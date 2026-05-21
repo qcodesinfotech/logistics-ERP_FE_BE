@@ -1,0 +1,7 @@
+
+> rest-express@1.0.0 dev:server
+> cross-env NODE_ENV=development SKIP_VITE=true tsx watch server/index.ts
+
+11:07:30 PM [express] serving on port 5001
+11:07:54 PM [tsx] change in ./server/storage.ts Restarting...
+c11:08:06 PM [express] serving on port 5001
