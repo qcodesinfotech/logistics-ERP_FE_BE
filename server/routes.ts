@@ -1198,8 +1198,8 @@ export async function registerRoutes(
 
       // Auto-seed chart of accounts for the new shop+branch if not already present
       try {
-        await storage.seedChartOfAccountsForShop(branch.shopId, branch.id);
-        console.log(`Auto-seeded chart of accounts for shop ${branch.shopId}, branch ${branch.id}`);
+        await storage.seedChartOfAccountsForShop(branch.shopId || "", branch.id);
+        console.log(`Auto-seeded chart of accounts for shop ${branch.shopId || ""}, branch ${branch.id}`);
       } catch (seedError) {
         console.warn("Failed to auto-seed chart of accounts:", seedError);
         // Don't fail the branch creation if seeding fails
@@ -7016,6 +7016,77 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Contract upload error:", error);
       res.status(500).json({ error: "Failed to upload documents" });
+    }
+  });
+
+  // Advanced Driver Management APIs
+  app.post("/api/drivers/attendance/auto-checkin", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { driverId, latitude, longitude } = req.body;
+      if (!driverId || !latitude || !longitude) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      
+      // Auto-attendance logic: Verify location
+      const autoVerified = true; // Replace with actual geo-fencing logic
+      
+      const record = await storage.createDriverAttendance({
+        driverId,
+        latitude,
+        longitude,
+        checkInTime: new Date(),
+        isAuthorizedDevice: true,
+        autoVerified,
+        status: "present"
+      } as any); // Type assertion until storage interface is updated
+      
+      res.status(201).json(record);
+    } catch (error) {
+      console.error("Auto checkin error:", error);
+      res.status(500).json({ error: "Failed to process auto checkin" });
+    }
+  });
+
+  app.get("/api/drivers/earnings", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      // Stub for driver earnings
+      res.json([]);
+    } catch (error) {
+      console.error("Get driver earnings error:", error);
+      res.status(500).json({ error: "Failed to fetch driver earnings" });
+    }
+  });
+
+  // Expanded Finance APIs
+  app.post("/api/finance/invoices/auto-generate", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { orderId, tripId, type } = req.body;
+      if (!type) return res.status(400).json({ error: "Invoice type is required" });
+      
+      // Auto-generation logic stub
+      const invoice = await storage.createInvoice({
+        invoiceNumber: `INV-${Date.now()}`,
+        type,
+        customerId: req.body.customerId || "temp", // Usually looked up via order/trip
+        orderId,
+        tripId,
+        status: "draft"
+      } as any);
+      
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error("Auto invoice generation error:", error);
+      res.status(500).json({ error: "Failed to auto-generate invoice" });
+    }
+  });
+
+  app.get("/api/finance/profit-analysis", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      // Stub for profitability analysis calculation
+      res.json({ totalRevenue: 0, totalCosts: 0, profitMargin: 0 });
+    } catch (error) {
+      console.error("Profit analysis error:", error);
+      res.status(500).json({ error: "Failed to perform profit analysis" });
     }
   });
 

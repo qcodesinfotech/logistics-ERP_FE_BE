@@ -49,6 +49,9 @@ import RfqPage from "@/pages/rfq";
 import OrdersPage from "@/pages/orders";
 import DispatchPage from "@/pages/dispatch";
 import DriverHubPage from "@/pages/driver-hub";
+import DriverManagementPage from "@/pages/driver-management";
+import FinanceExpandedPage from "@/pages/finance-expanded";
+import SettingsPage from "@/pages/settings";
 
 function PrivateRouter() {
   return (
@@ -78,6 +81,9 @@ function PrivateRouter() {
       <Route path="/logistics/orders" component={OrdersPage} />
       <Route path="/logistics/dispatch" component={DispatchPage} />
       <Route path="/logistics/driver-hub" component={DriverHubPage} />
+      <Route path="/logistics/driver-management" component={DriverManagementPage} />
+      <Route path="/logistics/finance" component={FinanceExpandedPage} />
+      <Route path="/settings" component={SettingsPage} />
 
       <Route component={NotFound} />
     </Switch>

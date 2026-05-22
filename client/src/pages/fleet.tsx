@@ -50,6 +50,7 @@ const vehicleSchema = z.object({
   currentZoneId: z.string().optional(),
   insuranceExpiry: z.string().optional(),
   permitExpiry: z.string().optional(),
+  registrationExpiry: z.string().optional(),
   lastService: z.string().optional(),
 });
 
@@ -93,6 +94,7 @@ export default function FleetPage() {
       currentZoneId: "",
       insuranceExpiry: "",
       permitExpiry: "",
+      registrationExpiry: "",
       lastService: "",
     },
   });
@@ -138,10 +140,10 @@ export default function FleetPage() {
 
   const createVehicleMutation = useMutation({
     mutationFn: (data: VehicleFormData) => {
-      const { insuranceExpiry, permitExpiry, lastService, ...rest } = data;
+      const { insuranceExpiry, permitExpiry, registrationExpiry, lastService, ...rest } = data;
       return apiRequest("POST", "/api/vehicles", {
         ...rest,
-        complianceDetails: { insuranceExpiry, permitExpiry, lastService }
+        complianceDetails: { insuranceExpiry, permitExpiry, registrationExpiry, lastService }
       });
     },
     onSuccess: () => {
@@ -244,8 +246,9 @@ export default function FleetPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="bg-muted/60 p-1 border rounded-lg max-w-md">
+        <TabsList className="bg-muted/60 p-1 border rounded-lg flex flex-wrap">
           <TabsTrigger value="vehicles" className="px-4 py-2">Fleet Registry</TabsTrigger>
+          <TabsTrigger value="renewals" className="px-4 py-2">Renewals</TabsTrigger>
           <TabsTrigger value="maintenance" className="px-4 py-2">Maintenance Logs</TabsTrigger>
           <TabsTrigger value="fuel" className="px-4 py-2">Fuel Logs</TabsTrigger>
         </TabsList>
@@ -285,6 +288,54 @@ export default function FleetPage() {
                           <TableCell>{getZoneName(vehicle.currentZoneId)}</TableCell>
                           <TableCell className="text-xs font-mono">{compliance.insuranceExpiry || "N/A"}</TableCell>
                           <TableCell className="text-xs font-mono">{compliance.permitExpiry || "N/A"}</TableCell>
+                          <TableCell>
+                            <StatusBadge status={vehicle.status} />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="renewals" className="m-0">
+          <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
+            <CardHeader className="pb-3 border-b">
+              <CardTitle>Fleet Renewals & Compliance</CardTitle>
+              <CardDescription>Track upcoming renewals for insurance, permits, and vehicle registrations.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {isVehiclesLoading ? (
+                <div className="p-8 text-center text-muted-foreground">Loading renewals data...</div>
+              ) : !vehiclesList || vehiclesList.length === 0 ? (
+                <div className="p-12 text-center text-muted-foreground">
+                  No vehicles registered to track renewals.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Plate Number</TableHead>
+                      <TableHead>Vehicle</TableHead>
+                      <TableHead>Insurance Expiry</TableHead>
+                      <TableHead>Permit Expiry</TableHead>
+                      <TableHead>Registration Expiry</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {vehiclesList.map((vehicle) => {
+                      const compliance = (vehicle.complianceDetails || {}) as any;
+                      return (
+                        <TableRow key={vehicle.id} className="hover:bg-accent/40 transition-colors">
+                          <TableCell className="font-mono font-bold text-primary">{vehicle.plateNumber}</TableCell>
+                          <TableCell className="font-semibold">{vehicle.name}</TableCell>
+                          <TableCell className="text-xs font-mono">{compliance.insuranceExpiry || "N/A"}</TableCell>
+                          <TableCell className="text-xs font-mono">{compliance.permitExpiry || "N/A"}</TableCell>
+                          <TableCell className="text-xs font-mono">{compliance.registrationExpiry || "N/A"}</TableCell>
                           <TableCell>
                             <StatusBadge status={vehicle.status} />
                           </TableCell>
@@ -487,7 +538,7 @@ export default function FleetPage() {
                 )}
               />
 
-              <div className="grid grid-cols-2 gap-4 border-t pt-4">
+              <div className="grid grid-cols-3 gap-4 border-t pt-4">
                 <FormField
                   control={vehicleForm.control}
                   name="insuranceExpiry"
@@ -507,6 +558,19 @@ export default function FleetPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Permit Expiry Date</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={vehicleForm.control}
+                  name="registrationExpiry"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Registration Expiry</FormLabel>
                       <FormControl>
                         <Input type="date" {...field} />
                       </FormControl>

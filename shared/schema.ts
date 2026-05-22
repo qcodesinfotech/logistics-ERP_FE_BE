@@ -30,7 +30,7 @@ export const shops = pgTable("shops", {
 
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  shopId: varchar("shop_id").notNull(),
+  shopId: varchar("shop_id"),
   name: text("name").notNull(),
   address: text("address"),
   phone: text("phone"),
@@ -1627,7 +1627,7 @@ export const vehicles = pgTable("vehicles", {
   plateNumber: text("plate_number").notNull(),
   type: text("type").notNull(), // "owned" or "outsourced"
   capacity: text("capacity"),
-  complianceDetails: jsonb("compliance_details").$type<{ insuranceExpiry?: string; permitExpiry?: string; lastService?: string }>().default({}),
+  complianceDetails: jsonb("compliance_details").$type<{ insuranceExpiry?: string; permitExpiry?: string; registrationExpiry?: string; lastService?: string }>().default({}),
   status: text("status").notNull().default("available"), // "available", "in_transit", "maintenance"
   currentZoneId: varchar("current_zone_id"), // points to zones.id
   createdAt: timestamp("created_at").defaultNow(),
@@ -1722,7 +1722,12 @@ export const driverAttendance = pgTable("driver_attendance", {
   checkOutTime: timestamp("check_out_time"),
   latitude: decimal("latitude", { precision: 10, scale: 6 }),
   longitude: decimal("longitude", { precision: 10, scale: 6 }),
+  checkInLocation: text("check_in_location"),
   isAuthorizedDevice: boolean("is_authorized_device").default(false),
+  autoVerified: boolean("auto_verified").default(false),
+  shiftType: text("shift_type").default("regular"),
+  shiftHours: decimal("shift_hours", { precision: 5, scale: 2 }).default("0.00"),
+  overtimeHours: decimal("overtime_hours", { precision: 5, scale: 2 }).default("0.00"),
   status: text("status").notNull().default("present"), // "present", "absent"
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1757,6 +1762,70 @@ export const userActivityLogs = pgTable("user_activity_logs", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// ==================== ADVANCED MODULES (DRIVER, FINANCE, SETTINGS) ====================
+
+export const driverEarnings = pgTable("driver_earnings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  driverId: varchar("driver_id").notNull(),
+  tripId: varchar("trip_id"),
+  basePay: decimal("base_pay", { precision: 12, scale: 3 }).default("0.000"),
+  allowances: decimal("allowances", { precision: 12, scale: 3 }).default("0.000"),
+  overtimePay: decimal("overtime_pay", { precision: 12, scale: 3 }).default("0.000"),
+  holidayPay: decimal("holiday_pay", { precision: 12, scale: 3 }).default("0.000"),
+  totalEarnings: decimal("total_earnings", { precision: 12, scale: 3 }).default("0.000"),
+  status: text("status").notNull().default("pending"), // pending, paid
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const invoices = pgTable("invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  type: text("type").notNull(), // "delivery" or "contract"
+  customerId: varchar("customer_id").notNull(),
+  orderId: varchar("order_id"),
+  tripId: varchar("trip_id"),
+  contractId: varchar("contract_id"),
+  subtotal: decimal("subtotal", { precision: 12, scale: 3 }).default("0.000"),
+  vatAmount: decimal("vat_amount", { precision: 12, scale: 3 }).default("0.000"),
+  discount: decimal("discount", { precision: 12, scale: 3 }).default("0.000"),
+  total: decimal("total", { precision: 12, scale: 3 }).default("0.000"),
+  status: text("status").notNull().default("draft"), // draft, sent, paid, overdue
+  dueDate: timestamp("due_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dynamicExpenses = pgTable("dynamic_expenses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull(), // "driver", "clearing_agent", "toll", "other"
+  tripId: varchar("trip_id"),
+  vehicleId: varchar("vehicle_id"),
+  employeeId: varchar("employee_id"),
+  amount: decimal("amount", { precision: 12, scale: 3 }).notNull(),
+  description: text("description"),
+  receiptUrl: text("receipt_url"),
+  status: text("status").notNull().default("pending"), // pending, approved, paid
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const companyAssets = pgTable("company_assets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  assetType: text("asset_type").notNull(), // "truck", "spare_part", "equipment"
+  vehicleId: varchar("vehicle_id"),
+  value: decimal("value", { precision: 12, scale: 3 }).default("0.000"),
+  purchaseDate: timestamp("purchase_date"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const companySettings = pgTable("company_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  companyId: varchar("company_id"),
+  notificationPrefs: jsonb("notification_prefs").$type<{ email: boolean; sms: boolean; push: boolean }>().default({ email: true, sms: false, push: true }),
+  regionalFormats: jsonb("regional_formats").$type<{ currency: string; dateFormat: string; timezone: string }>().default({ currency: "OMR", dateFormat: "DD/MM/YYYY", timezone: "Asia/Muscat" }),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Zod insertion schemas
 export const insertZoneSchema = createInsertSchema(zones).omit({ id: true, createdAt: true });
 export const insertSupervisorZoneSchema = createInsertSchema(supervisorZones).omit({ id: true, createdAt: true });
@@ -1773,6 +1842,11 @@ export const insertDriverAttendanceSchema = createInsertSchema(driverAttendance)
 export const insertVehicleMaintenanceSchema = createInsertSchema(vehicleMaintenance).omit({ id: true, createdAt: true });
 export const insertFuelLogSchema = createInsertSchema(fuelLogs).omit({ id: true, createdAt: true });
 export const insertUserActivityLogSchema = createInsertSchema(userActivityLogs).omit({ id: true, createdAt: true });
+export const insertDriverEarningsSchema = createInsertSchema(driverEarnings).omit({ id: true, createdAt: true });
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, createdAt: true });
+export const insertDynamicExpenseSchema = createInsertSchema(dynamicExpenses).omit({ id: true, createdAt: true });
+export const insertCompanyAssetSchema = createInsertSchema(companyAssets).omit({ id: true, createdAt: true });
+export const insertCompanySettingSchema = createInsertSchema(companySettings).omit({ id: true, updatedAt: true });
 
 // Types
 export type Zone = typeof zones.$inferSelect;
@@ -1805,4 +1879,13 @@ export type FuelLog = typeof fuelLogs.$inferSelect;
 export type InsertFuelLog = z.infer<typeof insertFuelLogSchema>;
 export type UserActivityLog = typeof userActivityLogs.$inferSelect;
 export type InsertUserActivityLog = z.infer<typeof insertUserActivityLogSchema>;
-
+export type DriverEarning = typeof driverEarnings.$inferSelect;
+export type InsertDriverEarning = z.infer<typeof insertDriverEarningsSchema>;
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type DynamicExpense = typeof dynamicExpenses.$inferSelect;
+export type InsertDynamicExpense = z.infer<typeof insertDynamicExpenseSchema>;
+export type CompanyAsset = typeof companyAssets.$inferSelect;
+export type InsertCompanyAsset = z.infer<typeof insertCompanyAssetSchema>;
+export type CompanySetting = typeof companySettings.$inferSelect;
+export type InsertCompanySetting = z.infer<typeof insertCompanySettingSchema>;

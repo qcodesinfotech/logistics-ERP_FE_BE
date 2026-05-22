@@ -20,6 +20,8 @@ import {
   Truck,
   MapPin,
   ClipboardList,
+  Clock,
+  Settings,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { usePermissions } from "@/contexts/permissions-context";
@@ -62,7 +64,9 @@ const menuGroups: MenuGroup[] = [
       { title: "Companies", url: "/companies", icon: Building2, menuKey: "companies" },
       { title: "Branches", url: "/branches", icon: GitBranch, menuKey: "branches" },
       { title: "Users", url: "/users", icon: Users, menuKey: "users", superAdminOnly: true },
+      { title: "Compliance Reminders", url: "/compliance/reminders", icon: Clock, menuKey: "compliance" },
       { title: "Roles & Permissions", url: "/rbac", icon: Shield, menuKey: "rbac", superAdminOnly: true },
+      { title: "System Settings", url: "/settings", icon: Settings, menuKey: "settings", superAdminOnly: true },
     ],
   },
   {
@@ -75,6 +79,8 @@ const menuGroups: MenuGroup[] = [
       { title: "Order Book", url: "/logistics/orders", icon: ClipboardList },
       { title: "Dispatch Board", url: "/logistics/dispatch", icon: BarChart3 },
       { title: "Driver Geo-Hub", url: "/logistics/driver-hub", icon: UserCircle },
+      { title: "Driver Mgt", url: "/logistics/driver-management", icon: Users },
+      { title: "Logistics Finance", url: "/logistics/finance", icon: Calculator },
     ],
   },
   {

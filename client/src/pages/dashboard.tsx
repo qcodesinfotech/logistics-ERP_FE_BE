@@ -6,7 +6,11 @@ import {
   Calendar,
   ArrowUpRight,
   Briefcase,
-  Building2
+  Building2,
+  AlertTriangle,
+  MapPin,
+  Truck,
+  PackageSearch
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -100,19 +104,13 @@ export default function Dashboard() {
       {isLoading ? (
         <MetricCardsSkeleton count={4} />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
           <MetricCard
             title="Total Bank Balance"
             value={stats?.bankBalance ?? 0}
             icon={Banknote}
             isCurrency
             description="Combined bank balances"
-          />
-          <MetricCard
-            title="Total Employees"
-            value={totalEmployees}
-            icon={Users}
-            description="Active staff members"
           />
           <MetricCard
             title="Pending Leaves"
@@ -125,6 +123,24 @@ export default function Dashboard() {
             value={pendingTasks.length}
             icon={ListTodo}
             description="In progress or todo"
+          />
+          <MetricCard
+            title="Active Orders"
+            value={24}
+            icon={PackageSearch}
+            description="Currently in transit"
+          />
+          <MetricCard
+            title="Pending Dispatch"
+            value={8}
+            icon={Truck}
+            description="Awaiting assignment"
+          />
+          <MetricCard
+            title="Logistics Alerts"
+            value={3}
+            icon={AlertTriangle}
+            description="Delays & issues"
           />
         </div>
       )}
@@ -169,6 +185,68 @@ export default function Dashboard() {
                 emptyMessage="No pending tasks"
               />
             )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Smart Command Center Sections */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4 border-b">
+            <CardTitle className="text-base font-medium flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" /> Smart Alerts
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            <div className="flex items-start gap-4 p-3 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900">
+              <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-amber-900 dark:text-amber-300">Delayed Transit: TRP-1002</p>
+                <p className="text-xs text-amber-700 dark:text-amber-400">Driver John Doe is 45 mins behind schedule due to border delays.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-4 p-3 rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900">
+              <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
+              <div>
+                <p className="font-medium text-sm text-red-900 dark:text-red-300">Incomplete Order: ORD-8842</p>
+                <p className="text-xs text-red-700 dark:text-red-400">Partial delivery recorded. Missing 2 pallets.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4 border-b">
+            <CardTitle className="text-base font-medium flex items-center gap-2 text-primary">
+              <MapPin className="h-5 w-5" /> Zone-wise Performance
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <div className="space-y-4">
+              <div className="flex justify-between items-center text-sm">
+                <span className="font-medium">North Zone</span>
+                <span className="text-green-600 text-xs font-bold">+14% Revenue</span>
+              </div>
+              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                <div className="bg-primary h-full w-[85%] rounded-full"></div>
+              </div>
+
+              <div className="flex justify-between items-center text-sm pt-2">
+                <span className="font-medium">South Zone</span>
+                <span className="text-amber-600 text-xs font-bold">92% Dispatch Rate</span>
+              </div>
+              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                <div className="bg-amber-500 h-full w-[60%] rounded-full"></div>
+              </div>
+
+              <div className="flex justify-between items-center text-sm pt-2">
+                <span className="font-medium">Border Ops</span>
+                <span className="text-blue-600 text-xs font-bold">4 Active Trips</span>
+              </div>
+              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                <div className="bg-blue-500 h-full w-[45%] rounded-full"></div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

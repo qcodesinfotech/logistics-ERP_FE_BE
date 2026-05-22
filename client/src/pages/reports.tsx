@@ -206,9 +206,101 @@ export default function Reports() {
     { id: "salary", label: "Salary Report", icon: Wallet },
     { id: "petty-cash", label: "Petty Cash Report", icon: Wallet },
     { id: "employee-work", label: "Employee Work Report", icon: Users },
+    { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck },
   ];
 
   const filteredBranches = shopId ? branches.filter(b => b.shopId === shopId) : branches;
+
+  const exportToCSV = (filename: string, data: any[]) => {
+    if (!data || !data.length) return;
+    const headers = Object.keys(data[0]).join(",");
+    const rows = data.map(obj => Object.values(obj).map(v => `"${v}"`).join(",")).join("\n");
+    const csv = `${headers}\n${rows}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${filename}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const renderLogisticsKPIs = () => {
+    // Mock data for Logistics KPIs
+    const kpiData = [
+      { route: "Muscat - Salalah", successRate: "98%", fleetUtil: "85%", driverEff: "92%", profitPerRoute: "1250 OMR" },
+      { route: "Sohar - Dubai", successRate: "95%", fleetUtil: "90%", driverEff: "88%", profitPerRoute: "800 OMR" },
+      { route: "Nizwa - Sur", successRate: "99%", fleetUtil: "75%", driverEff: "95%", profitPerRoute: "450 OMR" }
+    ];
+
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center no-print">
+          <h2 className="text-xl font-bold">Logistics Operational & Financial KPIs</h2>
+          <Button onClick={() => exportToCSV("logistics-kpis", kpiData)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+        
+        <div className="grid grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-green-600">97.3%</div>
+              <div className="text-sm text-muted-foreground">Avg Delivery Success</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-blue-600">83.3%</div>
+              <div className="text-sm text-muted-foreground">Avg Fleet Utilization</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-amber-600">91.6%</div>
+              <div className="text-sm text-muted-foreground">Driver Efficiency</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold font-mono">2500 OMR</div>
+              <div className="text-sm text-muted-foreground">Total Profit (Routes)</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="pt-4 p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Route / Zone</TableHead>
+                  <TableHead className="text-right">Success Rate</TableHead>
+                  <TableHead className="text-right">Fleet Utilization</TableHead>
+                  <TableHead className="text-right">Driver Efficiency</TableHead>
+                  <TableHead className="text-right">Profit per Route</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {kpiData.map((row, idx) => (
+                  <TableRow key={idx}>
+                    <TableCell className="font-medium">{row.route}</TableCell>
+                    <TableCell className="text-right font-mono">{row.successRate}</TableCell>
+                    <TableCell className="text-right font-mono">{row.fleetUtil}</TableCell>
+                    <TableCell className="text-right font-mono">{row.driverEff}</TableCell>
+                    <TableCell className="text-right font-mono text-green-600">{row.profitPerRoute}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
 
   const renderSalesReport = () => (
     <div className="space-y-4">
@@ -1328,6 +1420,7 @@ export default function Reports() {
       case "project": return renderProjectReport();
       case "petty-cash": return renderPettyCashReport();
       case "employee-work": return renderEmployeeWorkReport();
+      case "logistics-kpi": return renderLogisticsKPIs();
       case "service-tickets": return renderServiceReport();
       default: return renderTrialBalance();
     }
@@ -1639,7 +1732,9 @@ export default function Reports() {
   };
 
   const renderOverallReport = () => {
-    const report = (overallReport as any) || { summary: { totalIncome: "0", totalExpense: "0", netProfit: "0" }, transactions: [] };
+    const report = (overallReport as any) || {};
+    const summary = report.summary || { totalIncome: "0", totalExpense: "0", netProfit: "0" };
+    const transactions = report.transactions || [];
     
     return (
       <div className="space-y-4">
@@ -1663,20 +1758,20 @@ export default function Reports() {
         <div className="grid grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold font-mono text-green-600">{formatCurrency(report.summary.totalIncome)}</div>
+              <div className="text-2xl font-bold font-mono text-green-600">{formatCurrency(summary.totalIncome)}</div>
               <div className="text-sm text-muted-foreground">Total Income</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold font-mono text-red-600">{formatCurrency(report.summary.totalExpense)}</div>
+              <div className="text-2xl font-bold font-mono text-red-600">{formatCurrency(summary.totalExpense)}</div>
               <div className="text-sm text-muted-foreground">Total Expenses</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <div className={`text-2xl font-bold font-mono ${parseFloat(report.summary.netProfit || "0") >= 0 ? "text-green-600" : "text-red-600"}`}>
-                {formatCurrency(report.summary.netProfit)}
+              <div className={`text-2xl font-bold font-mono ${parseFloat(summary.netProfit || "0") >= 0 ? "text-green-600" : "text-red-600"}`}>
+                {formatCurrency(summary.netProfit)}
               </div>
               <div className="text-sm text-muted-foreground">Net Profit/Loss</div>
             </CardContent>
@@ -1706,7 +1801,7 @@ export default function Reports() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {report.transactions?.map((t: any, idx: number) => (
+                  {transactions.map((t: any, idx: number) => (
                     <TableRow key={`${t.id}-${idx}`}>
                       <TableCell>{t.date ? new Date(t.date).toLocaleDateString() : "-"}</TableCell>
                       <TableCell>
@@ -1719,7 +1814,7 @@ export default function Reports() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {(!report.transactions || report.transactions.length === 0) && (
+                  {transactions.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No transactions found for the selected filters.</TableCell>
                     </TableRow>

@@ -46,11 +46,11 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import type { Branch, Shop } from "@shared/schema";
+import type { Branch } from "@shared/schema";
 
 const branchSchema = z.object({
   name: z.string().min(1, "Branch name is required"),
-  shopId: z.string().min(1, "Shop is required"),
+  shopId: z.string().optional(),
   address: z.string().optional(),
   phone: z.string().optional(),
   status: z.string().default("active"),
@@ -77,10 +77,6 @@ export default function Branches() {
 
   const { data: branches, isLoading } = useQuery<Branch[]>({
     queryKey: ["/api/branches"],
-  });
-
-  const { data: shops } = useQuery<Shop[]>({
-    queryKey: ["/api/shops"],
   });
 
   const createMutation = useMutation({
@@ -130,7 +126,7 @@ export default function Branches() {
     setEditingBranch(branch);
     form.reset({
       name: branch.name,
-      shopId: branch.shopId,
+      shopId: branch.shopId || "",
       address: branch.address || "",
       phone: branch.phone || "",
       status: branch.status,
@@ -146,17 +142,8 @@ export default function Branches() {
     }
   };
 
-  const getShopName = (shopId: string) => {
-    return shops?.find((s) => s.id === shopId)?.name || "Unknown";
-  };
-
   const columns = [
     { key: "name", header: "Name" },
-    { 
-      key: "shopId", 
-      header: "Shop",
-      render: (branch: Branch) => getShopName(branch.shopId)
-    },
     { key: "address", header: "Address" },
     { key: "phone", header: "Phone" },
     { 
@@ -257,30 +244,7 @@ export default function Branches() {
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="shopId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Shop *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-shop">
-                            <SelectValue placeholder="Select shop" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {shops?.map((shop) => (
-                            <SelectItem key={shop.id} value={shop.id}>
-                              {shop.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+
                 <FormField
                   control={form.control}
                   name="phone"
