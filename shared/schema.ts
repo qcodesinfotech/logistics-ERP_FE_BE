@@ -1764,6 +1764,16 @@ export const userActivityLogs = pgTable("user_activity_logs", {
 
 // ==================== ADVANCED MODULES (DRIVER, FINANCE, SETTINGS) ====================
 
+export const drivers = pgTable("drivers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  packageType: text("package_type").notNull().default("standard"),
+  baseSalary: decimal("base_salary", { precision: 12, scale: 3 }).default("0.000"),
+  holidayPayRate: text("holiday_pay_rate").notNull().default("1.5x"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const driverEarnings = pgTable("driver_earnings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   driverId: varchar("driver_id").notNull(),
@@ -1842,6 +1852,7 @@ export const insertDriverAttendanceSchema = createInsertSchema(driverAttendance)
 export const insertVehicleMaintenanceSchema = createInsertSchema(vehicleMaintenance).omit({ id: true, createdAt: true });
 export const insertFuelLogSchema = createInsertSchema(fuelLogs).omit({ id: true, createdAt: true });
 export const insertUserActivityLogSchema = createInsertSchema(userActivityLogs).omit({ id: true, createdAt: true });
+export const insertDriverSchema = createInsertSchema(drivers).omit({ id: true, createdAt: true });
 export const insertDriverEarningsSchema = createInsertSchema(driverEarnings).omit({ id: true, createdAt: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, createdAt: true });
 export const insertDynamicExpenseSchema = createInsertSchema(dynamicExpenses).omit({ id: true, createdAt: true });
@@ -1879,6 +1890,8 @@ export type FuelLog = typeof fuelLogs.$inferSelect;
 export type InsertFuelLog = z.infer<typeof insertFuelLogSchema>;
 export type UserActivityLog = typeof userActivityLogs.$inferSelect;
 export type InsertUserActivityLog = z.infer<typeof insertUserActivityLogSchema>;
+export type Driver = typeof drivers.$inferSelect;
+export type InsertDriver = z.infer<typeof insertDriverSchema>;
 export type DriverEarning = typeof driverEarnings.$inferSelect;
 export type InsertDriverEarning = z.infer<typeof insertDriverEarningsSchema>;
 export type Invoice = typeof invoices.$inferSelect;

@@ -37,7 +37,7 @@ import {
   type InsertCrmLead, type InsertCrmDeal, type InsertCrmActivity, type InsertCrmLeadNote, type InsertCrmCalendarEvent, type InsertCrmReminder, type InsertCrmCustomerContact, type InsertCrmNotification, type InsertCrmTask,
   userScopes, type UserScope,
   zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, trips, tripOrders, deliveries, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
-  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog,
+  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver,
 } from "@shared/schema";
 import { db, pool } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -553,6 +553,10 @@ export interface IStorage {
   createDelivery(data: InsertDelivery): Promise<Delivery>;
   updateDelivery(id: string, data: Partial<InsertDelivery>): Promise<Delivery | undefined>;
   recordDeliveryPOD(tripId: string, orderId: string, podUrl: string, status: string, issueLog?: string): Promise<Delivery>;
+
+  // Logistics Driver Management
+  getDrivers(): Promise<Driver[]>;
+  createDriver(data: InsertDriver): Promise<Driver>;
 
   // Logistics Driver activities & attendance
   getDriverActivities(driverId?: string, tripId?: string): Promise<DriverActivity[]>;
@@ -5573,6 +5577,16 @@ export class DatabaseStorage implements IStorage {
     
     await db.update(orders).set({ status: orderStatus }).where(eq(orders.id, orderId));
     return delivery;
+  }
+
+  // Logistics Driver Management
+  async getDrivers(): Promise<Driver[]> {
+    return db.select().from(drivers).orderBy(drivers.createdAt);
+  }
+
+  async createDriver(data: InsertDriver): Promise<Driver> {
+    const [driver] = await db.insert(drivers).values(data).returning();
+    return driver;
   }
 
   // Logistics Driver activities & attendance

@@ -21,20 +21,42 @@ export default function DriverManagementPage() {
   const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
   const { toast } = useToast();
 
-  const handleAddDriver = (e: React.FormEvent) => {
+  const { data: drivers = [] } = useQuery({
+    queryKey: ["/api/drivers"],
+  });
+
+  const addDriverMutation = useMutation({
+    mutationFn: async (driverData: any) => {
+      const res = await apiRequest("POST", "/api/drivers", driverData);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+      setIsAddDriverOpen(false);
+      toast({
+        title: "Driver Profile Created",
+        description: "The new driver profile has been successfully added to the system.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to Add Driver",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    }
+  });
+
+  const handleAddDriver = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsAddDriverOpen(false);
-    toast({
-      title: "Driver Profile Created",
-      description: "The new driver profile has been successfully added to the system.",
+    const formData = new FormData(e.currentTarget);
+    addDriverMutation.mutate({
+      name: formData.get("name"),
+      packageType: formData.get("packageType"),
+      baseSalary: formData.get("baseSalary"),
+      holidayPayRate: formData.get("holidayPayRate")
     });
   };
-
-  // Mock data for UI development before backend endpoints are fully integrated
-  const drivers = [
-    { id: "1", name: "Ahmed Al Balushi", packageType: "standard", status: "active", holidayPayRate: "1.5x", baseSalary: "450" },
-    { id: "2", name: "John Doe", packageType: "premium", status: "on_leave", holidayPayRate: "2.0x", baseSalary: "500" }
-  ];
 
   const attendance = [
     { id: "1", driverName: "Ahmed Al Balushi", date: "2026-05-22", checkInTime: "08:00 AM", checkOutTime: "06:30 PM", shiftHours: "10.5", overtimeHours: "0.5", autoVerified: true },
@@ -66,11 +88,11 @@ export default function DriverManagementPage() {
             <form onSubmit={handleAddDriver} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
-                <Input id="name" placeholder="Driver's full name" required />
+                <Input id="name" name="name" placeholder="Driver's full name" required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="package">Package Type</Label>
-                <Select defaultValue="standard">
+                <Select name="packageType" defaultValue="standard">
                   <SelectTrigger>
                     <SelectValue placeholder="Select package" />
                   </SelectTrigger>
@@ -84,11 +106,11 @@ export default function DriverManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="salary">Base Salary / Trip Rate</Label>
-                  <Input id="salary" type="number" placeholder="0.000" required />
+                  <Input id="salary" name="baseSalary" type="number" placeholder="0.000" required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="holiday">Holiday Pay Rate</Label>
-                  <Select defaultValue="1.5x">
+                  <Select name="holidayPayRate" defaultValue="1.5x">
                     <SelectTrigger>
                       <SelectValue placeholder="Select rate" />
                     </SelectTrigger>
@@ -102,7 +124,9 @@ export default function DriverManagementPage() {
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsAddDriverOpen(false)}>Cancel</Button>
-                <Button type="submit">Create Profile</Button>
+                <Button type="submit" disabled={addDriverMutation.isPending}>
+                  {addDriverMutation.isPending ? "Creating..." : "Create Profile"}
+                </Button>
               </DialogFooter>
             </form>
           </DialogContent>

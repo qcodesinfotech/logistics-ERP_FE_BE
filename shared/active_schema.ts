@@ -53,7 +53,8 @@ import {
   driverAttendance,
   vehicleMaintenance,
   fuelLogs,
-  userActivityLogs
+  userActivityLogs,
+  drivers
 } from "./schema";
 
 export {
@@ -111,5 +112,6 @@ export {
   driverAttendance,
   vehicleMaintenance,
   fuelLogs,
-  userActivityLogs
+  userActivityLogs,
+  drivers
 };

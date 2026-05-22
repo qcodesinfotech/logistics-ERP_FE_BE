@@ -311,6 +311,7 @@ import {
   insertDeliverySchema,
   insertDriverActivitySchema,
   insertDriverAttendanceSchema,
+  insertDriverSchema,
   insertVehicleMaintenanceSchema,
   insertFuelLogSchema,
   insertUserActivityLogSchema,
@@ -7404,6 +7405,26 @@ export async function registerRoutes(
   });
 
   // Logistics Driver Hub API
+  app.get("/api/drivers", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const driversList = await storage.getDrivers();
+      res.json(driversList);
+    } catch (error) {
+      console.error("Get drivers error:", error);
+      res.status(500).json({ error: "Failed to fetch drivers" });
+    }
+  });
+
+  app.post("/api/drivers", authMiddleware, validateBody(insertDriverSchema), async (req: AuthRequest, res) => {
+    try {
+      const driver = await storage.createDriver(req.body);
+      res.status(201).json(driver);
+    } catch (error) {
+      console.error("Create driver error:", error);
+      res.status(500).json({ error: "Failed to create driver" });
+    }
+  });
+
   app.get("/api/drivers/activities", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const driverId = req.query.driverId as string | undefined;
