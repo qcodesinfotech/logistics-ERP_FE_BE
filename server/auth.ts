@@ -272,9 +272,9 @@ export const enforceScopeMiddleware = (req: AuthRequest, res: Response, next: Ne
   const userShopId = req.user.shopId;
   const userBranchId = req.user.branchId;
 
-  if (!userCompanyId || !userShopId || !userBranchId) {
+  if (!userCompanyId || !userBranchId) {
     return res.status(403).json({ 
-      error: "Access denied. Your account is not assigned to a company/shop/branch. Contact administrator." 
+      error: "Access denied. Your account is not assigned to a company/branch. Contact administrator." 
     });
   }
 

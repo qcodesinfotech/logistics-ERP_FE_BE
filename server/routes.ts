@@ -1937,7 +1937,7 @@ export async function registerRoutes(
 
       if (totalRequiredFunds > breakdown.totalAvailable) {
         return res.status(400).json({
-          message: `Insufficient funds. Required: ${totalRequiredFunds.toFixed(3)} RO, Available: ${breakdown.totalAvailable.toFixed(3)} RO. Please add capital or bank balance first.`
+          message: `Insufficient funds. Required: ${totalRequiredFunds.toFixed(3)} BD, Available: ${breakdown.totalAvailable.toFixed(3)} BD. Please add capital or bank balance first.`
         });
       }
 
@@ -2961,8 +2961,9 @@ export async function registerRoutes(
     try {
       const account = await storage.createBankAccount(req.body);
       res.status(201).json(account);
-    } catch (error) {
-      res.status(400).json({ error: "Failed to create bank account" });
+    } catch (error: any) {
+      console.error("Failed to create bank account:", error);
+      res.status(400).json({ error: "Failed to create bank account: " + (error.message || String(error)) });
     }
   });
 
@@ -3108,8 +3109,9 @@ export async function registerRoutes(
         branchId: scope.branchId || req.body.branchId,
       });
       res.status(201).json(employee);
-    } catch (error) {
-      res.status(400).json({ error: "Failed to create employee" });
+    } catch (error: any) {
+      console.error("Create employee error:", error);
+      res.status(400).json({ error: "Failed to create employee: " + (error.message || String(error)) });
     }
   });
 
@@ -4843,7 +4845,7 @@ export async function registerRoutes(
   app.get("/api/accounting/available-cash", authMiddleware, permissionMiddleware("accounting"), async (req: AuthRequest, res) => {
     try {
       const availableCash = await storage.getTotalAvailableCash();
-      res.json({ availableCash: availableCash.toFixed(3), currency: "OMR" });
+      res.json({ availableCash: availableCash.toFixed(3), currency: "BHD" });
     } catch (error) {
       res.status(500).json({ error: "Failed to get available cash" });
     }
@@ -6881,6 +6883,37 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/zones/:id/outlets", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const outlets = await storage.getZoneOutlets(req.params.id);
+      res.json(outlets);
+    } catch (error) {
+      console.error("Get zone outlets error:", error);
+      res.status(500).json({ error: "Failed to fetch zone outlets" });
+    }
+  });
+
+  app.post("/api/zones/:id/outlets", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { outletIds } = req.body;
+      await storage.appendOutletsToZone(req.params.id, outletIds);
+      res.sendStatus(200);
+    } catch (error) {
+      console.error("Append zone outlets error:", error);
+      res.status(500).json({ error: "Failed to append outlets to zone" });
+    }
+  });
+
+  app.delete("/api/zones/:id/outlets/:outletId", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await storage.removeOutletFromZone(req.params.id, req.params.outletId);
+      res.sendStatus(204);
+    } catch (error) {
+      console.error("Delete zone outlet mapping error:", error);
+      res.status(500).json({ error: "Failed to remove outlet from zone" });
+    }
+  });
+
   app.get("/api/zones/supervisor/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const list = await storage.getSupervisorZones(req.params.id);
@@ -6982,6 +7015,223 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/clients/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      await storage.deleteClient(req.params.id);
+      res.sendStatus(204);
+    } catch (error) {
+      console.error("Error deleting client:", error);
+      res.status(500).json({ error: "Failed to delete client" });
+    }
+  });
+
+  // Outlets
+  app.get("/api/outlets", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const clientId = req.query.clientId as string | undefined;
+      const outlets = await storage.getOutlets(clientId);
+      res.json(outlets);
+    } catch (error) {
+      console.error("Error fetching outlets:", error);
+      res.status(500).json({ error: "Failed to fetch outlets" });
+    }
+  });
+
+  app.get("/api/outlets/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const outlet = await storage.getOutlet(req.params.id);
+      if (!outlet) return res.status(404).json({ error: "Outlet not found" });
+      res.json(outlet);
+    } catch (error) {
+      console.error("Error fetching outlet:", error);
+      res.status(500).json({ error: "Failed to fetch outlet" });
+    }
+  });
+
+  app.post("/api/outlets", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const { zoneIds, ...data } = req.body;
+      const outlet = await storage.createOutlet(data);
+      if (zoneIds && Array.isArray(zoneIds)) {
+        await storage.assignOutletZones(outlet.id, zoneIds);
+      }
+      res.status(201).json(outlet);
+    } catch (error) {
+      console.error("Error creating outlet:", error);
+      res.status(500).json({ error: "Failed to create outlet", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.patch("/api/outlets/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const { zoneIds, ...data } = req.body;
+      const outlet = await storage.updateOutlet(req.params.id, data);
+      if (zoneIds && Array.isArray(zoneIds)) {
+        await storage.assignOutletZones(req.params.id, zoneIds);
+      }
+      if (!outlet) return res.status(404).json({ error: "Outlet not found" });
+      res.json(outlet);
+    } catch (error) {
+      console.error("Error updating outlet:", error);
+      res.status(500).json({ error: "Failed to update outlet" });
+    }
+  });
+
+  app.delete("/api/outlets/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      await storage.deleteOutlet(req.params.id);
+      res.sendStatus(204);
+    } catch (error) {
+      console.error("Error deleting outlet:", error);
+      res.status(500).json({ error: "Failed to delete outlet" });
+    }
+  });
+
+  app.get("/api/outlets/:id/zones", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const zones = await storage.getOutletZones(req.params.id);
+      res.json(zones);
+    } catch (error) {
+      console.error("Error fetching outlet zones:", error);
+      res.status(500).json({ error: "Failed to fetch outlet zones" });
+    }
+  });
+
+  // ===== DAILY DISPATCH MODULE ROUTES =====
+
+  // Driver Zone Assignments
+  app.get("/api/dispatch/driver-zones", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const rows = await storage.getDriverZones();
+      res.json(rows);
+    } catch (e) {
+      console.error("Get driver zones error:", e);
+      res.status(500).json({ error: "Failed to fetch driver zones" });
+    }
+  });
+
+  app.post("/api/dispatch/driver-zones", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { driverId, zoneId } = req.body;
+      const row = await storage.assignDriverZone(driverId, zoneId);
+      res.status(201).json(row);
+    } catch (e) {
+      console.error("Assign driver zone error:", e);
+      res.status(500).json({ error: "Failed to assign driver zone" });
+    }
+  });
+
+  app.delete("/api/dispatch/driver-zones/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await storage.removeDriverZone(req.params.id);
+      res.sendStatus(204);
+    } catch (e) {
+      console.error("Remove driver zone error:", e);
+      res.status(500).json({ error: "Failed to remove driver zone" });
+    }
+  });
+
+  // Dispatch Sheets
+  app.get("/api/dispatch/sheets", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const sheets = await storage.getDispatchSheets();
+      res.json(sheets);
+    } catch (e) {
+      console.error("Get dispatch sheets error:", e);
+      res.status(500).json({ error: "Failed to fetch dispatch sheets" });
+    }
+  });
+
+  // Delete dispatch sheet
+  app.delete("/api/dispatch/sheets/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await storage.deleteDispatchSheet(req.params.id);
+      res.sendStatus(200);
+    } catch (e) {
+      console.error("Delete dispatch sheet error:", e);
+      res.status(500).json({ error: "Failed to delete dispatch sheet" });
+    }
+  });
+
+  // Upload CSV and create dispatch sheet
+  app.post("/api/dispatch/sheets", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { date, fileName, items } = req.body; // items: parsed CSV rows from frontend
+      const uploadedBy = req.user?.id;
+
+      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName });
+
+      // Resolve outlet codes to outlet IDs
+      const allOutlets = await storage.getOutlets();
+      const outletCodeMap = new Map(allOutlets.map(o => [o.code?.trim().toLowerCase(), o.id]));
+
+      const resolvedItems = items.map((row: any) => ({
+        sheetId: sheet.id,
+        outletCode: row.outlet_code || row.outletCode || "",
+        outletId: outletCodeMap.get((row.outlet_code || row.outletCode || "").trim().toLowerCase()) || null,
+        itemCode: row.item_code || row.itemCode || "",
+        description: row.description || null,
+        weight: row.weight || null,
+        totalDelivered: row.total_delivered || row.totalDelivered || null,
+        remaining: row.remaining || null,
+        remark: row.remark || null,
+        grnNumber: row.grn_number || row.grnNumber || null,
+      }));
+
+      await storage.createDispatchItems(resolvedItems);
+      res.status(201).json({ sheet, itemCount: resolvedItems.length });
+    } catch (e) {
+      console.error("Create dispatch sheet error:", e);
+      res.status(500).json({ error: "Failed to create dispatch sheet", details: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // Get dispatch board for a specific sheet
+  app.get("/api/dispatch/sheets/:id/board", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const board = await storage.getDispatchBoard(req.params.id);
+      res.json(board);
+    } catch (e) {
+      console.error("Get dispatch board error:", e);
+      res.status(500).json({ error: "Failed to fetch dispatch board" });
+    }
+  });
+
+  // Update delivery status for a dispatch item
+  app.patch("/api/dispatch/items/:id/delivery", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const result = await storage.updateDispatchDelivery(req.params.id, { ...req.body, driverId: req.user?.id });
+      res.json(result);
+    } catch (e) {
+      console.error("Update delivery error:", e);
+      res.status(500).json({ error: "Failed to update delivery" });
+    }
+  });
+
+  // Supervisor override: move outlet to different zone for this sheet
+  app.post("/api/dispatch/overrides", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { sheetId, outletId, overrideZoneId, reason } = req.body;
+      const result = await storage.createDispatchOverride({ sheetId, outletId, overrideZoneId, reason, createdBy: req.user?.id });
+      res.status(201).json(result);
+    } catch (e) {
+      console.error("Create override error:", e);
+      res.status(500).json({ error: "Failed to create zone override" });
+    }
+  });
+
+  app.delete("/api/dispatch/overrides/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await storage.deleteDispatchOverride(req.params.id);
+      res.sendStatus(204);
+    } catch (e) {
+      console.error("Delete override error:", e);
+      res.status(500).json({ error: "Failed to delete zone override" });
+    }
+  });
+
+
+
   const contractUploadDir = path.join(process.cwd(), "uploads", "contracts");
   if (!fs.existsSync(contractUploadDir)) {
     fs.mkdirSync(contractUploadDir, { recursive: true });
@@ -7065,14 +7315,14 @@ export async function registerRoutes(
       if (!type) return res.status(400).json({ error: "Invoice type is required" });
       
       // Auto-generation logic stub
-      const invoice = await storage.createInvoice({
+      const invoice = {
         invoiceNumber: `INV-${Date.now()}`,
         type,
-        customerId: req.body.customerId || "temp", // Usually looked up via order/trip
+        customerId: req.body.customerId || "temp",
         orderId,
         tripId,
         status: "draft"
-      } as any);
+      };
       
       res.status(201).json(invoice);
     } catch (error) {
@@ -7268,26 +7518,26 @@ export async function registerRoutes(
 
   app.get("/api/orders/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const order = await storage.getOrder(req.params.id);
-      if (!order) return res.status(404).json({ error: "Order not found" });
-      res.json(order);
+      const data = await storage.getOrderWithCharges(req.params.id);
+      if (!data) return res.status(404).json({ error: "Order not found" });
+      res.json(data); // Returns { order, charges }
     } catch (error) {
       console.error("Get order error:", error);
       res.status(500).json({ error: "Failed to fetch order" });
     }
   });
 
-  app.post("/api/orders", authMiddleware, validateBody(insertOrderSchema), async (req: AuthRequest, res) => {
+  app.post("/api/orders", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const order = await storage.createOrder(req.body);
       res.status(201).json(order);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Create order error:", error);
-      res.status(500).json({ error: "Failed to create order" });
+      res.status(500).json({ error: "Failed to create order: " + (error.message || String(error)) });
     }
   });
 
-  app.put("/api/orders/:id", authMiddleware, validateBody(insertOrderSchema.partial()), async (req: AuthRequest, res) => {
+  app.put("/api/orders/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const order = await storage.updateOrder(req.params.id, req.body);
       if (!order) return res.status(404).json({ error: "Order not found" });

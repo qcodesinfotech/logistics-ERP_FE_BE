@@ -31,6 +31,7 @@ export const shops = pgTable("shops", {
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   shopId: varchar("shop_id"),
+  companyId: varchar("company_id"),
   name: text("name").notNull(),
   address: text("address"),
   phone: text("phone"),
@@ -39,7 +40,7 @@ export const branches = pgTable("branches", {
 
 export const warehouses = pgTable("warehouses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  shopId: varchar("shop_id").notNull(),
+  shopId: varchar("shop_id"),
   branchId: varchar("branch_id"),
   name: text("name").notNull(),
   address: text("address"),
@@ -520,7 +521,7 @@ export const bankAccounts = pgTable("bank_accounts", {
   accountNumber: text("account_number"),
   bankName: text("bank_name"),
   companyId: varchar("company_id"), // Company-level banking
-  shopId: varchar("shop_id").notNull(), // Shop-level banking - mandatory
+  shopId: varchar("shop_id"), // Shop-level banking - optional
   branchId: varchar("branch_id").notNull(), // Branch-level banking - mandatory
   openingBalance: decimal("opening_balance", { precision: 12, scale: 3 }).default("0.000"),
   currentBalance: decimal("current_balance", { precision: 12, scale: 3 }).default("0.000"),
@@ -531,7 +532,7 @@ export const bankTransactions = pgTable("bank_transactions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   bankAccountId: varchar("bank_account_id").notNull(),
   companyId: varchar("company_id"), // Company-level transaction
-  shopId: varchar("shop_id").notNull(), // Shop-level transaction - mandatory
+  shopId: varchar("shop_id"), // Shop-level transaction - optional
   branchId: varchar("branch_id").notNull(), // Branch-level transaction - mandatory
   transactionDate: timestamp("transaction_date").defaultNow(),
   type: text("type").notNull(),
@@ -644,6 +645,7 @@ export const clients = pgTable("clients", {
   companyName: text("company_name"),
   email: text("email"),
   phone: text("phone"),
+  logo: text("logo"),
   address: text("address"),
   contactPerson: text("contact_person"),
   notes: text("notes"),
@@ -652,6 +654,29 @@ export const clients = pgTable("clients", {
   branchId: varchar("branch_id"),
   status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const outlets = pgTable("outlets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientId: varchar("client_id"),
+  name: text("name").notNull(),
+  code: text("code"),
+  phone: text("phone"),
+  email: text("email"),
+  address: text("address"),
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  contactPerson: text("contact_person"),
+  contactPhone: text("contact_phone"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const outletZones = pgTable("outlet_zones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  outletId: varchar("outlet_id").notNull(),
+  zoneId: varchar("zone_id").notNull(),
+  assignedAt: timestamp("assigned_at").defaultNow(),
 });
 
 // ==================== PROJECT MODULE ====================
@@ -1668,10 +1693,33 @@ export const orders = pgTable("orders", {
   weight: decimal("weight", { precision: 10, scale: 3 }),
   loadType: text("load_type"), // LTL, FTL
   documents: jsonb("documents").$type<{ name: string; url: string }[]>().default([]),
-  pickupLocationId: varchar("pickup_location_id"), // points to locations.id
-  deliveryLocationId: varchar("delivery_location_id"), // points to locations.id
+  pickupLocationId: varchar("pickup_location_id"), // points to locations.id (legacy)
+  deliveryLocationId: varchar("delivery_location_id"), // points to locations.id (legacy)
+  
+  // New comprehensive booking fields
+  orderDate: timestamp("order_date"),
+  paymentDueDate: timestamp("payment_due_date"),
+  truckType: text("truck_type"), // 'own' or 'rented'
+  driverName: text("driver_name"),
+  driverContact: text("driver_contact"),
+  originCountry: text("origin_country"),
+  originCity: text("origin_city"),
+  destinations: jsonb("destinations").$type<{ country: string; city: string }[]>().default([]),
+  grandTotal: decimal("grand_total", { precision: 12, scale: 3 }).default("0.000"),
+  
   status: text("status").notNull().default("pending"), // "pending", "confirmed", "cancelled", "incomplete", "completed"
   zoneId: varchar("zone_id"), // points to zones.id
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const orderCharges = pgTable("order_charges", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(), // points to orders.id
+  description: text("description").notNull(),
+  qty: decimal("qty", { precision: 12, scale: 3 }).notNull().default("1.000"),
+  unitRate: decimal("unit_rate", { precision: 12, scale: 3 }).notNull().default("0.000"),
+  total: decimal("total", { precision: 12, scale: 3 }).notNull().default("0.000"),
+  isProfit: boolean("is_profit").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1902,3 +1950,87 @@ export type CompanyAsset = typeof companyAssets.$inferSelect;
 export type InsertCompanyAsset = z.infer<typeof insertCompanyAssetSchema>;
 export type CompanySetting = typeof companySettings.$inferSelect;
 export type InsertCompanySetting = z.infer<typeof insertCompanySettingSchema>;
+
+export const insertOutletSchema = createInsertSchema(outlets).omit({ id: true, createdAt: true });
+export type Outlet = typeof outlets.$inferSelect;
+export type InsertOutlet = z.infer<typeof insertOutletSchema>;
+
+export const insertOutletZoneSchema = createInsertSchema(outletZones).omit({ id: true, assignedAt: true });
+export type OutletZone = typeof outletZones.$inferSelect;
+export type InsertOutletZone = z.infer<typeof insertOutletZoneSchema>;
+
+// ========== DAILY DISPATCH MODULE ==========
+
+export const driverZones = pgTable("driver_zones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  driverId: varchar("driver_id").notNull(),
+  zoneId: varchar("zone_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dispatchSheets = pgTable("dispatch_sheets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: date("date").notNull(),
+  uploadedBy: varchar("uploaded_by"),
+  fileName: text("file_name"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dispatchItems = pgTable("dispatch_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sheetId: varchar("sheet_id").notNull(),
+  outletCode: text("outlet_code").notNull(),
+  outletId: varchar("outlet_id"),
+  itemCode: text("item_code").notNull(),
+  description: text("description"),
+  weight: decimal("weight", { precision: 10, scale: 3 }),
+  totalDelivered: decimal("total_delivered", { precision: 10, scale: 3 }),
+  remaining: decimal("remaining", { precision: 10, scale: 3 }),
+  remark: text("remark"),
+  grnNumber: text("grn_number"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dispatchOutletZoneOverrides = pgTable("dispatch_outlet_zone_overrides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sheetId: varchar("sheet_id").notNull(),
+  outletId: varchar("outlet_id").notNull(),
+  overrideZoneId: varchar("override_zone_id").notNull(),
+  reason: text("reason"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dispatchDeliveries = pgTable("dispatch_deliveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  dispatchItemId: varchar("dispatch_item_id").notNull(),
+  driverId: varchar("driver_id"),
+  deliveredQty: decimal("delivered_qty", { precision: 10, scale: 3 }),
+  remainingQty: decimal("remaining_qty", { precision: 10, scale: 3 }),
+  remark: text("remark"),
+  status: text("status").notNull().default("pending"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertDriverZoneSchema = createInsertSchema(driverZones).omit({ id: true, createdAt: true });
+export type DriverZone = typeof driverZones.$inferSelect;
+export type InsertDriverZone = z.infer<typeof insertDriverZoneSchema>;
+
+export const insertDispatchSheetSchema = createInsertSchema(dispatchSheets).omit({ id: true, createdAt: true });
+export type DispatchSheet = typeof dispatchSheets.$inferSelect;
+export type InsertDispatchSheet = z.infer<typeof insertDispatchSheetSchema>;
+
+export const insertDispatchItemSchema = createInsertSchema(dispatchItems).omit({ id: true, createdAt: true });
+export type DispatchItem = typeof dispatchItems.$inferSelect;
+export type InsertDispatchItem = z.infer<typeof insertDispatchItemSchema>;
+
+export const insertDispatchOutletZoneOverrideSchema = createInsertSchema(dispatchOutletZoneOverrides).omit({ id: true, createdAt: true });
+export type DispatchOutletZoneOverride = typeof dispatchOutletZoneOverrides.$inferSelect;
+export type InsertDispatchOutletZoneOverride = z.infer<typeof insertDispatchOutletZoneOverrideSchema>;
+
+export const insertDispatchDeliverySchema = createInsertSchema(dispatchDeliveries).omit({ id: true, createdAt: true });
+export type DispatchDelivery = typeof dispatchDeliveries.$inferSelect;
+export type InsertDispatchDelivery = z.infer<typeof insertDispatchDeliverySchema>;
+

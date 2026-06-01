@@ -212,7 +212,7 @@ export default function RfqPage() {
 
   const formatCurrency = (val: any) => {
     const num = parseFloat(String(val)) || 0;
-    return `${num.toFixed(3)} RO`;
+    return `${num.toFixed(3)} BD`;
   };
 
   return (
@@ -380,7 +380,7 @@ export default function RfqPage() {
             </CardHeader>
             <CardContent className="text-xs text-muted-foreground space-y-3">
               <p>
-                In Logistics RFQs, billing is strictly computed using the Omani Rial (**RO**).
+                In Logistics RFQs, billing is strictly computed using the Bahraini Dinar (**BD**).
               </p>
               <p className="font-semibold text-foreground">Formula:</p>
               <div className="bg-muted p-2 rounded-md font-mono text-[10px] text-foreground">
@@ -497,7 +497,7 @@ export default function RfqPage() {
                   name="transportationCharges"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Transportation Charges (RO) *</FormLabel>
+                      <FormLabel>Transportation Charges (BD) *</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.001" placeholder="0.000" {...field} />
                       </FormControl>
@@ -511,7 +511,7 @@ export default function RfqPage() {
                   name="outsourcedTruckCost"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Outsourced Cost (RO) (Optional)</FormLabel>
+                      <FormLabel>Outsourced Cost (BD) (Optional)</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.001" placeholder="0.000" {...field} />
                       </FormControl>
@@ -525,7 +525,7 @@ export default function RfqPage() {
                   name="tollTransitCharges"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Toll & Port Charges (RO)</FormLabel>
+                      <FormLabel>Toll & Port Charges (BD)</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.001" placeholder="0.000" {...field} />
                       </FormControl>
@@ -539,7 +539,7 @@ export default function RfqPage() {
                   name="clearanceAgentCharges"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Clearance/Customs Fees (RO)</FormLabel>
+                      <FormLabel>Clearance/Customs Fees (BD)</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.001" placeholder="0.000" {...field} />
                       </FormControl>
@@ -577,7 +577,7 @@ export default function RfqPage() {
               <div className="border rounded-lg p-4 bg-muted/40 space-y-2 text-xs">
                 <div className="font-semibold text-sm border-b pb-1.5 text-foreground flex justify-between">
                   <span>Financial Statement</span>
-                  <span>Currency: RO</span>
+                  <span>Currency: BD</span>
                 </div>
                 <div className="flex justify-between text-muted-foreground">
                   <span>Base Transportation</span>

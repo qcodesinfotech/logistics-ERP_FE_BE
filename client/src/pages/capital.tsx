@@ -255,7 +255,7 @@ export default function CapitalPage() {
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Amount (RO) *</FormLabel>
+                    <FormLabel>Amount (BD) *</FormLabel>
                     <FormControl>
                       <Input {...field} type="number" step="0.001" data-testid="input-amount" />
                     </FormControl>

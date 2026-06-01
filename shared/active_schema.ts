@@ -54,7 +54,15 @@ import {
   vehicleMaintenance,
   fuelLogs,
   userActivityLogs,
-  drivers
+  drivers,
+  outlets,
+  outletZones,
+  dispatchSheets,
+  dispatchItems,
+  dispatchOutletZoneOverrides,
+  dispatchDeliveries,
+  driverZones,
+  orderCharges
 } from "./schema";
 
 export {
@@ -113,5 +121,13 @@ export {
   vehicleMaintenance,
   fuelLogs,
   userActivityLogs,
-  drivers
+  drivers,
+  outlets,
+  outletZones,
+  dispatchSheets,
+  dispatchItems,
+  dispatchOutletZoneOverrides,
+  dispatchDeliveries,
+  driverZones,
+  orderCharges
 };

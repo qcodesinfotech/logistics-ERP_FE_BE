@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check } from "lucide-react";
+import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -58,9 +59,15 @@ export default function ZonesPage() {
   const [isZoneDialogOpen, setIsZoneDialogOpen] = useState(false);
   const [isSupervisorDialogOpen, setIsSupervisorDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
   
   const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>("");
   const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
+  
+  const [isAppendOutletsDialogOpen, setIsAppendOutletsDialogOpen] = useState(false);
+  const [selectedZoneIdForOutlets, setSelectedZoneIdForOutlets] = useState<string>("");
+  const [selectedOutletIds, setSelectedOutletIds] = useState<string[]>([]);
+  const [outletSearchQuery, setOutletSearchQuery] = useState("");
   
   // Excel import simulation state
   const [simulatedData, setSimulatedData] = useState<ExcelSimRow[]>([]);
@@ -85,6 +92,15 @@ export default function ZonesPage() {
     queryKey: ["/api/users"],
   });
 
+  const { data: outletsList } = useQuery<any[]>({
+    queryKey: ["/api/outlets"],
+  });
+
+  const { data: zoneOutlets } = useQuery<any[]>({
+    queryKey: [`/api/zones/${selectedZoneIdForOutlets}/outlets`],
+    enabled: !!selectedZoneIdForOutlets && isAppendOutletsDialogOpen,
+  });
+
   const supervisors = usersList?.filter(u => u.role === "supervisor" || u.role === "admin") || [];
 
   const createZoneMutation = useMutation({
@@ -93,6 +109,21 @@ export default function ZonesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
       toast({ title: "Zone created successfully" });
       setIsZoneDialogOpen(false);
+      form.reset();
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const updateZoneMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ZoneFormData }) => 
+      apiRequest("PUT", `/api/zones/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      toast({ title: "Zone updated successfully" });
+      setIsZoneDialogOpen(false);
+      setEditingZoneId(null);
       form.reset();
     },
     onError: (error: unknown) => {
@@ -109,6 +140,41 @@ export default function ZonesPage() {
       setIsSupervisorDialogOpen(false);
       setSelectedSupervisorId("");
       setSelectedZoneIds([]);
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const deleteZoneMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/zones/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      toast({ title: "Zone deleted successfully" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const addSingleOutletMutation = useMutation({
+    mutationFn: (data: { zoneId: string; outletId: string }) => 
+      apiRequest("POST", `/api/zones/${data.zoneId}/outlets`, { outletIds: [data.outletId] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/zones/${selectedZoneIdForOutlets}/outlets`] });
+      toast({ title: "Outlet added to zone" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const removeOutletMutation = useMutation({
+    mutationFn: (data: { zoneId: string; outletId: string }) => 
+      apiRequest("DELETE", `/api/zones/${data.zoneId}/outlets/${data.outletId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/zones/${selectedZoneIdForOutlets}/outlets`] });
+      toast({ title: "Outlet removed from zone" });
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -132,6 +198,12 @@ export default function ZonesPage() {
   const handleZoneToggle = (zoneId: string) => {
     setSelectedZoneIds(prev => 
       prev.includes(zoneId) ? prev.filter(id => id !== zoneId) : [...prev, zoneId]
+    );
+  };
+
+  const handleOutletToggle = (outletId: string) => {
+    setSelectedOutletIds(prev => 
+      prev.includes(outletId) ? prev.filter(id => id !== outletId) : [...prev, outletId]
     );
   };
 
@@ -184,6 +256,23 @@ export default function ZonesPage() {
     setSimulatedData([]);
   };
 
+  const currentZoneForOutlets = zonesList?.find(z => z.id === selectedZoneIdForOutlets);
+
+  const filteredZoneOutlets = zoneOutlets?.filter(outlet => 
+    outlet.name.toLowerCase().includes(outletSearchQuery.toLowerCase()) ||
+    (outlet.address && outlet.address.toLowerCase().includes(outletSearchQuery.toLowerCase()))
+  ) || [];
+
+  const availableOutlets = outletsList?.filter(outlet => {
+    // Exclude if already in zoneOutlets
+    const isAssigned = zoneOutlets?.some(zo => zo.id === outlet.id);
+    if (isAssigned) return false;
+    
+    // Filter by query
+    return outlet.name.toLowerCase().includes(outletSearchQuery.toLowerCase()) ||
+      (outlet.address && outlet.address.toLowerCase().includes(outletSearchQuery.toLowerCase()));
+  }) || [];
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <PageHeader 
@@ -196,13 +285,24 @@ export default function ZonesPage() {
         <Button onClick={() => setIsSupervisorDialogOpen(true)} variant="secondary" className="gap-2">
           <UserCheck className="h-4 w-4" /> Assign Supervisors
         </Button>
-        <Button onClick={() => setIsZoneDialogOpen(true)} className="gap-2">
+        <Button 
+          onClick={() => {
+            setEditingZoneId(null);
+            form.reset({
+              name: "",
+              description: "",
+              status: "active",
+            });
+            setIsZoneDialogOpen(true);
+          }} 
+          className="gap-2"
+        >
           <Plus className="h-4 w-4" /> Add Zone
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 gap-6">
+        <div className="space-y-6">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
             <CardHeader className="pb-3 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -233,21 +333,56 @@ export default function ZonesPage() {
                   <TableBody>
                     {zonesList.map((zone) => (
                       <TableRow key={zone.id} className="hover:bg-accent/40 transition-colors">
-                        <TableCell className="font-semibold text-foreground">{zone.name}</TableCell>
+                        <TableCell className="font-semibold text-foreground">
+                          <button 
+                            onClick={() => {
+                              setSelectedZoneIdForOutlets(zone.id);
+                              setOutletSearchQuery("");
+                              setIsAppendOutletsDialogOpen(true);
+                            }}
+                            className="hover:underline text-left text-primary cursor-pointer font-bold"
+                          >
+                            {zone.name}
+                          </button>
+                        </TableCell>
                         <TableCell className="text-muted-foreground max-w-xs truncate">{zone.description || "N/A"}</TableCell>
                         <TableCell>
                           <StatusBadge status={zone.status} />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => {
-                            form.reset({
-                              name: zone.name,
-                              description: zone.description || "",
-                              status: zone.status as "active" | "inactive",
-                            });
-                            setIsZoneDialogOpen(true);
-                          }}>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => {
+                              setEditingZoneId(zone.id);
+                              form.reset({
+                                name: zone.name,
+                                description: zone.description || "",
+                                status: zone.status as "active" | "inactive",
+                              });
+                              setIsZoneDialogOpen(true);
+                            }}
+                          >
                             Edit
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-blue-600 hover:text-blue-700" 
+                            onClick={() => {
+                              setSelectedZoneIdForOutlets(zone.id);
+                              setOutletSearchQuery("");
+                              setIsAppendOutletsDialogOpen(true);
+                            }}
+                          >
+                            Manage Outlets
+                          </Button>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => {
+                            if (confirm("Are you sure you want to delete this zone?")) {
+                              deleteZoneMutation.mutate(zone.id);
+                            }
+                          }}>
+                            Delete
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -259,40 +394,42 @@ export default function ZonesPage() {
           </Card>
         </div>
 
-        <div>
-          <Card className="shadow-md bg-accent/10 border-accent/20">
-            <CardHeader>
-              <CardTitle className="text-md flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-500" /> Dynamic Cross-Zone Fallback
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground space-y-3">
-              <p>
-                The Logistics ERP uses **Smart Zone Allocation** to assign orders to their respective geographical regions based on customer address mapping.
-              </p>
-              <p className="font-medium text-foreground">
-                Cross-Zone Fallback Use Case:
-              </p>
-              <ul className="list-disc list-inside space-y-1 pl-1">
-                <li>If the primary Zone has no available vehicle or driver, supervisors can assign a fallback driver from another zone.</li>
-                <li>Temporary fleet permits can be enabled instantly from the Dispatch board.</li>
-              </ul>
-            </CardContent>
-          </Card>
-        </div>
+
       </div>
 
       {/* Create / Edit Zone Dialog */}
-      <Dialog open={isZoneDialogOpen} onOpenChange={setIsZoneDialogOpen}>
+      <Dialog 
+        open={isZoneDialogOpen} 
+        onOpenChange={(open) => {
+          setIsZoneDialogOpen(open);
+          if (!open) {
+            setEditingZoneId(null);
+            form.reset({
+              name: "",
+              description: "",
+              status: "active",
+            });
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Configure Zone</DialogTitle>
+            <DialogTitle>{editingZoneId ? "Edit Zone" : "Configure Zone"}</DialogTitle>
             <DialogDescription>
               Specify logistics parameters for the zone. Fields marked with * are required.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(d => createZoneMutation.mutate(d))} className="space-y-4">
+            <form 
+              onSubmit={form.handleSubmit(d => {
+                if (editingZoneId) {
+                  updateZoneMutation.mutate({ id: editingZoneId, data: d });
+                } else {
+                  createZoneMutation.mutate(d);
+                }
+              })} 
+              className="space-y-4"
+            >
               <FormField
                 control={form.control}
                 name="name"
@@ -325,7 +462,7 @@ export default function ZonesPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select status" />
@@ -344,8 +481,8 @@ export default function ZonesPage() {
                 <Button type="button" variant="outline" onClick={() => setIsZoneDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createZoneMutation.isPending}>
-                  {createZoneMutation.isPending ? "Saving..." : "Save Zone"}
+                <Button type="submit" disabled={createZoneMutation.isPending || updateZoneMutation.isPending}>
+                  {createZoneMutation.isPending || updateZoneMutation.isPending ? "Saving..." : editingZoneId ? "Update Zone" : "Save Zone"}
                 </Button>
               </DialogFooter>
             </form>
@@ -506,6 +643,105 @@ export default function ZonesPage() {
             </Button>
             <Button onClick={saveSimulatedAllocations} disabled={simulatedData.length === 0}>
               Apply & Save Allocations
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Outlets Dialog */}
+      <Dialog open={isAppendOutletsDialogOpen} onOpenChange={setIsAppendOutletsDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Manage Outlets for {currentZoneForOutlets?.name || "Zone"}</DialogTitle>
+            <DialogDescription>
+              View currently appended outlets, remove them, or assign new available outlets to this zone.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-2">
+            <Input
+              placeholder="Search outlets by name or address..."
+              value={outletSearchQuery}
+              onChange={(e) => setOutletSearchQuery(e.target.value)}
+              className="mb-4"
+            />
+
+            <Tabs defaultValue="appended" className="w-full">
+              <TabsList className="grid grid-cols-2 mb-4">
+                <TabsTrigger value="appended" className="relative">
+                  Appended Outlets
+                  {zoneOutlets && zoneOutlets.length > 0 && (
+                    <span className="ml-2 bg-primary/25 text-primary font-bold rounded-full px-2.5 py-0.5 text-xs">
+                      {zoneOutlets.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="available">
+                  Add Outlets
+                  {availableOutlets.length > 0 && (
+                    <span className="ml-2 bg-muted text-muted-foreground font-semibold rounded-full px-2.5 py-0.5 text-xs">
+                      {availableOutlets.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="appended" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                {filteredZoneOutlets.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    {outletSearchQuery ? "No matching appended outlets." : "No outlets appended to this zone yet."}
+                  </div>
+                ) : (
+                  filteredZoneOutlets.map(outlet => (
+                    <div key={outlet.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/40 hover:bg-accent/30 transition-colors">
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className="text-sm font-semibold text-foreground truncate">{outlet.name}</span>
+                        {outlet.address && <span className="text-xs text-muted-foreground truncate">{outlet.address}</span>}
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 shrink-0"
+                        onClick={() => removeOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
+                        disabled={removeOutletMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+
+              <TabsContent value="available" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                {availableOutlets.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    {outletSearchQuery ? "No matching unassigned outlets." : "All available outlets have been assigned to this zone."}
+                  </div>
+                ) : (
+                  availableOutlets.map(outlet => (
+                    <div key={outlet.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/30 transition-colors">
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className="text-sm font-semibold text-foreground truncate">{outlet.name}</span>
+                        {outlet.address && <span className="text-xs text-muted-foreground truncate">{outlet.address}</span>}
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-8 gap-1 shrink-0 text-xs hover:bg-primary hover:text-white transition-colors"
+                        onClick={() => addSingleOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
+                        disabled={addSingleOutletMutation.isPending}
+                      >
+                        <Plus className="h-3 w-3" /> Add
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button type="button" onClick={() => setIsAppendOutletsDialogOpen(false)}>
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>

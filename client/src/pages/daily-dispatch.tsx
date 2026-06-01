@@ -1,0 +1,820 @@
+import { useState, useRef, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest, getErrorMessage } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { format, parseISO } from "date-fns";
+import {
+  Tabs, TabsContent, TabsList, TabsTrigger,
+} from "@/components/ui/tabs";
+import {
+  Card, CardContent, CardDescription, CardHeader, CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  Truck, Upload, FileText, Calendar, MapPin, User, Package,
+  ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, Clock,
+  X, Plus, Trash2, RefreshCw, ArrowRight, Eye,
+} from "lucide-react";
+
+// ===== Types =====
+interface DispatchSheet { id: string; date: string; fileName: string | null; status: string; createdAt: string; }
+interface DispatchItem {
+  id: string; sheetId: string; outletCode: string; outletId: string | null;
+  outletName?: string; itemCode: string; description: string | null;
+  weight: string | null; totalDelivered: string | null; remaining: string | null;
+  remark: string | null; grnNumber: string | null;
+  delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; } | null;
+}
+interface OutletGroup {
+  outletId: string | null; outletCode: string; outletName: string;
+  isOverridden: boolean; overrideZoneId: string | null; items: DispatchItem[];
+}
+interface ZoneGroup {
+  zoneId: string; zoneName: string;
+  drivers: { id: string; name: string }[];
+  outlets: OutletGroup[];
+}
+interface BoardData { zones: ZoneGroup[]; overrides: any[]; }
+interface Driver { id: string; name: string; status: string; }
+interface Zone { id: string; name: string; }
+
+// ===== CSV Parser =====
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.trim().split("\n").filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
+  // Normalize common header variants
+  const normalize = (h: string) => {
+    if (h.includes("outlet") && h.includes("code")) return "outlet_code";
+    if (h.includes("item") && h.includes("code")) return "item_code";
+    if (h.includes("desc")) return "description";
+    if (h === "weight" || h.includes("qty") || h.includes("quantity")) return "weight";
+    if (h.includes("total") && h.includes("del")) return "total_delivered";
+    if (h === "remaining") return "remaining";
+    if (h.includes("remark")) return "remark";
+    if (h.includes("grn")) return "grn_number";
+    return h;
+  };
+  const headers = rawHeaders.map(normalize);
+  return lines.slice(1).map(line => {
+    const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
+    return row;
+  });
+}
+
+// ===== Status Badge =====
+const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
+  pending: { label: "Pending", color: "bg-slate-100 text-slate-700 border-slate-200", icon: Clock },
+  partial: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
+  delivered: { label: "Delivered", color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
+  damaged: { label: "Damaged", color: "bg-red-100 text-red-700 border-red-200", icon: X },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const cfg = statusConfig[status] || statusConfig.pending;
+  const Icon = cfg.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.color}`}>
+      <Icon className="h-3 w-3" />{cfg.label}
+    </span>
+  );
+}
+
+// ===== Delivery Update Dialog =====
+function DeliveryDialog({
+  item, sheetId, onClose, onSave,
+}: { item: DispatchItem; sheetId: string; onClose: () => void; onSave: (data: any) => void }) {
+  const [status, setStatus] = useState(item.delivery?.status || "pending");
+  const [deliveredQty, setDeliveredQty] = useState(item.delivery?.deliveredQty || item.totalDelivered || item.weight || "");
+  const [remainingQty, setRemainingQty] = useState(item.delivery?.remainingQty || item.remaining || "0");
+  const [remark, setRemark] = useState(item.delivery?.remark || "");
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5 text-primary" />
+            Update Delivery — {item.itemCode}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="bg-muted/40 rounded-lg p-3 text-sm space-y-1">
+            <p><span className="text-muted-foreground">Outlet:</span> <span className="font-medium">{item.outletCode}</span></p>
+            {item.description && <p><span className="text-muted-foreground">Item:</span> {item.description}</p>}
+            {item.grnNumber && <p><span className="text-muted-foreground">GRN:</span> {item.grnNumber}</p>}
+            {item.weight && <p><span className="text-muted-foreground">Weight:</span> {item.weight} kg</p>}
+          </div>
+          <div className="space-y-2">
+            <Label>Delivery Status</Label>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(statusConfig).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Delivered Qty</Label>
+              <Input type="number" value={deliveredQty} onChange={e => setDeliveredQty(e.target.value)} placeholder="0" />
+            </div>
+            <div className="space-y-2">
+              <Label>Remaining Qty</Label>
+              <Input type="number" value={remainingQty} onChange={e => setRemainingQty(e.target.value)} placeholder="0" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Remark (damage, reason, etc.)</Label>
+            <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="Optional notes..." rows={2} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave({ status, deliveredQty, remainingQty, remark })}>Save Delivery</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ===== Zone Override Dialog =====
+function ZoneOverrideDialog({
+  outletCode, outletId, sheetId, zones, onClose, onSave,
+}: { outletCode: string; outletId: string; sheetId: string; zones: Zone[]; onClose: () => void; onSave: (zoneId: string, reason: string) => void }) {
+  const [zoneId, setZoneId] = useState("");
+  const [reason, setReason] = useState("");
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowRight className="h-5 w-5 text-amber-500" />
+            Move Outlet — {outletCode}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <p className="text-sm text-muted-foreground">Temporarily reassign this outlet to a different zone for this dispatch sheet.</p>
+          <div className="space-y-2">
+            <Label>Target Zone</Label>
+            <Select value={zoneId} onValueChange={setZoneId}>
+              <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
+              <SelectContent>
+                {zones.map(z => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Reason (optional)</Label>
+            <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Truck at max capacity" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!zoneId} onClick={() => onSave(zoneId, reason)} className="bg-amber-500 hover:bg-amber-600 text-white">Move Outlet</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ===== Outlet Card =====
+function OutletCard({
+  outlet, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride,
+}: {
+  outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
+  onDeliveryUpdate: (item: DispatchItem) => void;
+  onOverride: (outlet: OutletGroup) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
+  const total = outlet.items.length;
+  const allDone = delivered === total && total > 0;
+  const anyPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
+
+  return (
+    <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
+      <div className="flex items-center justify-between p-3 cursor-pointer" onClick={() => setExpanded(e => !e)}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${allDone ? "bg-emerald-100" : "bg-primary/10"}`}>
+            <MapPin className={`h-4 w-4 ${allDone ? "text-emerald-600" : "text-primary"}`} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold text-sm truncate">{outlet.outletName}</p>
+            <p className="text-xs text-muted-foreground">{outlet.outletCode}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {outlet.isOverridden && (
+            <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-xs">Override</Badge>
+          )}
+          <Badge variant="outline" className="text-xs">{delivered}/{total}</Badge>
+          {isSupervisor && (
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+              onClick={e => { e.stopPropagation(); onOverride(outlet); }}>
+              <ArrowRight className="h-3 w-3 mr-1" />Move
+            </Button>
+          )}
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </div>
+      {expanded && (
+        <div className="border-t divide-y">
+          {outlet.items.map(item => {
+            const status = item.delivery?.status || "pending";
+            return (
+              <div key={item.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-xs">{item.itemCode}</span>
+                    {item.grnNumber && <span className="text-xs text-muted-foreground">GRN: {item.grnNumber}</span>}
+                    <StatusBadge status={status} />
+                  </div>
+                  {item.description && <p className="text-xs text-muted-foreground truncate mt-0.5">{item.description}</p>}
+                  <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground">
+                    {item.totalDelivered && <span>Total: {item.totalDelivered}</span>}
+                    {item.delivery?.deliveredQty && <span className="text-emerald-600">Del: {item.delivery.deliveredQty}</span>}
+                    {item.delivery?.remainingQty && <span className="text-amber-600">Rem: {item.delivery.remainingQty}</span>}
+                    {item.weight && <span>{item.weight} kg</span>}
+                  </div>
+                  {item.delivery?.remark && (
+                    <p className="text-xs text-muted-foreground italic mt-0.5">"{item.delivery.remark}"</p>
+                  )}
+                </div>
+                <Button variant="outline" size="sm" className="h-7 px-2 text-xs flex-shrink-0"
+                  onClick={() => onDeliveryUpdate(item)}>
+                  <Eye className="h-3 w-3 mr-1" />Update
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== Zone Column =====
+function ZoneColumn({
+  zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride,
+}: {
+  zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
+  onDeliveryUpdate: (item: DispatchItem) => void;
+  onOverride: (outlet: OutletGroup) => void;
+}) {
+  const totalItems = zone.outlets.reduce((s, o) => s + o.items.length, 0);
+  const deliveredItems = zone.outlets.reduce((s, o) => s + o.items.filter(i => i.delivery?.status === "delivered").length, 0);
+  const isUnassigned = zone.zoneId === "unassigned";
+
+  return (
+    <div className={`flex-shrink-0 w-80 flex flex-col rounded-2xl border ${isUnassigned ? "border-dashed border-slate-300 bg-slate-50/50 dark:bg-slate-900/20" : "border-border bg-card"} shadow-sm`}>
+      {/* Zone Header */}
+      <div className={`p-4 rounded-t-2xl ${isUnassigned ? "" : "bg-gradient-to-r from-primary/10 to-primary/5"}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isUnassigned ? "bg-slate-200" : "bg-primary/20"}`}>
+              <MapPin className={`h-4 w-4 ${isUnassigned ? "text-slate-500" : "text-primary"}`} />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm">{zone.zoneName}</h3>
+              <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · {totalItems} items</p>
+            </div>
+          </div>
+          <Badge className={`${deliveredItems === totalItems && totalItems > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
+            {deliveredItems}/{totalItems}
+          </Badge>
+        </div>
+        {zone.drivers.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+            {zone.drivers.map(d => (
+              <div key={d.id} className="flex items-center gap-1 bg-background rounded-full px-2 py-0.5 border text-xs">
+                <User className="h-3 w-3 text-primary" />
+                <span className="font-medium">{d.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!isUnassigned && zone.drivers.length === 0 && (
+          <p className="text-xs text-muted-foreground italic mt-1">No driver assigned to this zone</p>
+        )}
+      </div>
+      {/* Outlets */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ maxHeight: "calc(100vh - 280px)" }}>
+        {zone.outlets.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground text-sm">No outlets in this zone</div>
+        ) : (
+          zone.outlets.map((outlet, i) => (
+            <OutletCard key={outlet.outletId || outlet.outletCode + i}
+              outlet={outlet} sheetId={sheetId} zones={zones}
+              isSupervisor={isSupervisor}
+              onDeliveryUpdate={onDeliveryUpdate}
+              onOverride={onOverride}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===== Main Page =====
+export default function DailyDispatchPage() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // State
+  const [activeTab, setActiveTab] = useState("board");
+  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [boardSheetId, setBoardSheetId] = useState<string | null>(null);
+  const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
+  const [csvFileName, setCsvFileName] = useState("");
+  const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [isDragging, setIsDragging] = useState(false);
+  const [deliveryDialog, setDeliveryDialog] = useState<DispatchItem | null>(null);
+  const [overrideDialog, setOverrideDialog] = useState<OutletGroup | null>(null);
+  const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
+
+  // Queries
+  const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
+  const { data: zones = [] } = useQuery<Zone[]>({ queryKey: ["/api/zones"] });
+  const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
+  const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
+
+  const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
+    queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
+    enabled: !!boardSheetId,
+  });
+
+  // Upload mutation
+  const uploadMutation = useMutation({
+    mutationFn: (data: { date: string; fileName: string; items: any[] }) =>
+      apiRequest("POST", "/api/dispatch/sheets", data),
+    onSuccess: async (res) => {
+      const result = await res.json();
+      toast({ title: `Sheet uploaded! ${result.itemCount} items loaded.` });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+      setCsvPreview(null);
+      setCsvFileName("");
+      setActiveTab("board");
+      setBoardSheetId(result.sheet.id);
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const deleteSheetMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/sheets/${id}`),
+    onSuccess: () => {
+      toast({ title: "Sheet deleted successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+      if (boardSheetId) {
+        setBoardSheetId(null);
+        setActiveTab("upload");
+      }
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  // Delivery mutation
+  const deliveryMutation = useMutation({
+    mutationFn: ({ itemId, data }: { itemId: string; data: any }) =>
+      apiRequest("PATCH", `/api/dispatch/items/${itemId}/delivery`, data),
+    onSuccess: () => {
+      toast({ title: "Delivery updated!" });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setDeliveryDialog(null);
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  // Override mutation
+  const overrideMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/dispatch/overrides", data),
+    onSuccess: () => {
+      toast({ title: "Zone override applied!" });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setOverrideDialog(null);
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const removeOverrideMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/overrides/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+    },
+  });
+
+  // Driver zone mutations
+  const assignDriverZoneMutation = useMutation({
+    mutationFn: (data: { driverId: string; zoneId: string }) => apiRequest("POST", "/api/dispatch/driver-zones", data),
+    onSuccess: () => {
+      toast({ title: "Driver assigned to zone!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/driver-zones"] });
+      setDriverZoneForm({ driverId: "", zoneId: "" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const removeDriverZoneMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/driver-zones/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/dispatch/driver-zones"] }),
+  });
+
+  // File handling
+  const handleFile = (file: File) => {
+    if (!file.name.endsWith(".csv")) {
+      toast({ title: "Please upload a CSV file", variant: "destructive" });
+      return;
+    }
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target?.result as string;
+      const parsed = parseCSV(text);
+      setCsvPreview(parsed);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, []);
+
+  const handleUpload = () => {
+    if (!csvPreview || csvPreview.length === 0) return;
+    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview });
+  };
+
+  // Find sheet for selected date on board
+  const sheetForDate = sheets.find(s => s.date === selectedDate);
+
+  const driverMap = new Map(drivers.map(d => [d.id, d]));
+  const zoneMap = new Map(zones.map(z => [z.id, z]));
+
+  const isSupervisor = true; // TODO: link to user role
+
+  return (
+    <div className="flex flex-col" style={{ height: "calc(100vh - 57px)" }}>
+      {/* Header */}
+      <div className="px-6 py-5 border-b bg-gradient-to-r from-primary/5 via-background to-background">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Truck className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">Daily Dispatch</h1>
+            <p className="text-sm text-muted-foreground">Upload delivery sheets, track orders by zone and driver</p>
+          </div>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+        <div className="px-6 pt-4 border-b bg-background">
+          <TabsList className="gap-1">
+            <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
+            <TabsTrigger value="upload" className="gap-2"><Upload className="h-4 w-4" />Upload Sheet</TabsTrigger>
+            <TabsTrigger value="drivers" className="gap-2"><User className="h-4 w-4" />Driver Zones</TabsTrigger>
+          </TabsList>
+        </div>
+
+        {/* ===== BOARD TAB ===== */}
+        <TabsContent value="board" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden">
+          <div className="px-6 py-3 border-b flex items-center gap-4 flex-wrap bg-background">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                className="w-40 h-8 text-sm" />
+            </div>
+            {sheetForDate ? (
+              <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
+                onClick={() => setBoardSheetId(sheetForDate.id)}>
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                {boardSheetId === sheetForDate.id ? "Viewing Board" : "Load Board"}
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="h-4 w-4" />
+                No sheet for this date.
+                <Button size="sm" variant="ghost" onClick={() => { setUploadDate(selectedDate); setActiveTab("upload"); }}>
+                  Upload one →
+                </Button>
+              </div>
+            )}
+            {boardSheetId && (
+              <Button size="sm" variant="ghost" onClick={() => refetchBoard()}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1" />Refresh
+              </Button>
+            )}
+            {boardData && boardData.overrides.length > 0 && (
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
+                <AlertTriangle className="h-3 w-3" />
+                {boardData.overrides.length} zone override(s) active
+              </Badge>
+            )}
+          </div>
+
+          {!boardSheetId ? (
+            <div className="flex-1 flex items-center justify-center min-h-0">
+              <div className="text-center space-y-3">
+                <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+                  <Truck className="h-8 w-8 text-primary" />
+                </div>
+                <p className="text-lg font-semibold">Select a Date to Load the Board</p>
+                <p className="text-sm text-muted-foreground">Pick a date above that has an uploaded dispatch sheet.</p>
+              </div>
+            </div>
+          ) : boardLoading ? (
+            <div className="flex-1 flex items-center justify-center min-h-0">
+              <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+            </div>
+          ) : !boardData ? (
+            <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load board.</div>
+          ) : (
+            <div className="flex-1 overflow-auto p-4 min-h-0">
+              <div className="flex gap-4 min-w-max pb-4">
+                {boardData.zones
+                  .filter(z => z.outlets.length > 0 || z.zoneId === "unassigned")
+                  .map(zone => (
+                    <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId}
+                      zones={zones} isSupervisor={isSupervisor}
+                      onDeliveryUpdate={item => setDeliveryDialog(item)}
+                      onOverride={outlet => setOverrideDialog(outlet)}
+                    />
+                  ))}
+                {boardData.zones.every(z => z.outlets.length === 0) && (
+                  <div className="flex items-center justify-center w-full h-64 text-muted-foreground">
+                    No items found in this sheet.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ===== UPLOAD TAB ===== */}
+        <TabsContent value="upload" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {/* Existing Sheets */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-primary" />
+                  Uploaded Sheets
+                </CardTitle>
+                <CardDescription>All daily dispatch sheets. Re-uploading for the same date replaces the previous sheet.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sheets.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No sheets uploaded yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {sheets.map(s => (
+                      <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-4 w-4 text-primary flex-shrink-0" />
+                          <div>
+                            <p className="font-medium text-sm">{format(parseISO(s.date), "EEEE, dd MMM yyyy")}</p>
+                            <p className="text-xs text-muted-foreground">{s.fileName || "No filename"}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={s.status === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""}>
+                            {s.status}
+                          </Badge>
+                          <Button size="sm" variant="outline" onClick={() => { setSelectedDate(s.date); setBoardSheetId(s.id); setActiveTab("board"); }}>
+                            <Eye className="h-3.5 w-3.5 mr-1" />View
+                          </Button>
+                          <Button size="icon" variant="outline" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" 
+                            onClick={() => {
+                              if (confirm("Are you sure you want to delete this sheet? All associated items and delivery logs will be lost.")) {
+                                deleteSheetMutation.mutate(s.id);
+                              }
+                            }}
+                            disabled={deleteSheetMutation.isPending}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Upload Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Upload className="h-4 w-4 text-primary" />
+                  Upload New Sheet
+                </CardTitle>
+                <CardDescription>
+                  CSV columns: <code className="text-xs bg-muted px-1 py-0.5 rounded">outlet_code, item_code, description, weight, total_delivered, remaining, remark, grn_number</code>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Dispatch Date</Label>
+                  <Input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} className="w-44" />
+                </div>
+
+                {/* Dropzone */}
+                <div
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${isDragging ? "border-primary bg-primary/5 scale-[1.01]" : "border-muted-foreground/30 hover:border-primary hover:bg-primary/3"}`}
+                  onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
+                  <p className="font-medium text-sm">Drop CSV here or click to browse</p>
+                  <p className="text-xs text-muted-foreground mt-1">Only .csv files accepted</p>
+                  {csvFileName && <p className="text-xs text-primary mt-2 font-medium">{csvFileName}</p>}
+                </div>
+                <input ref={fileInputRef} type="file" accept=".csv" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+
+                {/* Preview */}
+                {csvPreview && csvPreview.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-muted-foreground">{csvPreview.length} rows parsed — Preview:</p>
+                      <Button variant="ghost" size="sm" onClick={() => { setCsvPreview(null); setCsvFileName(""); }}>
+                        <X className="h-3.5 w-3.5 mr-1" />Clear
+                      </Button>
+                    </div>
+                    <div className="rounded-lg border overflow-auto max-h-64">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            {Object.keys(csvPreview[0]).map(h => (
+                              <TableHead key={h} className="text-xs whitespace-nowrap">{h}</TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {csvPreview.slice(0, 8).map((row, i) => (
+                            <TableRow key={i}>
+                              {Object.values(row).map((v, j) => (
+                                <TableCell key={j} className="text-xs py-1.5 whitespace-nowrap">{v || "-"}</TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    {csvPreview.length > 8 && (
+                      <p className="text-xs text-muted-foreground text-center">... and {csvPreview.length - 8} more rows</p>
+                    )}
+                    <Button onClick={handleUpload} disabled={uploadMutation.isPending} className="w-full gap-2">
+                      <Upload className="h-4 w-4" />
+                      {uploadMutation.isPending ? "Uploading..." : `Upload ${csvPreview.length} Items for ${format(parseISO(uploadDate), "dd MMM yyyy")}`}
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ===== DRIVER ZONES TAB ===== */}
+        <TabsContent value="drivers" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
+          <div className="max-w-2xl mx-auto space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-primary" />
+                  Assign Driver to Zone
+                </CardTitle>
+                <CardDescription>Drivers assigned here will appear on the dispatch board under their zone.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Driver</Label>
+                    <Select value={driverZoneForm.driverId} onValueChange={v => setDriverZoneForm(f => ({ ...f, driverId: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Select driver..." /></SelectTrigger>
+                      <SelectContent>
+                        {drivers.filter(d => d.status === "active").map(d => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Zone</Label>
+                    <Select value={driverZoneForm.zoneId} onValueChange={v => setDriverZoneForm(f => ({ ...f, zoneId: v }))}>
+                      <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
+                      <SelectContent>
+                        {zones.map(z => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button onClick={() => assignDriverZoneMutation.mutate(driverZoneForm)}
+                  disabled={!driverZoneForm.driverId || !driverZoneForm.zoneId || assignDriverZoneMutation.isPending}
+                  className="gap-2">
+                  <Plus className="h-4 w-4" />Assign
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Current Assignments</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {driverZones.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No driver zone assignments yet.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Driver</TableHead>
+                        <TableHead>Zone</TableHead>
+                        <TableHead className="w-12"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {driverZones.map((dz: any) => {
+                        const driver = driverMap.get(dz.driverId);
+                        const zone = zoneMap.get(dz.zoneId);
+                        return (
+                          <TableRow key={dz.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center">
+                                  <User className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <span className="font-medium text-sm">{driver?.name || dz.driverId}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5">
+                                <MapPin className="h-3.5 w-3.5 text-primary" />
+                                <span className="text-sm">{zone?.name || dz.zoneId}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                onClick={() => removeDriverZoneMutation.mutate(dz.id)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Delivery Dialog */}
+      {deliveryDialog && (
+        <DeliveryDialog item={deliveryDialog} sheetId={boardSheetId!}
+          onClose={() => setDeliveryDialog(null)}
+          onSave={data => deliveryMutation.mutate({ itemId: deliveryDialog.id, data })}
+        />
+      )}
+
+      {/* Override Dialog */}
+      {overrideDialog && overrideDialog.outletId && (
+        <ZoneOverrideDialog
+          outletCode={overrideDialog.outletCode}
+          outletId={overrideDialog.outletId!}
+          sheetId={boardSheetId!}
+          zones={zones}
+          onClose={() => setOverrideDialog(null)}
+          onSave={(zoneId, reason) => overrideMutation.mutate({
+            sheetId: boardSheetId, outletId: overrideDialog.outletId, overrideZoneId: zoneId, reason,
+          })}
+        />
+      )}
+    </div>
+  );
+}

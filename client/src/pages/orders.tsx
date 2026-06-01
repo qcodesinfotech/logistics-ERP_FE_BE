@@ -21,11 +21,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/page-header";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { format, parseISO } from "date-fns";
 import {
   Form,
   FormControl,
@@ -37,6 +44,15 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
 import type { Order, Location, Client, Rfq, Zone } from "@shared/schema";
+import { Checkbox } from "@/components/ui/checkbox";
+
+const chargeSchema = z.object({
+  id: z.string().optional(),
+  description: z.string().min(1, "Required"),
+  qty: z.string().transform(v => parseFloat(v) || 1).or(z.number()),
+  unitRate: z.string().transform(v => parseFloat(v) || 0).or(z.number()),
+  isProfit: z.boolean().default(false),
+});
 
 const orderFormSchema = z.object({
   customerId: z.string().min(1, "Customer is required"),
@@ -44,8 +60,22 @@ const orderFormSchema = z.object({
   cargoDetails: z.string().min(1, "Cargo details are required"),
   weight: z.string().transform((v) => parseFloat(v) || 0),
   loadType: z.enum(["FTL", "LTL"]),
-  pickupLocationId: z.string().min(1, "Pickup location is required"),
-  deliveryLocationId: z.string().min(1, "Delivery location is required"),
+  
+  orderDate: z.string().optional(),
+  paymentDueDate: z.string().optional(),
+  truckType: z.string().optional(),
+  driverName: z.string().optional(),
+  driverContact: z.string().optional(),
+  originCountry: z.string().optional(),
+  originCity: z.string().optional(),
+  
+  destinations: z.array(z.object({
+    country: z.string(),
+    city: z.string()
+  })).default([]),
+  
+  charges: z.array(chargeSchema).default([]),
+  
   status: z.enum(["pending", "confirmed", "cancelled", "incomplete", "completed"]),
   zoneId: z.string().optional().nullable(),
 });
@@ -90,23 +120,54 @@ export default function OrdersPage() {
       cargoDetails: "",
       weight: "0",
       loadType: "FTL",
-      pickupLocationId: "",
-      deliveryLocationId: "",
+      orderDate: new Date().toISOString().substring(0, 10),
+      paymentDueDate: new Date(Date.now() + 30*24*60*60*1000).toISOString().substring(0, 10),
+      truckType: "rented",
+      driverName: "",
+      driverContact: "",
+      originCountry: "",
+      originCity: "",
+      destinations: [{ country: "", city: "" }],
+      charges: [],
       status: "pending",
       zoneId: "",
     },
   });
 
+  const { fields: destFields, append: appendDest, remove: removeDest } = useFieldArray({
+    control: form.control,
+    name: "destinations"
+  });
+
+  const { fields: chargeFields, append: appendCharge, remove: removeCharge } = useFieldArray({
+    control: form.control,
+    name: "charges"
+  });
+
+  // Calculate grand total dynamically based on charges array
+  const watchedCharges = form.watch("charges") || [];
+  const grandTotal = watchedCharges.reduce((acc, curr) => acc + (parseFloat((curr as any).qty as string || "0") * parseFloat((curr as any).unitRate as string || "0")), 0);
+
   // Mutations
   const createOrderMutation = useMutation({
     mutationFn: (data: any) => {
+      // Calculate total for each charge before sending
+      const processedCharges = data.charges.map((c: any) => ({
+        ...c,
+        total: (parseFloat(c.qty) * parseFloat(c.unitRate)).toFixed(3)
+      }));
+
       const payload = {
         ...data,
         orderNumber: selectedOrder ? selectedOrder.orderNumber : `ORD-${Date.now()}`,
         weight: parseFloat(data.weight).toFixed(3),
+        grandTotal: grandTotal.toFixed(3),
         documents: uploadedFiles,
         rfqId: data.rfqId || null,
         zoneId: data.zoneId || null,
+        charges: processedCharges,
+        orderDate: data.orderDate ? new Date(data.orderDate).toISOString() : null,
+        paymentDueDate: data.paymentDueDate ? new Date(data.paymentDueDate).toISOString() : null,
       };
       return apiRequest(selectedOrder ? "PUT" : "POST", selectedOrder ? `/api/orders/${selectedOrder.id}` : "/api/orders", payload);
     },
@@ -167,14 +228,7 @@ export default function OrdersPage() {
     }
 
     try {
-      const res = await fetch("/api/upload/contracts", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        throw new Error("Upload failed");
-      }
+      const res = await apiRequest("POST", "/api/upload/contracts", formData);
 
       const data = await res.json();
       setUploadedFiles(prev => [...prev, ...data.documents]);
@@ -190,8 +244,6 @@ export default function OrdersPage() {
     const rfq = rfqsList?.find(r => r.id === rfqId);
     if (rfq) {
       form.setValue("customerId", rfq.customerId);
-      form.setValue("pickupLocationId", rfq.originLocationId || "");
-      form.setValue("deliveryLocationId", rfq.destinationLocationId || "");
       const origin = locationsList?.find(l => l.id === rfq.originLocationId);
       const destination = locationsList?.find(l => l.id === rfq.destinationLocationId);
       form.setValue("cargoDetails", `Transit from ${origin?.name || 'Origin'} to ${destination?.name || 'Destination'} (via ${rfq.transitRoute || 'direct'})`);
@@ -213,8 +265,15 @@ export default function OrdersPage() {
             cargoDetails: "",
             weight: "0",
             loadType: "FTL",
-            pickupLocationId: "",
-            deliveryLocationId: "",
+            orderDate: new Date().toISOString().substring(0, 10),
+            paymentDueDate: new Date(Date.now() + 30*24*60*60*1000).toISOString().substring(0, 10),
+            truckType: "rented",
+            driverName: "",
+            driverContact: "",
+            originCountry: "",
+            originCity: "",
+            destinations: [{ country: "", city: "" }],
+            charges: [],
             status: "pending",
             zoneId: "",
           });
@@ -224,8 +283,8 @@ export default function OrdersPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="md:col-span-3">
+      <div className="grid grid-cols-1 gap-6">
+        <div className="col-span-1">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
             <CardHeader className="pb-3 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -283,9 +342,23 @@ export default function OrdersPage() {
                               {order.weight ? `${parseFloat(String(order.weight)).toFixed(3)} tons` : "0.000 tons"} • {order.loadType}
                             </div>
                             {order.documents && (order.documents as any).length > 0 && (
-                              <div className="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400">
-                                <FileText className="h-3 w-3" /> {(order.documents as any).length} attachments
-                              </div>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <div className="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 cursor-pointer hover:underline">
+                                    <FileText className="h-3 w-3" /> {(order.documents as any).length} attachments
+                                  </div>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {(order.documents as {name: string, url: string}[]).map((doc, idx) => (
+                                    <DropdownMenuItem key={idx} asChild>
+                                      <a href={doc.url} target="_blank" rel="noopener noreferrer" className="cursor-pointer">
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        <span>{doc.name}</span>
+                                      </a>
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             )}
                           </TableCell>
                           <TableCell className="text-xs">
@@ -314,21 +387,43 @@ export default function OrdersPage() {
                             <StatusBadge status={order.status} />
                           </TableCell>
                           <TableCell className="text-right space-x-1">
-                            <Button variant="ghost" size="sm" onClick={() => {
+                            <Button variant="ghost" size="sm" onClick={async () => {
                               setSelectedOrder(order);
                               setUploadedFiles((order.documents as any) || []);
-                              form.reset({
-                                customerId: order.customerId,
-                                rfqId: order.rfqId || "",
-                                cargoDetails: order.cargoDetails,
-                                weight: String(order.weight),
-                                loadType: order.loadType as any,
-                                pickupLocationId: order.pickupLocationId || "",
-                                deliveryLocationId: order.deliveryLocationId || "",
-                                status: order.status as any,
-                                zoneId: order.zoneId || "",
-                              });
-                              setIsOrderDialogOpen(true);
+                              
+                              // Fetch order details with charges
+                              try {
+                                const res = await apiRequest("GET", `/api/orders/${order.id}`);
+                                const data = await res.json();
+                                const orderData = data.order || data;
+                                const chargesData = data.charges || [];
+                                
+                                form.reset({
+                                  customerId: orderData.customerId,
+                                  rfqId: orderData.rfqId || "",
+                                  cargoDetails: orderData.cargoDetails,
+                                  weight: String(orderData.weight),
+                                  loadType: orderData.loadType as any,
+                                  orderDate: orderData.orderDate ? new Date(orderData.orderDate).toISOString().substring(0, 10) : "",
+                                  paymentDueDate: orderData.paymentDueDate ? new Date(orderData.paymentDueDate).toISOString().substring(0, 10) : "",
+                                  truckType: orderData.truckType || "rented",
+                                  driverName: orderData.driverName || "",
+                                  driverContact: orderData.driverContact || "",
+                                  originCountry: orderData.originCountry || "",
+                                  originCity: orderData.originCity || "",
+                                  destinations: Array.isArray(orderData.destinations) && orderData.destinations.length > 0 ? orderData.destinations : [{ country: "", city: "" }],
+                                  charges: chargesData.map((c: any) => ({
+                                    ...c,
+                                    qty: String(c.qty),
+                                    unitRate: String(c.unitRate)
+                                  })),
+                                  status: orderData.status as any,
+                                  zoneId: orderData.zoneId || "",
+                                });
+                                setIsOrderDialogOpen(true);
+                              } catch (e) {
+                                toast({ title: "Failed to load order details", variant: "destructive" });
+                              }
                             }}>
                               Edit
                             </Button>
@@ -354,29 +449,6 @@ export default function OrdersPage() {
             </CardContent>
           </Card>
         </div>
-
-        <div>
-          <Card className="shadow-md bg-accent/10 border-accent/20 sticky top-6">
-            <CardHeader>
-              <CardTitle className="text-md flex items-center gap-2">
-                <Layers className="h-4 w-4 text-primary" /> Partial Deliveries
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted-foreground space-y-3">
-              <p>
-                Orders can possess the status of **Incomplete** or **Completed**.
-              </p>
-              <p className="font-semibold text-foreground">ERP Status Lifecycle:</p>
-              <ul className="list-disc list-inside space-y-1.5 pl-1">
-                <li>**Incomplete:** Occurs when one or more deliveries of a trip are flagged as `partial` or `failed`.</li>
-                <li>**Completed:** Achieved only once the driver registers successful Proof-of-Delivery (POD) for every single item linked to the booking.</li>
-              </ul>
-              <p>
-                Use the **Auto-Assign** button to analyze customer geocodes and automatically classify orders under active operational regions.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
       </div>
 
       {/* Order Booking Dialog */}
@@ -397,15 +469,15 @@ export default function OrdersPage() {
                   render={({ field }) => (
                     <FormItem className="col-span-2">
                       <FormLabel>Reference RFQ (Optional)</FormLabel>
-                      <Select onValueChange={(val) => { field.onChange(val); handleRfqSelect(val); }} value={field.value || ""}>
+                      <Select onValueChange={(val) => { const v = val === "none" ? "" : val; field.onChange(v); handleRfqSelect(v); }} value={field.value || "none"}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select RFQ to pre-fill" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">No RFQ Reference</SelectItem>
-                          {rfqsList?.filter(r => r.status === "approved" || r.status === "converted").map(r => (
+                          <SelectItem value="none">No RFQ Reference</SelectItem>
+                          {rfqsList?.filter(r => r.status !== "rejected").map(r => (
                             <SelectItem key={r.id} value={r.id}>{r.rfqNumber} ({formatCurrency(r.totalCharges)})</SelectItem>
                           ))}
                         </SelectContent>
@@ -437,6 +509,36 @@ export default function OrdersPage() {
                     </FormItem>
                   )}
                 />
+
+                
+                <div className="grid grid-cols-2 gap-4 col-span-2">
+                  <FormField
+                    control={form.control}
+                    name="orderDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Order Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="paymentDueDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Payment Due Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
                 <FormField
                   control={form.control}
@@ -488,51 +590,223 @@ export default function OrdersPage() {
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="pickupLocationId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Pickup Location *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select pickup" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {locationsList?.map(l => (
-                            <SelectItem key={l.id} value={l.id}>{l.name} ({l.code})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="col-span-2 space-y-4 border p-4 rounded-md">
+                  <h3 className="font-semibold text-sm">Truck & Driver Info</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="truckType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Truck Type</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="own">Own Truck</SelectItem>
+                              <SelectItem value="rented">Rented Truck</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="driverName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Driver Name</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Optional" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="driverContact"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Driver Contact</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Optional" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
 
-                <FormField
-                  control={form.control}
-                  name="deliveryLocationId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delivery Location *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select delivery" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {locationsList?.map(l => (
-                            <SelectItem key={l.id} value={l.id}>{l.name} ({l.code})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="col-span-2 space-y-4 border p-4 rounded-md">
+                  <h3 className="font-semibold text-sm">Origin</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="originCountry"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Origin Country</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. Bahrain" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="originCity"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Origin City</FormLabel>
+                          <FormControl>
+                            <Input placeholder="e.g. Manama" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <div className="col-span-2 space-y-4 border p-4 rounded-md">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm">Destinations</h3>
+                    <Button type="button" variant="outline" size="sm" onClick={() => appendDest({ country: "", city: "" })}>
+                      <Plus className="h-4 w-4 mr-1" /> Add Destination
+                    </Button>
+                  </div>
+                  {destFields.map((field, index) => (
+                    <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-5">
+                        <FormField
+                          control={form.control}
+                          name={`destinations.${index}.country`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Destination Country</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Country" {...field} />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <div className="col-span-6">
+                        <FormField
+                          control={form.control}
+                          name={`destinations.${index}.city`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Destination City</FormLabel>
+                              <FormControl>
+                                <Input placeholder="City" {...field} />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      <div className="col-span-1 pb-2 text-right">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeDest(index)}>
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="col-span-2 space-y-4 border p-4 rounded-md">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm">Charges & Items</h3>
+                    <Button type="button" variant="outline" size="sm" onClick={() => appendCharge({ description: "", qty: 1, unitRate: 0, isProfit: false })}>
+                      <Plus className="h-4 w-4 mr-1" /> Add Charge
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {chargeFields.map((field, index) => (
+                      <div key={field.id} className="grid grid-cols-12 gap-2 items-end border-b pb-2">
+                        <div className="col-span-4">
+                          <FormField
+                            control={form.control}
+                            name={`charges.${index}.description`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">Description</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="e.g. Toll Charges" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <FormField
+                            control={form.control}
+                            name={`charges.${index}.qty`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">Qty</FormLabel>
+                                <FormControl>
+                                  <Input type="number" step="0.01" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <FormField
+                            control={form.control}
+                            name={`charges.${index}.unitRate`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel className="text-xs">Unit Rate</FormLabel>
+                                <FormControl>
+                                  <Input type="number" step="0.01" {...field} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <FormItem>
+                            <FormLabel className="text-xs">Total</FormLabel>
+                            <div className="h-10 flex items-center px-3 border rounded-md bg-muted/30">
+                              {(parseFloat((watchedCharges[index] as any)?.qty as string || "0") * parseFloat((watchedCharges[index] as any)?.unitRate as string || "0")).toFixed(3)}
+                            </div>
+                          </FormItem>
+                        </div>
+                        <div className="col-span-1 pb-3 text-center flex flex-col items-center">
+                          <FormLabel className="text-xs mb-2">Profit?</FormLabel>
+                          <FormField
+                            control={form.control}
+                            name={`charges.${index}.isProfit`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormControl>
+                                  <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                        <div className="col-span-1 pb-2 text-right">
+                          <Button type="button" variant="ghost" size="icon" onClick={() => removeCharge(index)}>
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex justify-end pt-2 pr-12">
+                      <div className="font-bold">Grand Total: {grandTotal.toFixed(3)}</div>
+                    </div>
+                  </div>
+                </div>
 
                 <FormField
                   control={form.control}
@@ -540,14 +814,14 @@ export default function OrdersPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Operational Zone</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                      <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Manual zone select" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">No Zone Assigned</SelectItem>
+                          <SelectItem value="none">No Zone Assigned</SelectItem>
                           {zonesList?.map(z => (
                             <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>
                           ))}
@@ -635,5 +909,5 @@ export default function OrdersPage() {
 
 function formatCurrency(val: any) {
   const num = parseFloat(String(val)) || 0;
-  return `${num.toFixed(3)} RO`;
+  return `${num.toFixed(3)} BD`;
 }

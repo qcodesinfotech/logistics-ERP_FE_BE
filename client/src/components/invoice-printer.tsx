@@ -236,7 +236,7 @@ interface InvoicePrinterProps {
 
 const formatCurrency = (value: string | number | null | undefined): string => {
   const num = parseFloat(String(value || 0));
-  return `${num.toFixed(3)} RO`;
+  return `${num.toFixed(3)} BD`;
 };
 
 // Helper to get full URL for images

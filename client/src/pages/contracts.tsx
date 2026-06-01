@@ -238,8 +238,8 @@ export default function ContractsPage() {
                   <TableHead>Type</TableHead>
                   <TableHead className="text-right">Vehicles</TableHead>
                   <TableHead className="text-right">Base / Monthly Rate</TableHead>
-                  <TableHead className="text-right">OT Rate (RO/Hr)</TableHead>
-                  <TableHead className="text-right">Holiday (RO/Day)</TableHead>
+                  <TableHead className="text-right">OT Rate (BD/Hr)</TableHead>
+                  <TableHead className="text-right">Holiday (BD/Day)</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Docs</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -328,7 +328,7 @@ export default function ContractsPage() {
           <DialogHeader>
             <DialogTitle>Configure Contract Agreement</DialogTitle>
             <DialogDescription>
-              Set customer service level parameters. All currency amounts are in Omani Rial (RO).
+              Set customer service level parameters. All currency amounts are in Bahraini Dinar (BD).
             </DialogDescription>
           </DialogHeader>
 
@@ -414,7 +414,7 @@ export default function ContractsPage() {
                   name="monthlyRate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Rate / Truck (RO/Mo)</FormLabel>
+                      <FormLabel>Rate / Truck (BD/Mo)</FormLabel>
                       <FormControl>
                         <Input placeholder="0.000" {...field} disabled={watchType !== "lease"} />
                       </FormControl>
@@ -437,7 +437,7 @@ export default function ContractsPage() {
                   name="otCharges"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Overtime Rate (RO / Hour)</FormLabel>
+                      <FormLabel>Overtime Rate (BD / Hour)</FormLabel>
                       <FormControl>
                         <Input placeholder="0.000" {...field} />
                       </FormControl>
@@ -451,7 +451,7 @@ export default function ContractsPage() {
                   name="holidayCharges"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Holiday Rate (RO / Day)</FormLabel>
+                      <FormLabel>Holiday Rate (BD / Day)</FormLabel>
                       <FormControl>
                         <Input placeholder="0.000" {...field} />
                       </FormControl>

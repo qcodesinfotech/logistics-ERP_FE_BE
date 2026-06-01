@@ -1,16 +1,16 @@
 export function formatCurrency(amount: number | string | null | undefined): string {
   if (amount === null || amount === undefined) {
-    return "0.000 RO";
+    return "0.000 BD";
   }
   
   const numAmount = typeof amount === "string" ? parseFloat(amount) : amount;
   
   if (isNaN(numAmount)) {
-    return "0.000 RO";
+    return "0.000 BD";
   }
   
   const formatted = numAmount.toFixed(3);
-  return `${formatted} RO`;
+  return `${formatted} BD`;
 }
 
 export function parseCurrency(value: string): number {

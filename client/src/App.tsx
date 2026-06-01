@@ -35,21 +35,22 @@ import Tasks from "@/pages/tasks";
 import Accounting from "@/pages/accounting";
 import LeaveManagement from "@/pages/leave-management";
 import Reports from "@/pages/reports";
-import CRM from "@/pages/crm";
 import UsersPage from "@/pages/users";
 import ComplianceDocuments from "@/pages/compliance-documents";
 import ComplianceReminders from "@/pages/compliance-reminders";
 import RBACPage from "@/pages/rbac";
 
 // Logistics ERP Modules
+import ClientsPage from "@/pages/clients";
 import ZonesPage from "@/pages/zones";
 import ContractsPage from "@/pages/contracts";
 import FleetPage from "@/pages/fleet";
 import RfqPage from "@/pages/rfq";
 import OrdersPage from "@/pages/orders";
+import InvoicesPage from "@/pages/invoices";
 import DispatchPage from "@/pages/dispatch";
+import DailyDispatchPage from "@/pages/daily-dispatch";
 import DriverHubPage from "@/pages/driver-hub";
-import DriverManagementPage from "@/pages/driver-management";
 import FinanceExpandedPage from "@/pages/finance-expanded";
 import SettingsPage from "@/pages/settings";
 
@@ -67,21 +68,22 @@ function PrivateRouter() {
       <Route path="/accounting" component={Accounting} />
       <Route path="/leave-management" component={LeaveManagement} />
       <Route path="/reports" component={Reports} />
-      <Route path="/crm" component={CRM} />
       <Route path="/users" component={UsersPage} />
       <Route path="/compliance/documents" component={ComplianceDocuments} />
       <Route path="/compliance/reminders" component={ComplianceReminders} />
       <Route path="/rbac" component={RBACPage} />
 
       {/* Logistics ERP Routes */}
+      <Route path="/logistics/clients" component={ClientsPage} />
       <Route path="/logistics/zones" component={ZonesPage} />
       <Route path="/logistics/contracts" component={ContractsPage} />
       <Route path="/logistics/fleet" component={FleetPage} />
       <Route path="/logistics/rfq" component={RfqPage} />
       <Route path="/logistics/orders" component={OrdersPage} />
+      <Route path="/logistics/invoices" component={InvoicesPage} />
       <Route path="/logistics/dispatch" component={DispatchPage} />
+      <Route path="/logistics/daily-dispatch" component={DailyDispatchPage} />
       <Route path="/logistics/driver-hub" component={DriverHubPage} />
-      <Route path="/logistics/driver-management" component={DriverManagementPage} />
       <Route path="/logistics/finance" component={FinanceExpandedPage} />
       <Route path="/settings" component={SettingsPage} />
 

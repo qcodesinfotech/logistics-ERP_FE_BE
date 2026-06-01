@@ -39,17 +39,13 @@ export default defineConfig({
     port: 5003,
     allowedHosts: true,
     host: "0.0.0.0",
-    hmr: {
-      port: 5003,
-      protocol: "ws",
-    },
     proxy: {
       "/api": {
-        target: "http://localhost:5001",
+        target: "http://localhost:5000",
         changeOrigin: true,
       },
       "/uploads": {
-        target: "http://localhost:5001",
+        target: "http://localhost:5000",
         changeOrigin: true,
       },
     },

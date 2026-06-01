@@ -60,12 +60,12 @@ export default function SettingsPage() {
             <CardContent className="pt-6 grid gap-6 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Base Currency</Label>
-                <Select defaultValue="OMR">
+                <Select defaultValue="BHD">
                   <SelectTrigger>
                     <SelectValue placeholder="Select currency" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="OMR">OMR - Omani Rial</SelectItem>
+                    <SelectItem value="BHD">BHD - Bahraini Dinar</SelectItem>
                     <SelectItem value="AED">AED - UAE Dirham</SelectItem>
                     <SelectItem value="SAR">SAR - Saudi Riyal</SelectItem>
                     <SelectItem value="USD">USD - US Dollar</SelectItem>

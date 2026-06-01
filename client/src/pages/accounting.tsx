@@ -409,7 +409,7 @@ export default function Accounting() {
                         <TableCell>{entry.description || "-"}</TableCell>
                         <TableCell>{entry.reference || "-"}</TableCell>
                         <TableCell className="text-right font-mono">
-                          {entry.totalAmount ? parseFloat(entry.totalAmount).toFixed(3) : "0.000"} RO
+                          {entry.totalAmount ? parseFloat(entry.totalAmount).toFixed(3) : "0.000"} BD
                         </TableCell>
                         <TableCell>
                           <Badge variant={entry.status === "posted" ? "default" : "secondary"}>

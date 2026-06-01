@@ -17,7 +17,7 @@ import type { CrmLead, CrmDeal, CrmActivity, CrmTask, CrmReminder, CrmLeadNote, 
 
 const formatCurrency = (value: string | number | null | undefined) => {
   const num = parseFloat(String(value || "0"));
-  return `${num.toFixed(3)} RO`;
+  return `${num.toFixed(3)} BD`;
 };
 
 const leadStatusColors: Record<string, string> = {
@@ -807,7 +807,7 @@ export default function CRM() {
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="grid gap-2">
-                      <Label>Estimated Value (RO)</Label>
+                      <Label>Estimated Value (BD)</Label>
                       <Input
                         type="number"
                         step="0.001"

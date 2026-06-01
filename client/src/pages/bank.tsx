@@ -476,7 +476,7 @@ export default function Bank() {
                 name="openingBalance"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Opening Balance (RO)</FormLabel>
+                    <FormLabel>Opening Balance (BD)</FormLabel>
                     <FormControl>
                       <Input {...field} type="number" step="0.001" data-testid="input-opening-balance" />
                     </FormControl>
@@ -562,7 +562,7 @@ export default function Bank() {
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Amount (RO) *</FormLabel>
+                    <FormLabel>Amount (BD) *</FormLabel>
                     <FormControl>
                       <Input {...field} type="number" step="0.001" data-testid="input-amount" />
                     </FormControl>

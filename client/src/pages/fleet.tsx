@@ -406,7 +406,7 @@ export default function FleetPage() {
                         <TableCell className="text-right font-mono">{log.liters} L</TableCell>
                         <TableCell className="text-right"><CurrencyDisplay amount={log.fuelExpense} /></TableCell>
                         <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                          {(parseFloat(log.fuelExpense || "0") / parseFloat(log.liters || "1")).toFixed(3)} RO/L
+                          {(parseFloat(log.fuelExpense || "0") / parseFloat(log.liters || "1")).toFixed(3)} BD/L
                         </TableCell>
                       </TableRow>
                     ))}
@@ -644,7 +644,7 @@ export default function FleetPage() {
                   name="cost"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Total Cost (RO) *</FormLabel>
+                      <FormLabel>Total Cost (BD) *</FormLabel>
                       <FormControl>
                         <Input placeholder="0.000" {...field} />
                       </FormControl>
@@ -761,7 +761,7 @@ export default function FleetPage() {
                 name="fuelExpense"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Total Fuel Bill (RO) *</FormLabel>
+                    <FormLabel>Total Fuel Bill (BD) *</FormLabel>
                     <FormControl>
                       <Input placeholder="0.000" {...field} />
                     </FormControl>

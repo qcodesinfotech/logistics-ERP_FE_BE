@@ -339,7 +339,7 @@ export default function ComplianceRemindersPage() {
       header: "Amount",
       render: (reminder: ComplianceReminder) => (
         <span className="font-mono">
-          {reminder.amount ? `${parseFloat(reminder.amount).toFixed(3)} RO` : "-"}
+          {reminder.amount ? `${parseFloat(reminder.amount).toFixed(3)} BD` : "-"}
         </span>
       ),
     },
@@ -613,7 +613,7 @@ export default function ComplianceRemindersPage() {
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Amount (RO)</FormLabel>
+                    <FormLabel>Amount (BD)</FormLabel>
                     <FormControl>
                       <Input {...field} placeholder="0.000" />
                     </FormControl>
@@ -722,7 +722,7 @@ export default function ComplianceRemindersPage() {
               <div>
                 <p className="text-sm text-muted-foreground font-medium uppercase">Total Amount</p>
                 <p className="text-2xl font-bold font-mono">
-                  {selectedReminder?.amount ? `${parseFloat(selectedReminder.amount).toFixed(3)} RO` : "0.000 RO"}
+                  {selectedReminder?.amount ? `${parseFloat(selectedReminder.amount).toFixed(3)} BD` : "0.000 BD"}
                 </p>
               </div>
               <div className="h-12 w-12 bg-primary/10 rounded-full flex items-center justify-center">
@@ -739,7 +739,7 @@ export default function ComplianceRemindersPage() {
                 <SelectContent>
                   {bankAccounts.map((account: BankAccount) => (
                     <SelectItem key={account.id} value={account.id}>
-                      {account.bankName} - {account.accountNumber} ({parseFloat(account.currentBalance || "0").toFixed(3)} RO)
+                      {account.bankName} - {account.accountNumber} ({parseFloat(account.currentBalance || "0").toFixed(3)} BD)
                     </SelectItem>
                   ))}
                 </SelectContent>

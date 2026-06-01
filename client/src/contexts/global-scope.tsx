@@ -164,6 +164,15 @@ export function GlobalScopeProvider({ children }: { children: ReactNode }) {
   const setCurrentBranchId = (id: string | null) => {
     if (!canChangeScope) return;
     setCurrentBranchIdInternal(id);
+    
+    // Auto-set the underlying shopId based on the selected branch
+    if (id) {
+      const branch = branches.find(b => b.id === id);
+      if (branch && branch.shopId) {
+        setCurrentShopIdInternal(branch.shopId);
+      }
+    }
+    
     // STRICT HIERARCHY: When branch changes, clear warehouse
     // It will be auto-selected by the useEffect hook if valid options exist
     setCurrentWarehouseIdInternal(null);
@@ -202,15 +211,14 @@ export function GlobalScopeProvider({ children }: { children: ReactNode }) {
     ? shops.filter((s) => s.companyId === currentCompanyId)
     : [];
 
-  // STRICT HIERARCHY: Branches must filter by Shop (which is already filtered by Company)
-  const filteredBranches = currentShopId
-    ? branches.filter((b) => b.shopId === currentShopId)
+  // ALL branches for the current company (temporary: since branches don't have companyId, show all if company is selected)
+  const filteredBranches = currentCompanyId
+    ? branches
     : [];
 
-  // STRICT HIERARCHY: Warehouses must filter by BOTH shop AND branch
-  // Company → Shop → Branch → Warehouse
-  const filteredWarehouses = currentShopId && currentBranchId
-    ? warehouses.filter((w) => w.shopId === currentShopId && w.branchId === currentBranchId)
+  // STRICT HIERARCHY: Warehouses must filter by branch
+  const filteredWarehouses = currentBranchId
+    ? warehouses.filter((w) => w.branchId === currentBranchId)
     : [];
 
   // Admin users: update currentShop/currentBranch/currentWarehouse from fetched lists based on selected IDs
@@ -306,20 +314,24 @@ export function GlobalScopeProvider({ children }: { children: ReactNode }) {
   }, [filteredShops, currentShopId, currentCompanyId, canChangeScope, shopInitialized]);
 
   useEffect(() => {
-    if (canChangeScope && currentShopId && filteredBranches.length > 0 && !branchInitialized) {
+    if (canChangeScope && currentCompanyId && filteredBranches.length > 0 && !branchInitialized) {
       const currentValid = filteredBranches.some((b) => b.id === currentBranchId);
       if (!currentValid) {
         setCurrentBranchIdInternal(filteredBranches[0].id);
+        // Also set the underlying shop ID
+        if (filteredBranches[0].shopId) {
+          setCurrentShopIdInternal(filteredBranches[0].shopId);
+        }
       }
       setBranchInitialized(true);
     } else if (canChangeScope && filteredBranches.length === 0 && branchInitialized) {
       setCurrentBranchIdInternal(null);
     }
-  }, [currentShopId, filteredBranches, currentBranchId, canChangeScope, branchInitialized]);
+  }, [currentCompanyId, filteredBranches, currentBranchId, canChangeScope, branchInitialized]);
 
   useEffect(() => {
-    // STRICT HIERARCHY: Warehouse selection depends on both shop AND branch
-    if (canChangeScope && currentShopId && currentBranchId && filteredWarehouses.length > 0 && !warehouseInitialized) {
+    // STRICT HIERARCHY: Warehouse selection depends on branch
+    if (canChangeScope && currentBranchId && filteredWarehouses.length > 0 && !warehouseInitialized) {
       const currentValid = filteredWarehouses.some((w) => w.id === currentWarehouseId);
       if (!currentValid) {
         setCurrentWarehouseIdInternal(filteredWarehouses[0].id);
@@ -328,7 +340,7 @@ export function GlobalScopeProvider({ children }: { children: ReactNode }) {
     } else if (canChangeScope && filteredWarehouses.length === 0 && warehouseInitialized) {
       setCurrentWarehouseIdInternal(null);
     }
-  }, [currentShopId, currentBranchId, filteredWarehouses, currentWarehouseId, canChangeScope, warehouseInitialized]);
+  }, [currentBranchId, filteredWarehouses, currentWarehouseId, canChangeScope, warehouseInitialized]);
 
   const isLoading = myScopeLoading || (canChangeScope && (companiesLoading || shopsLoading || branchesLoading || warehousesLoading));
 

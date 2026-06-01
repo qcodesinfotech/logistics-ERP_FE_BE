@@ -421,7 +421,14 @@ export default function Employees() {
   };
 
   const onSubmit = (data: EmployeeFormData) => {
-    const payload = { ...data, photoUrl: employeePhotoUrl || undefined };
+    const payload = { 
+      ...data, 
+      photoUrl: employeePhotoUrl || undefined,
+      joiningDate: data.joiningDate || null,
+      branchId: data.branchId || null,
+      shopId: data.shopId || null,
+      email: data.email || null,
+    };
     if (editingEmployee) {
       updateMutation.mutate({ ...payload, id: editingEmployee.id });
     } else {
@@ -796,27 +803,47 @@ export default function Employees() {
                 <FormField control={form.control} name="position" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Position</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger><SelectValue placeholder="Select position" /></SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Driver">Driver</SelectItem>
+                        <SelectItem value="Staff">Staff</SelectItem>
+                        <SelectItem value="Manager">Manager</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="department" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Department</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="Sales">Sales</SelectItem>
+                        <SelectItem value="Operational">Operational</SelectItem>
+                        <SelectItem value="Management">Management</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )} />
-                <FormField control={form.control} name="shopId" render={({ field }) => (
+                <FormField control={form.control} name="branchId" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Shop</FormLabel>
+                    <FormLabel>Branch</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select shop" /></SelectTrigger>
+                        <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {shops?.map((shop) => (
-                          <SelectItem key={shop.id} value={shop.id}>{shop.name}</SelectItem>
+                        {branches?.map((branch) => (
+                          <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -832,14 +859,14 @@ export default function Employees() {
                 )} />
                 <FormField control={form.control} name="basicSalary" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Basic Salary (RO)</FormLabel>
+                    <FormLabel>Basic Salary (BD)</FormLabel>
                     <FormControl><Input {...field} type="number" step="0.001" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="allowances" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Allowances (RO)</FormLabel>
+                    <FormLabel>Allowances (BD)</FormLabel>
                     <FormControl><Input {...field} type="number" step="0.001" /></FormControl>
                     <FormMessage />
                   </FormItem>
@@ -1047,7 +1074,7 @@ export default function Employees() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium">Amount (RO)</label>
+              <label className="text-sm font-medium">Amount (BD)</label>
               <Input type="number" step="0.001" value={advanceForm.amount} onChange={(e) => setAdvanceForm({ ...advanceForm, amount: e.target.value })} placeholder="Enter amount" />
             </div>
             <div>
@@ -1099,7 +1126,7 @@ export default function Employees() {
               </div>
             )}
             <div>
-              <label className="text-sm font-medium">Repayment Amount (RO)</label>
+              <label className="text-sm font-medium">Repayment Amount (BD)</label>
               <Input 
                 type="number" 
                 step="0.001" 

@@ -64,34 +64,10 @@ export function HeaderScopeSelector() {
         )}
       </div>
 
-      {/* Shop Selector - Only show if company is selected */}
-      {currentCompanyId && (
-        <div className="flex items-center gap-1.5">
-          <Store className="h-4 w-4 text-muted-foreground" />
-          {canChangeScope && filteredShops.length > 0 ? (
-            <Select value={currentShopId || ""} onValueChange={setCurrentShopId}>
-              <SelectTrigger className="w-[140px] h-8 text-xs" data-testid="select-header-shop">
-                <SelectValue placeholder="Shop" />
-              </SelectTrigger>
-              <SelectContent>
-                {filteredShops.map((shop) => (
-                  <SelectItem key={shop.id} value={shop.id}>
-                    {shop.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="flex items-center gap-1 px-2 py-1 bg-muted rounded text-xs">
-              <Lock className="h-3 w-3" />
-              <span>{currentShop?.name || "No shop"}</span>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* Branch Selector - Only show if shop is selected */}
-      {currentShopId && (filteredBranches.length > 0 || currentBranch) && (
+
+      {/* Branch Selector - Only show if company is selected */}
+      {currentCompanyId && (filteredBranches.length > 0 || currentBranch) && (
         <div className="flex items-center gap-1.5">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           {canChangeScope && filteredBranches.length > 0 ? (

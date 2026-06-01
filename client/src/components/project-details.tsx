@@ -973,12 +973,12 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                   </div>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-gray-50">
-                  <span className="text-sm font-semibold text-gray-800">Total Cost (RO):</span>
-                  <span className="text-sm font-bold text-blue-600">{totalCost.toFixed(2)} RO</span>
+                  <span className="text-sm font-semibold text-gray-800">Total Cost (BD):</span>
+                  <span className="text-sm font-bold text-blue-600">{totalCost.toFixed(2)} BD</span>
                 </div>
                 <div className="flex justify-between items-center py-2">
                   <span className="text-sm font-semibold text-gray-800">Spent:</span>
-                  <span className="text-sm font-bold text-orange-500">{spentCost.toFixed(2)} RO</span>
+                  <span className="text-sm font-bold text-orange-500">{spentCost.toFixed(2)} BD</span>
                 </div>
                 {/* <Button className="w-full mt-4 bg-blue-500 hover:bg-blue-600"><Edit className="mr-2 h-4 w-4" /> Edit Project</Button> */}
               </CardContent>
@@ -1248,7 +1248,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                       </Badge>
                     </td>
                     <td className="px-4 py-3 font-medium text-gray-800">{exp.date}</td>
-                    <td className="px-4 py-3 font-bold text-gray-900 text-right">{exp.amount.toFixed(2)} RO</td>
+                    <td className="px-4 py-3 font-bold text-gray-900 text-right">{exp.amount.toFixed(2)} BD</td>
                     <td className="px-4 py-3 text-center">
                       {exp.attachmentUrl ? (
                         <a href={exp.attachmentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-blue-500 hover:text-blue-700">
@@ -1282,7 +1282,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
               <tfoot className="bg-white">
                 <tr className="border-t-2 border-gray-100">
                   <td colSpan={4} className="px-4 py-3 text-right font-bold text-gray-900">Total Expenses:</td>
-                  <td className="px-4 py-3 font-bold text-gray-900 text-right tabular-nums text-lg">{totalExpensesAmount.toFixed(2)} RO</td>
+                  <td className="px-4 py-3 font-bold text-gray-900 text-right tabular-nums text-lg">{totalExpensesAmount.toFixed(2)} BD</td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -1322,7 +1322,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                     <td className="px-4 py-3 text-gray-600">{inc.fromDate ? format(new Date(inc.fromDate), "yyyy-MM-dd") : "-"}</td>
                     <td className="px-4 py-3 text-gray-600">{inc.toDate ? format(new Date(inc.toDate), "yyyy-MM-dd") : "-"}</td>
                     <td className="px-4 py-3 text-gray-600 truncate max-w-[200px]" title={inc.description}>{inc.description || "-"}</td>
-                    <td className="px-4 py-3 font-bold text-green-600 text-right">{Number(inc.amount || 0).toFixed(2)} RO</td>
+                    <td className="px-4 py-3 font-bold text-green-600 text-right">{Number(inc.amount || 0).toFixed(2)} BD</td>
                     <td className="px-4 py-3 text-center">
                       {inc.attachmentUrl ? (
                         <a href={inc.attachmentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-blue-500 hover:text-blue-700">
@@ -1352,7 +1352,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
               <tfoot className="bg-white">
                 <tr className="border-t-2 border-gray-100">
                   <td colSpan={6} className="px-4 py-3 text-right font-bold text-gray-900">Total Amounts:</td>
-                  <td className="px-4 py-3 font-bold text-green-600 text-right tabular-nums text-lg">{totalCRAmount.toFixed(2)} RO</td>
+                  <td className="px-4 py-3 font-bold text-green-600 text-right tabular-nums text-lg">{totalCRAmount.toFixed(2)} BD</td>
                 </tr>
               </tfoot>
             </table>
@@ -1409,9 +1409,9 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                 <Button variant="outline" className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100 hover:text-green-800"><CheckCircle className="mr-2 h-4 w-4" /> Approve</Button>
                 <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => window.print()}><Printer className="mr-2 h-4 w-4" /> Print</Button>
                 <Button variant="outline" onClick={() => {
-                  let csv = "Employee Name,Hours,Hourly Rate,Total Amount (RO)\\n";
+                  let csv = "Employee Name,Hours,Hourly Rate,Total Amount (BD)\\n";
                   employeeSummary.forEach(emp => { csv += `"${emp.name}",${emp.hours.toFixed(2)},${emp.rate.toFixed(2)},${emp.amount.toFixed(2)}\\n`; });
-                  csv += "\\nProject Name,Employee Name,Task,Billable,Date,From Time,To Time,Estimated Hours,Total Hours,Total Amount (RO)\\n";
+                  csv += "\\nProject Name,Employee Name,Task,Billable,Date,From Time,To Time,Estimated Hours,Total Hours,Total Amount (BD)\\n";
                   filteredReportTimesheets.forEach(ts => {
                     const estHours = projectTasks.find(t => t.id === ts.taskId)?.estimatedHours || 0;
                     const amount = ts.billable ? (Number(ts.hours || 0) * hourlyRate).toFixed(2) : "0.00";
@@ -1438,7 +1438,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
               <Card className="shadow-sm border-gray-100 bg-white print:shadow-none print:border-gray-200">
                 <CardContent className="p-6 flex flex-col justify-center items-center text-center">
                   <h3 className="text-gray-500 font-medium mb-2">Total Cost</h3>
-                  <p className="text-4xl font-bold text-red-500">{reportTotalCost.toFixed(2)} <span className="text-lg">RO</span></p>
+                  <p className="text-4xl font-bold text-red-500">{reportTotalCost.toFixed(2)} <span className="text-lg">BD</span></p>
                 </CardContent>
               </Card>
               <Card className="shadow-sm border-gray-100 bg-white print:shadow-none print:border-gray-200">
@@ -1460,7 +1460,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                     <th className="px-4 py-3">Employee Name</th>
                     <th className="px-4 py-3 text-right">Hours</th>
                     <th className="px-4 py-3 text-right">Hourly Rate</th>
-                    <th className="px-4 py-3 text-right">Total Amount (RO)</th>
+                    <th className="px-4 py-3 text-right">Total Amount (BD)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -1469,8 +1469,8 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                       <td className="px-4 py-3 font-medium text-gray-900">{idx + 1}</td>
                       <td className="px-4 py-3 text-blue-600 font-medium">{emp.name}</td>
                       <td className="px-4 py-3 text-right font-medium">{emp.hours.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right font-medium">{emp.rate.toFixed(2)} RO</td>
-                      <td className="px-4 py-3 font-bold text-gray-900 text-right">{emp.amount.toFixed(2)} RO</td>
+                      <td className="px-4 py-3 text-right font-medium">{emp.rate.toFixed(2)} BD</td>
+                      <td className="px-4 py-3 font-bold text-gray-900 text-right">{emp.amount.toFixed(2)} BD</td>
                     </tr>
                   )) : (
                     <tr>
@@ -1496,7 +1496,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                       <th className="px-4 py-3">Description</th>
                       <th className="px-4 py-3">Category</th>
                       <th className="px-4 py-3">Date</th>
-                      <th className="px-4 py-3 text-right">Amount (RO)</th>
+                      <th className="px-4 py-3 text-right">Amount (BD)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
@@ -1518,7 +1518,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                     <tfoot className="bg-gray-50 font-bold">
                       <tr>
                         <td colSpan={4} className="px-4 py-3 text-right text-gray-700">Total Expenses</td>
-                        <td className="px-4 py-3 text-right text-red-600">{projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0).toFixed(3)} RO</td>
+                        <td className="px-4 py-3 text-right text-red-600">{projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0).toFixed(3)} BD</td>
                       </tr>
                     </tfoot>
                   )}
@@ -1542,7 +1542,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                       <th className="px-4 py-3">Invoice No</th>
                       <th className="px-4 py-3">Date</th>
                       <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 text-right">Amount (RO)</th>
+                      <th className="px-4 py-3 text-right">Amount (BD)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
@@ -1573,7 +1573,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                     <tfoot className="bg-gray-50 font-bold">
                       <tr>
                         <td colSpan={5} className="px-4 py-3 text-right text-gray-700">Total Project Income</td>
-                        <td className="px-4 py-3 text-right text-green-600">{totalCRAmount.toFixed(3)} RO</td>
+                        <td className="px-4 py-3 text-right text-green-600">{totalCRAmount.toFixed(3)} BD</td>
                       </tr>
                     </tfoot>
                   )}
@@ -1586,16 +1586,16 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="flex flex-col">
                     <span className="text-gray-500 text-sm font-medium mb-1">Total Project Revenue</span>
-                    <span className="text-2xl font-bold text-green-600">{totalCRAmount.toFixed(3)} RO</span>
+                    <span className="text-2xl font-bold text-green-600">{totalCRAmount.toFixed(3)} BD</span>
                   </div>
                   <div className="flex flex-col">
                     <span className="text-gray-500 text-sm font-medium mb-1">Total Project Costs (Exp + Labor)</span>
-                    <span className="text-2xl font-bold text-red-600">{(projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) + reportTotalCost).toFixed(3)} RO</span>
+                    <span className="text-2xl font-bold text-red-600">{(projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) + reportTotalCost).toFixed(3)} BD</span>
                   </div>
                   <div className="flex flex-col border-l pl-6 border-gray-200">
                     <span className="text-gray-500 text-sm font-medium mb-1">Project Net Margin</span>
                     <span className={`text-2xl font-bold ${totalCRAmount - (projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) + reportTotalCost) >= 0 ? "text-blue-600" : "text-red-700"}`}>
-                      {(totalCRAmount - (projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) + reportTotalCost)).toFixed(3)} RO
+                      {(totalCRAmount - (projectExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0) + reportTotalCost)).toFixed(3)} BD
                     </span>
                   </div>
                </div>
@@ -1653,7 +1653,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                       <td className="px-4 py-4 font-medium text-gray-900">{item.title}</td>
                       <td className="px-4 py-4 text-gray-600">{format(new Date(item.paymentDate || new Date()), "dd MMM yyyy")}</td>
                       <td className="px-4 py-4 text-right">
-                        <div className="font-bold text-gray-900">{Number(item.amount).toFixed(3)} RO</div>
+                        <div className="font-bold text-gray-900">{Number(item.amount).toFixed(3)} BD</div>
                         {Number(item.paidAmount || 0) > 0 && (
                           <div className="text-[10px] text-muted-foreground mt-1 flex flex-col items-end gap-0.5">
                             <span className="text-green-600 font-medium">Paid: {Number(item.paidAmount).toFixed(3)}</span>
@@ -1725,7 +1725,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                 <tfoot className="bg-gray-50 font-bold border-t border-gray-200">
                   <tr>
                     <td colSpan={2} className="px-4 py-3 text-gray-800">Total Project Income (Base + CRs)</td>
-                    <td className="px-4 py-3 text-right text-gray-900">{totalCRAmount.toFixed(3)} RO</td>
+                    <td className="px-4 py-3 text-right text-gray-900">{totalCRAmount.toFixed(3)} BD</td>
                     <td colSpan={3}></td>
                   </tr>
                 </tfoot>
@@ -1851,7 +1851,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
           <DialogHeader>
             <DialogTitle>Confirm Payment</DialogTitle>
             <DialogDescription>
-              Invoice total: <span className="font-bold">{Number(confirmingTransaction?.amount || 0).toFixed(3)} RO</span>.
+              Invoice total: <span className="font-bold">{Number(confirmingTransaction?.amount || 0).toFixed(3)} BD</span>.
               Pay in full or partial — split across multiple bank accounts if needed.
             </DialogDescription>
           </DialogHeader>
@@ -1888,7 +1888,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                         <SelectContent>
                           {bankAccounts.map((account: any) => (
                             <SelectItem key={account.id} value={account.id.toString()}>
-                              {account.bankName} ({Number(account.currentBalance || account.balance || 0).toFixed(3)} RO)
+                              {account.bankName} ({Number(account.currentBalance || account.balance || 0).toFixed(3)} BD)
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1930,10 +1930,10 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                 return (
                   <div className="flex justify-between text-xs pt-1 border-t">
                     <span className="text-muted-foreground">
-                      {isExact ? "✓ Final payment" : isOver ? "⚠ Over remaining balance" : `Partial — ${remaining.toFixed(3)} RO still pending`}
+                      {isExact ? "✓ Final payment" : isOver ? "⚠ Over remaining balance" : `Partial — ${remaining.toFixed(3)} BD still pending`}
                     </span>
                     <span className={`font-bold ${isExact ? "text-green-600" : isOver ? "text-red-500" : "text-amber-600"}`}>
-                      {allocated.toFixed(3)} / {maxPayable.toFixed(3)} RO
+                      {allocated.toFixed(3)} / {maxPayable.toFixed(3)} BD
                     </span>
                   </div>
                 );
@@ -2142,7 +2142,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                 </div>
                 <div className="flex justify-between p-4 bg-gray-900 text-white rounded-lg items-center shadow-lg mt-4 mb-2">
                   <span className="text-xs uppercase font-black tracking-widest opacity-70">Total Due</span>
-                  <span className="text-xl font-black">{Number(invoiceData?.amount || 0).toFixed(3)} RO</span>
+                  <span className="text-xl font-black">{Number(invoiceData?.amount || 0).toFixed(3)} BD</span>
                 </div>
                 <div className="flex justify-between p-3 border-b text-xs items-center bg-green-50/50">
                   <span className="text-green-700 font-semibold">Total Paid</span>
@@ -2150,7 +2150,7 @@ export function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                 </div>
                 <div className="flex justify-between p-3 text-sm items-center bg-red-50/50 rounded-b-lg">
                   <span className="text-red-700 font-black">Remaining</span>
-                  <span className="font-black text-red-700">{Math.max(0, Number(invoiceData?.amount || 0) - Number(invoiceData?.paidAmount || 0)).toFixed(3)} RO</span>
+                  <span className="font-black text-red-700">{Math.max(0, Number(invoiceData?.amount || 0) - Number(invoiceData?.paidAmount || 0)).toFixed(3)} BD</span>
                 </div>
               </div>
             </div>

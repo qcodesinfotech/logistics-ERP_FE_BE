@@ -36,8 +36,9 @@ import {
   type CrmLead, type CrmDeal, type CrmActivity, type CrmLeadNote, type CrmCalendarEvent, type CrmReminder, type CrmCustomerContact, type CrmNotification, type CrmTask,
   type InsertCrmLead, type InsertCrmDeal, type InsertCrmActivity, type InsertCrmLeadNote, type InsertCrmCalendarEvent, type InsertCrmReminder, type InsertCrmCustomerContact, type InsertCrmNotification, type InsertCrmTask,
   userScopes, type UserScope,
-  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, trips, tripOrders, deliveries, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
-  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver,
+  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, trips, tripOrders, deliveries, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
+  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone,
+  driverZones, dispatchSheets, dispatchItems, dispatchOutletZoneOverrides, dispatchDeliveries,
 } from "@shared/schema";
 import { db, pool } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -535,8 +536,9 @@ export interface IStorage {
   // Logistics Orders
   getOrders(customerId?: string, zoneId?: string, status?: string): Promise<Order[]>;
   getOrder(id: string): Promise<Order | undefined>;
-  createOrder(data: InsertOrder): Promise<Order>;
-  updateOrder(id: string, data: Partial<InsertOrder>): Promise<Order | undefined>;
+  getOrderWithCharges(id: string): Promise<{ order: Order; charges: any[] } | undefined>;
+  createOrder(data: InsertOrder & { charges?: any[] }): Promise<Order>;
+  updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[] }): Promise<Order | undefined>;
   deleteOrder(id: string): Promise<void>;
 
   // Logistics Trips
@@ -1231,7 +1233,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (amount > balanceRemaining + 0.001) {
-      throw new Error(`Payment amount (${amount.toFixed(3)} RO) exceeds invoice outstanding balance (${balanceRemaining.toFixed(3)} RO). Overpayment is not allowed.`);
+      throw new Error(`Payment amount (${amount.toFixed(3)} BD) exceeds invoice outstanding balance (${balanceRemaining.toFixed(3)} BD). Overpayment is not allowed.`);
     }
 
     return await db.transaction(async (tx) => {
@@ -1279,15 +1281,16 @@ export class DatabaseStorage implements IStorage {
       let journalBranchId = sale?.branchId;
 
       // If sale doesn't have scope, try to get from bank account
-      if ((!journalShopId || !journalBranchId) && data.bankAccountId) {
+      if (!journalBranchId && data.bankAccountId) {
         const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
         if (bankAccount) {
           journalShopId = journalShopId || bankAccount.shopId;
           journalBranchId = journalBranchId || bankAccount.branchId;
         }
       }
-      if (!journalShopId) throw new Error("shopId is required for sale payment journal entry");
-      if (!journalBranchId) journalBranchId = journalShopId;
+      if (!journalBranchId) throw new Error("branchId is required for sale payment journal entry");
+      // Use branchId as fallback for shopId
+      journalShopId = journalShopId || journalBranchId;
 
       await this.createJournalEntryInTx(tx, {
         sourceType: "sale_payment",
@@ -1578,7 +1581,7 @@ export class DatabaseStorage implements IStorage {
         const currentBalance = parseFloat(pc.currentBalance || "0");
         if (amount > currentBalance) {
           const actionName = data.type === "return" ? "return to bank" : "withdrawals";
-          throw new Error(`Insufficient petty cash balance for ${actionName}. Available: ${currentBalance.toFixed(3)} RO, Required: ${amount.toFixed(3)} RO. Please check petty cash funds.`);
+          throw new Error(`Insufficient petty cash balance for ${actionName}. Available: ${currentBalance.toFixed(3)} BD, Required: ${amount.toFixed(3)} BD. Please check petty cash funds.`);
         }
       }
     }
@@ -1600,10 +1603,10 @@ export class DatabaseStorage implements IStorage {
         // Get shopId and branchId from petty cash account
         const pettyCashShopId = pc.shopId;
         let pettyCashBranchId = pc.branchId;
-        if (!pettyCashShopId) throw new Error("Petty cash must have a shopId for journal entries");
-        if (!pettyCashBranchId) {
-          const [branch] = await tx.select().from(branches).where(eq(branches.shopId, pettyCashShopId)).limit(1);
-          pettyCashBranchId = branch?.id || pettyCashShopId;
+        if (!pettyCashBranchId) throw new Error("Petty cash must have a branchId for journal entries");
+        // Use branchId as fallback for shopId
+        if (!pettyCashShopId) {
+          // branchId will be used as shopId in createJournalEntryInTx
         }
 
         // Create accounting journal entry & bank transactions
@@ -1685,8 +1688,8 @@ export class DatabaseStorage implements IStorage {
           await this.createJournalEntryInTx(tx, {
             sourceType: "petty_cash",
             sourceId: transaction.id,
-            shopId: pettyCashShopId,
-            branchId: pettyCashBranchId,
+            shopId: pettyCashShopId || undefined,
+            branchId: pettyCashBranchId!,
             reference: data.reference || `PC-${Date.now()}`,
             description: data.description || `Petty cash ${data.type}`,
             lines: journalLines,
@@ -1782,7 +1785,7 @@ export class DatabaseStorage implements IStorage {
         let capitalBranchId = data.branchId;
 
         // If bankAccountId is provided, try to get shop/branch from it as fallback
-        if (data.bankAccountId && (!capitalShopId || !capitalBranchId)) {
+        if (data.bankAccountId && (!capitalBranchId)) {
           const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
           if (bankAccount) {
             capitalShopId = capitalShopId || bankAccount.shopId;
@@ -1790,11 +1793,9 @@ export class DatabaseStorage implements IStorage {
           }
         }
 
-        if (!capitalShopId) throw new Error("shopId is required for capital journal entry");
-        if (!capitalBranchId) {
-          const [branch] = await tx.select().from(branches).where(eq(branches.shopId, capitalShopId)).limit(1);
-          capitalBranchId = branch?.id || capitalShopId;
-        }
+        if (!capitalBranchId) throw new Error("branchId is required for capital journal entry");
+        // Use branchId as fallback for shopId
+        capitalShopId = capitalShopId || capitalBranchId;
 
         await this.createJournalEntryInTx(tx, {
           sourceType: "capital",
@@ -2082,7 +2083,7 @@ export class DatabaseStorage implements IStorage {
       }
 
       if (amount > remainingAmount) {
-        throw new Error(`Cannot repay more than the remaining balance of ${remainingAmount.toFixed(3)} RO`);
+        throw new Error(`Cannot repay more than the remaining balance of ${remainingAmount.toFixed(3)} BD`);
       }
 
       const newRemaining = remainingAmount - amount;
@@ -2188,6 +2189,273 @@ export class DatabaseStorage implements IStorage {
 
   async deleteClient(id: string): Promise<void> {
     await db.delete(clients).where(eq(clients.id, id));
+  }
+
+  // Outlets
+  async getOutlets(clientId?: string): Promise<Outlet[]> {
+    if (clientId) {
+      return db.select().from(outlets).where(eq(outlets.clientId, clientId)).orderBy(outlets.name);
+    }
+    return db.select().from(outlets).orderBy(outlets.name);
+  }
+
+  async getOutlet(id: string): Promise<Outlet | undefined> {
+    const [outlet] = await db.select().from(outlets).where(eq(outlets.id, id));
+    return outlet || undefined;
+  }
+
+  async createOutlet(data: InsertOutlet): Promise<Outlet> {
+    const [outlet] = await db.insert(outlets).values(data).returning();
+    return outlet;
+  }
+
+  async updateOutlet(id: string, data: Partial<InsertOutlet>): Promise<Outlet | undefined> {
+    const [outlet] = await db.update(outlets).set(data).where(eq(outlets.id, id)).returning();
+    return outlet || undefined;
+  }
+
+  async deleteOutlet(id: string): Promise<void> {
+    await db.delete(outletZones).where(eq(outletZones.outletId, id));
+    await db.delete(outlets).where(eq(outlets.id, id));
+  }
+
+  async getOutletZones(outletId: string): Promise<Zone[]> {
+    const assignments = await db.select().from(outletZones).where(eq(outletZones.outletId, outletId));
+    if (assignments.length === 0) return [];
+    
+    const zoneIds = assignments.map(a => a.zoneId);
+    return db.select().from(zones).where(inArray(zones.id, zoneIds));
+  }
+
+  async assignOutletZones(outletId: string, zoneIds: string[]): Promise<void> {
+    await db.delete(outletZones).where(eq(outletZones.outletId, outletId));
+    if (zoneIds.length > 0) {
+      const values = zoneIds.map(zoneId => ({ outletId, zoneId }));
+      await db.insert(outletZones).values(values);
+    }
+  }
+
+  async getZoneOutlets(zoneId: string): Promise<Outlet[]> {
+    const assignments = await db.select().from(outletZones).where(eq(outletZones.zoneId, zoneId));
+    if (assignments.length === 0) return [];
+    
+    const outletIds = assignments.map(a => a.outletId);
+    return db.select().from(outlets).where(inArray(outlets.id, outletIds));
+  }
+
+  async appendOutletsToZone(zoneId: string, outletIds: string[]): Promise<void> {
+    if (outletIds.length === 0) return;
+    
+    const existing = await db.select().from(outletZones)
+      .where(and(eq(outletZones.zoneId, zoneId), inArray(outletZones.outletId, outletIds)));
+    const existingOutletIds = new Set(existing.map(e => e.outletId));
+    
+    const newOutletIds = outletIds.filter(id => !existingOutletIds.has(id));
+    if (newOutletIds.length > 0) {
+      const values = newOutletIds.map(outletId => ({ outletId, zoneId }));
+      await db.insert(outletZones).values(values);
+    }
+  }
+
+  async removeOutletFromZone(zoneId: string, outletId: string): Promise<void> {
+    await db.delete(outletZones).where(
+      and(
+        eq(outletZones.zoneId, zoneId),
+        eq(outletZones.outletId, outletId)
+      )
+    );
+  }
+
+  // ===== DAILY DISPATCH MODULE =====
+
+  async getDriverZones(): Promise<any[]> {
+    const rows = await db.select().from(driverZones).orderBy(driverZones.createdAt);
+    return rows;
+  }
+
+  async getZoneDrivers(zoneId: string): Promise<any[]> {
+    return db.select().from(driverZones).where(eq(driverZones.zoneId, zoneId));
+  }
+
+  async assignDriverZone(driverId: string, zoneId: string): Promise<any> {
+    const [row] = await db.insert(driverZones).values({ driverId, zoneId }).returning();
+    return row;
+  }
+
+  async removeDriverZone(id: string): Promise<void> {
+    await db.delete(driverZones).where(eq(driverZones.id, id));
+  }
+
+  async getDispatchSheets(): Promise<any[]> {
+    return db.select().from(dispatchSheets).orderBy(desc(dispatchSheets.date));
+  }
+
+  async getDispatchSheet(id: string): Promise<any> {
+    const [sheet] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.id, id));
+    return sheet;
+  }
+
+  async getDispatchSheetByDate(date: string): Promise<any | undefined> {
+    const [sheet] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.date, date));
+    return sheet;
+  }
+
+  async createDispatchSheet(data: { date: string; uploadedBy?: string; fileName?: string }): Promise<any> {
+    // Delete existing sheet for same date (replace strategy)
+    const existing = await this.getDispatchSheetByDate(data.date);
+    if (existing) {
+      await this.deleteDispatchSheet(existing.id);
+    }
+    const [sheet] = await db.insert(dispatchSheets).values(data).returning();
+    return sheet;
+  }
+
+  async deleteDispatchSheet(id: string): Promise<void> {
+    const existingItems = await db.select({ id: dispatchItems.id })
+      .from(dispatchItems)
+      .where(eq(dispatchItems.sheetId, id));
+    
+    const itemIds = existingItems.map(item => item.id);
+    
+    if (itemIds.length > 0) {
+      await db.delete(dispatchDeliveries)
+        .where(inArray(dispatchDeliveries.dispatchItemId, itemIds));
+    }
+    
+    await db.delete(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, id));
+    await db.delete(dispatchItems).where(eq(dispatchItems.sheetId, id));
+    await db.delete(dispatchSheets).where(eq(dispatchSheets.id, id));
+  }
+
+  async createDispatchItems(items: any[]): Promise<any[]> {
+    if (items.length === 0) return [];
+    const inserted = await db.insert(dispatchItems).values(items).returning();
+    return inserted;
+  }
+
+  async getDispatchBoard(sheetId: string): Promise<any> {
+    // Get all items for sheet
+    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+
+    // Get overrides for sheet
+    const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));
+    const overrideMap = new Map(overrides.map(o => [o.outletId, o.overrideZoneId]));
+
+    // Get all outlets involved
+    const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
+    const allOutlets = outletIds.length > 0 ? await db.select().from(outlets).where(inArray(outlets.id, outletIds)) : [];
+    const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+
+    // Get zone assignments for all outlets
+    const allOutletZones = outletIds.length > 0 ? await db.select().from(outletZones).where(inArray(outletZones.outletId, outletIds)) : [];
+
+    // Build outletId → effective zoneId (override first, then normal zone)
+    const outletToZone = new Map<string, string>();
+    for (const oz of allOutletZones) {
+      outletToZone.set(oz.outletId, oz.zoneId);
+    }
+    for (const [outletId, zoneId] of Array.from(overrideMap.entries())) {
+      outletToZone.set(outletId, zoneId);
+    }
+
+    // Get all zone IDs we need
+    const zoneIds = Array.from(new Set(Array.from(outletToZone.values()))) as string[];
+    const allZones = zoneIds.length > 0 ? await db.select().from(zones).where(inArray(zones.id, zoneIds)) : [];
+    const zoneMap = new Map(allZones.map(z => [z.id, z]));
+
+    // Get driver assignments for each zone
+    const allDriverZones = zoneIds.length > 0 ? await db.select().from(driverZones).where(inArray(driverZones.zoneId, zoneIds)) : [];
+    const zoneToDriverIds = new Map<string, string[]>();
+    for (const dz of allDriverZones) {
+      if (!zoneToDriverIds.has(dz.zoneId)) zoneToDriverIds.set(dz.zoneId, []);
+      zoneToDriverIds.get(dz.zoneId)!.push(dz.driverId);
+    }
+
+    // Get all driver names
+    const allDriverIds = Array.from(new Set(allDriverZones.map(dz => dz.driverId)));
+    const allDrivers = allDriverIds.length > 0 ? await db.select().from(drivers).where(inArray(drivers.id, allDriverIds)) : [];
+    const driverMap = new Map(allDrivers.map(d => [d.id, d]));
+
+    // Get delivery statuses for all items
+    const itemIds = items.map(i => i.id);
+    const deliveries = itemIds.length > 0 ? await db.select().from(dispatchDeliveries).where(inArray(dispatchDeliveries.dispatchItemId, itemIds)) : [];
+    const deliveryMap = new Map(deliveries.map(d => [d.dispatchItemId, d]));
+
+    // Build board
+    const board: Record<string, any> = {};
+
+    // Add "Unassigned" bucket
+    board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], outlets: {} };
+
+    for (const item of items) {
+      const effectiveZoneId = item.outletId ? (outletToZone.get(item.outletId) || "unassigned") : "unassigned";
+      const isOverridden = item.outletId ? overrideMap.has(item.outletId) : false;
+
+      if (!board[effectiveZoneId]) {
+        const zone = zoneMap.get(effectiveZoneId);
+        const driverIds = zoneToDriverIds.get(effectiveZoneId) || [];
+        board[effectiveZoneId] = {
+          zoneId: effectiveZoneId,
+          zoneName: zone?.name || "Unknown Zone",
+          drivers: driverIds.map(id => driverMap.get(id)).filter(Boolean),
+          outlets: {},
+        };
+      }
+
+      const outletKey = item.outletId || item.outletCode;
+      if (!board[effectiveZoneId].outlets[outletKey]) {
+        const outlet = item.outletId ? outletMap.get(item.outletId) : null;
+        board[effectiveZoneId].outlets[outletKey] = {
+          outletId: item.outletId,
+          outletCode: item.outletCode,
+          outletName: outlet?.name || item.outletCode,
+          isOverridden,
+          overrideZoneId: isOverridden ? item.outletId ? overrideMap.get(item.outletId) : null : null,
+          items: [],
+        };
+      }
+
+      board[effectiveZoneId].outlets[outletKey].items.push({
+        ...item,
+        delivery: deliveryMap.get(item.id) || null,
+      });
+    }
+
+    return {
+      zones: Object.values(board).map(z => ({
+        ...z,
+        outlets: Object.values(z.outlets),
+      })),
+      overrides,
+    };
+  }
+
+  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string }): Promise<any> {
+    const existing = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
+    if (existing.length > 0) {
+      const [updated] = await db.update(dispatchDeliveries)
+        .set({ ...data, deliveredAt: new Date() })
+        .where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(dispatchDeliveries)
+        .values({ dispatchItemId, ...data, deliveredAt: new Date() })
+        .returning();
+      return created;
+    }
+  }
+
+  async createDispatchOverride(data: { sheetId: string; outletId: string; overrideZoneId: string; reason?: string; createdBy?: string }): Promise<any> {
+    // Remove existing override for same outlet+sheet
+    await db.delete(dispatchOutletZoneOverrides)
+      .where(and(eq(dispatchOutletZoneOverrides.sheetId, data.sheetId), eq(dispatchOutletZoneOverrides.outletId, data.outletId)));
+    const [row] = await db.insert(dispatchOutletZoneOverrides).values(data).returning();
+    return row;
+  }
+
+  async deleteDispatchOverride(id: string): Promise<void> {
+    await db.delete(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.id, id));
   }
 
   // Projects
@@ -3210,7 +3478,7 @@ export class DatabaseStorage implements IStorage {
         requestNo: data.requestNo,
         discountPercent: data.discountPercent?.toString() || "0.00",
         taxType: data.taxType || "VAT",
-        currency: data.currency || "OMR",
+        currency: data.currency || "BHD",
         salesPerson: data.salesPerson,
         companyName: data.companyName,
         contactPerson: data.contactPerson,
@@ -3754,7 +4022,7 @@ export class DatabaseStorage implements IStorage {
           availableBalance: accountBalance,
           bankBalance: accountBalance,
           pettyCashBalance: 0,
-          message: `Insufficient funds for ${transactionType}. Available in selected account: ${accountBalance.toFixed(3)} RO, Required: ${amount.toFixed(3)} RO. Please add capital or select a different account.`
+          message: `Insufficient funds for ${transactionType}. Available in selected account: ${accountBalance.toFixed(3)} BD, Required: ${amount.toFixed(3)} BD. Please add capital or select a different account.`
         };
       }
 
@@ -3775,7 +4043,7 @@ export class DatabaseStorage implements IStorage {
         availableBalance: breakdown.totalAvailable,
         bankBalance: breakdown.bankBalance,
         pettyCashBalance: breakdown.pettyCashBalance,
-        message: `Insufficient funds for ${transactionType}. Available: ${breakdown.totalAvailable.toFixed(3)} RO (Bank: ${breakdown.bankBalance.toFixed(3)}, Petty Cash: ${breakdown.pettyCashBalance.toFixed(3)}), Required: ${amount.toFixed(3)} RO. Please add capital or bank balance.`
+        message: `Insufficient funds for ${transactionType}. Available: ${breakdown.totalAvailable.toFixed(3)} BD (Bank: ${breakdown.bankBalance.toFixed(3)}, Petty Cash: ${breakdown.pettyCashBalance.toFixed(3)}), Required: ${amount.toFixed(3)} BD. Please add capital or bank balance.`
       };
     }
 
@@ -3895,16 +4163,13 @@ export class DatabaseStorage implements IStorage {
         // Get shopId and branchId from employee or use default
         const salaryShopId = employee?.shopId;
         let salaryBranchId = employee?.branchId;
-        if (!salaryShopId) throw new Error("Employee must have a shopId for salary payment");
-        if (!salaryBranchId && salaryShopId) {
-          const [branch] = await tx.select().from(branches).where(eq(branches.shopId, salaryShopId)).limit(1);
-          salaryBranchId = branch?.id || salaryShopId;
-        }
+        if (!salaryBranchId) throw new Error("Employee must have a branchId for salary payment");
+        // Use branchId as fallback for shopId
 
         await this.createJournalEntryInTx(tx, {
           sourceType: "salary",
           sourceId: paymentId,
-          shopId: salaryShopId!,
+          shopId: salaryShopId || undefined,
           branchId: salaryBranchId!,
           reference: `SAL-${payment.month}/${payment.year}-${employee?.employeeCode || ""}`,
           description: `Salary payment for ${employee?.name || "Employee"} - ${payment.month}/${payment.year}`,
@@ -3929,16 +4194,13 @@ export class DatabaseStorage implements IStorage {
       // Get shopId and branchId from employee
       const advanceShopId = employee.shopId;
       let advanceBranchId = employee.branchId;
-      if (!advanceShopId) throw new Error("Employee must have a shopId for advance payment");
-      if (!advanceBranchId && advanceShopId) {
-        const [branch] = await tx.select().from(branches).where(eq(branches.shopId, advanceShopId)).limit(1);
-        advanceBranchId = branch?.id || advanceShopId;
-      }
+      if (!advanceBranchId) throw new Error("Employee must have a branchId for advance payment");
+      // Use branchId as fallback for shopId
 
       await this.createJournalEntryInTx(tx, {
         sourceType: "advance_payment",
         sourceId: employeeId,
-        shopId: advanceShopId!,
+        shopId: advanceShopId || undefined,
         branchId: advanceBranchId!,
         reference: advanceNumber,
         description: `Advance payment to ${employee.name}${notes ? ` - ${notes}` : ""}`,
@@ -4056,7 +4318,7 @@ export class DatabaseStorage implements IStorage {
       sourceId: string;
       reference: string;
       description: string;
-      shopId: string;
+      shopId?: string | null;
       branchId: string;
       projectId?: string;
       clientId?: string;
@@ -4064,9 +4326,12 @@ export class DatabaseStorage implements IStorage {
       lines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string; projectId?: string; clientId?: string; taskId?: string }>;
     }
   ): Promise<JournalEntry> {
-    if (!data.shopId || !data.branchId) {
-      throw new Error("shopId and branchId are required for all journal entries (accounting scope enforcement)");
+    if (!data.branchId) {
+      throw new Error("branchId is required for all journal entries (accounting scope enforcement)");
     }
+
+    // Use branchId as fallback for shopId (shops have been replaced by branches)
+    const effectiveShopId = data.shopId || data.branchId;
 
     const entryNumber = await this.getNextNumber("JE");
 
@@ -4077,21 +4342,31 @@ export class DatabaseStorage implements IStorage {
       sourceId: data.sourceId,
       reference: data.reference,
       description: data.description,
-      shopId: data.shopId,
+      shopId: effectiveShopId,
       branchId: data.branchId,
       status: "posted",
     }).returning();
 
-    // Insert journal lines and update account balances - MUST filter by shopId for data isolation
+    // Insert journal lines and update account balances - filter by branchId for data isolation
     for (const line of data.lines) {
-      const [account] = await tx.select().from(chartOfAccounts).where(
+      // Try to find account by branchId first (preferred), then by shopId as fallback
+      let [account] = await tx.select().from(chartOfAccounts).where(
         and(
           eq(chartOfAccounts.accountCode, line.accountCode),
-          eq(chartOfAccounts.shopId, data.shopId)
+          eq(chartOfAccounts.branchId, data.branchId)
         )
       );
+      // Fallback: try by shopId if not found by branchId
+      if (!account && effectiveShopId !== data.branchId) {
+        [account] = await tx.select().from(chartOfAccounts).where(
+          and(
+            eq(chartOfAccounts.accountCode, line.accountCode),
+            eq(chartOfAccounts.shopId, effectiveShopId)
+          )
+        );
+      }
       if (!account) {
-        throw new Error(`Account code ${line.accountCode} not found in Chart of Accounts for shop ${data.shopId}. Please seed default accounts first.`);
+        throw new Error(`Account code ${line.accountCode} not found in Chart of Accounts for branch ${data.branchId}. Please seed default accounts first.`);
       }
 
       const debitAmount = line.debit || 0;
@@ -4441,7 +4716,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      if (!generalExpenseShopId) {
+      if (!generalExpenseBranchId) {
         // Try to get from any bank account as fallback
         const [anyAccount] = await tx.select().from(bankAccounts).limit(1);
         if (anyAccount) {
@@ -4449,11 +4724,9 @@ export class DatabaseStorage implements IStorage {
           generalExpenseBranchId = anyAccount.branchId;
         }
       }
-      if (!generalExpenseShopId) throw new Error("shopId is required for general expense journal entry. Please ensure a bank account with shopId exists.");
-      if (!generalExpenseBranchId && generalExpenseShopId) {
-        const [branch] = await tx.select().from(branches).where(eq(branches.shopId, generalExpenseShopId)).limit(1);
-        generalExpenseBranchId = branch?.id || generalExpenseShopId;
-      }
+      if (!generalExpenseBranchId) throw new Error("branchId is required for general expense journal entry. Please ensure a bank account with branchId exists.");
+      // Use branchId as fallback for shopId
+      if (!generalExpenseShopId) generalExpenseShopId = generalExpenseBranchId;
 
       await this.createJournalEntryInTx(tx, {
         sourceType: "general_expense",
@@ -5041,11 +5314,12 @@ export class DatabaseStorage implements IStorage {
       });
 
       // 3. Create Journal Entry (COA integration)
+      const reminderBranchId = reminder.branchId || reminder.shopId || account.branchId || "";
       await this.createJournalEntryInTx(tx, {
         sourceType: "compliance_payment",
         sourceId: id,
-        shopId: reminder.shopId || "",
-        branchId: reminder.branchId || "",
+        shopId: reminder.shopId || undefined,
+        branchId: reminderBranchId,
         reference: `REMINDER-${id}`,
         description: `Compliance Payment: ${reminder.title}`,
         lines: [
@@ -5454,18 +5728,43 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db.select().from(orders).where(eq(orders.id, id));
     return row || undefined;
   }
+  
+  async getOrderWithCharges(id: string): Promise<{ order: Order; charges: any[] } | undefined> {
+    const order = await this.getOrder(id);
+    if (!order) return undefined;
+    const chargesList = await db.select().from(orderCharges).where(eq(orderCharges.orderId, id));
+    return { order, charges: chargesList };
+  }
 
-  async createOrder(data: InsertOrder): Promise<Order> {
-    const [row] = await db.insert(orders).values(data as any).returning();
+  async createOrder(data: InsertOrder & { charges?: any[] }): Promise<Order> {
+    const { charges, ...orderData } = data;
+    if (orderData.orderDate && typeof orderData.orderDate === 'string') orderData.orderDate = new Date(orderData.orderDate) as any;
+    if (orderData.paymentDueDate && typeof orderData.paymentDueDate === 'string') orderData.paymentDueDate = new Date(orderData.paymentDueDate) as any;
+    const [row] = await db.insert(orders).values(orderData as any).returning();
+    if (charges && charges.length > 0) {
+      const chargesData = charges.map(c => ({ ...c, orderId: row.id }));
+      await db.insert(orderCharges).values(chargesData);
+    }
     return row;
   }
 
-  async updateOrder(id: string, data: Partial<InsertOrder>): Promise<Order | undefined> {
-    const [row] = await db.update(orders).set(data as any).where(eq(orders.id, id)).returning();
+  async updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[] }): Promise<Order | undefined> {
+    const { charges, ...orderData } = data;
+    if (orderData.orderDate && typeof orderData.orderDate === 'string') orderData.orderDate = new Date(orderData.orderDate) as any;
+    if (orderData.paymentDueDate && typeof orderData.paymentDueDate === 'string') orderData.paymentDueDate = new Date(orderData.paymentDueDate) as any;
+    const [row] = await db.update(orders).set(orderData as any).where(eq(orders.id, id)).returning();
+    if (row && charges) {
+      await db.delete(orderCharges).where(eq(orderCharges.orderId, id));
+      if (charges.length > 0) {
+        const chargesData = charges.map(c => ({ ...c, orderId: id }));
+        await db.insert(orderCharges).values(chargesData);
+      }
+    }
     return row || undefined;
   }
 
   async deleteOrder(id: string): Promise<void> {
+    await db.delete(orderCharges).where(eq(orderCharges.orderId, id));
     await db.delete(orders).where(eq(orders.id, id));
   }
 

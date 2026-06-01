@@ -21,7 +21,7 @@ export default function DriverManagementPage() {
   const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
   const { toast } = useToast();
 
-  const { data: drivers = [] } = useQuery({
+  const { data: drivers = [] } = useQuery<any[]>({
     queryKey: ["/api/drivers"],
   });
 
@@ -186,7 +186,7 @@ export default function DriverManagementPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {drivers.map((driver) => (
+                  {drivers.map((driver: any) => (
                     <TableRow key={driver.id} className="hover:bg-accent/40 transition-colors">
                       <TableCell className="font-semibold">{driver.name}</TableCell>
                       <TableCell className="capitalize text-xs font-mono">{driver.packageType}</TableCell>

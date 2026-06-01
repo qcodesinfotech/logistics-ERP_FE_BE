@@ -15,7 +15,7 @@ import { useGlobalScope } from "@/contexts/global-scope";
 
 const formatCurrency = (value: string | number | null | undefined) => {
   const num = parseFloat(String(value || "0"));
-  return `${num.toFixed(3)} RO`;
+  return `${num.toFixed(3)} BD`;
 };
 
 type DateRange = "today" | "week" | "month" | "year" | "custom";
@@ -230,9 +230,9 @@ export default function Reports() {
   const renderLogisticsKPIs = () => {
     // Mock data for Logistics KPIs
     const kpiData = [
-      { route: "Muscat - Salalah", successRate: "98%", fleetUtil: "85%", driverEff: "92%", profitPerRoute: "1250 OMR" },
-      { route: "Sohar - Dubai", successRate: "95%", fleetUtil: "90%", driverEff: "88%", profitPerRoute: "800 OMR" },
-      { route: "Nizwa - Sur", successRate: "99%", fleetUtil: "75%", driverEff: "95%", profitPerRoute: "450 OMR" }
+      { route: "Muscat - Salalah", successRate: "98%", fleetUtil: "85%", driverEff: "92%", profitPerRoute: "1250 BHD" },
+      { route: "Sohar - Dubai", successRate: "95%", fleetUtil: "90%", driverEff: "88%", profitPerRoute: "800 BHD" },
+      { route: "Nizwa - Sur", successRate: "99%", fleetUtil: "75%", driverEff: "95%", profitPerRoute: "450 BHD" }
     ];
 
     return (
@@ -266,7 +266,7 @@ export default function Reports() {
           </Card>
           <Card>
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold font-mono">2500 OMR</div>
+              <div className="text-2xl font-bold font-mono">2500 BHD</div>
               <div className="text-sm text-muted-foreground">Total Profit (Routes)</div>
             </CardContent>
           </Card>
