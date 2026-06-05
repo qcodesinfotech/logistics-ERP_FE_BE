@@ -27,56 +27,63 @@ stages {
             echo "Deployment started..."
 
             sh """
-            ssh -o StrictHostKeyChecking=no $SERVER '
+            ssh -o StrictHostKeyChecking=no $SERVER "
 
             set -e
 
-            echo "============================="
-            echo " LOGISTICS ERP DEPLOY START"
-            echo "============================="
+            echo '============================='
+            echo ' LOGISTICS ERP DEPLOY START'
+            echo '============================='
 
             cd $PROJECT_PATH
 
             # Validate repo
-            if [ ! -d ".git" ]; then
-                echo "Not a git repository!"
+            if [ ! -d '.git' ]; then
+                echo 'Not a git repository!'
                 exit 1
             fi
 
             # Backup current build
-            if [ -d "dist" ]; then
-                echo "Backing up existing build..."
+            if [ -d 'dist' ]; then
+                echo 'Backing up existing build...'
                 rm -rf dist_backup
                 cp -r dist dist_backup
             fi
 
-            echo "Pulling latest code..."
-            git reset --hard
-            git pull origin $BRANCH
+            # SAFE GIT PULL (no data loss)
+            echo 'Pulling latest code safely...'
+            git stash push -m 'jenkins-auto-stash' || true
 
-            echo "Installing dependencies..."
+            git pull --rebase origin $BRANCH || {
+                echo 'Git pull failed (possible conflict)'
+                exit 1
+            }
+
+            git stash pop || {
+                echo 'Stash apply had conflicts (manual fix may be needed)'
+            }
+
+            echo 'Installing dependencies...'
             npm ci || npm install
 
-            echo "Building project..."
+            echo 'Building project...'
             npm run build
 
-            echo "Reloading application (zero downtime)..."
+            echo 'Reloading application (zero downtime)...'
 
-            pm2 describe $APP_NAME > /dev/null 2>&1
-
-            if [ $? -eq 0 ]; then
-                echo "App exists → Reloading"
+            if pm2 describe $APP_NAME > /dev/null 2>&1; then
+                echo 'App exists → Reloading'
                 pm2 reload $APP_NAME --update-env
             else
-                echo "First deployment → Starting app"
+                echo 'First deployment → Starting app'
                 pm2 start ecosystem.config.cjs --env production
             fi
 
             pm2 save
 
-            echo "DEPLOYMENT SUCCESS"
+            echo 'DEPLOYMENT SUCCESS'
 
-            '
+            "
             """
         }
     }
@@ -88,24 +95,24 @@ post {
         echo "Build failed! Starting rollback..."
 
         sh """
-        ssh -o StrictHostKeyChecking=no $SERVER '
+        ssh -o StrictHostKeyChecking=no $SERVER "
 
         cd $PROJECT_PATH
 
-        if [ -d "dist_backup" ]; then
-            echo "Restoring previous build..."
+        if [ -d 'dist_backup' ]; then
+            echo 'Restoring previous build...'
             rm -rf dist
             mv dist_backup dist
 
-            echo "Restarting previous version..."
+            echo 'Restarting previous version...'
             pm2 restart $APP_NAME --update-env
 
-            echo "Rollback completed"
+            echo 'Rollback completed'
         else
-            echo "No backup available for rollback"
+            echo 'No backup available for rollback'
         fi
 
-        '
+        "
         """
     }
 
