@@ -243,8 +243,8 @@ export default function RfqPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-3 space-y-6">
+      <div>
+        <div className="space-y-6">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
             <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
               <div>
@@ -371,30 +371,7 @@ export default function RfqPage() {
           </Card>
         </div>
 
-        <div>
-          <Card className="shadow-md bg-accent/10 border-accent/20 sticky top-6">
-            <CardHeader>
-              <CardTitle className="text-md flex items-center gap-2">
-                <Calculator className="h-4 w-4 text-primary" /> Margin Guideline
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted-foreground space-y-3">
-              <p>
-                In Logistics RFQs, billing is strictly computed using the Bahraini Dinar (**BD**).
-              </p>
-              <p className="font-semibold text-foreground">Formula:</p>
-              <div className="bg-muted p-2 rounded-md font-mono text-[10px] text-foreground">
-                Total Charges = Base Transport + Toll Charges + Clearance Fees
-              </div>
-              <div className="bg-muted p-2 rounded-md font-mono text-[10px] text-foreground mt-1">
-                Net Profit Margin = Total Charges - Outsourced Vehicle Cost
-              </div>
-              <p>
-                Approved RFQs can be converted directly into the Order Book with a single click. Ensure location coordinates are accurate for auto-zonal mappings.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+
       </div>
 
       {/* RFQ Creation / Modification Dialog */}
