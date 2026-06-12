@@ -59,6 +59,14 @@ export const brands = pgTable("brands", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   description: text("description"),
+  email: text("email"),
+  phone: text("phone"),
+  website: text("website"),
+  address: text("address"),
+  status: text("status").notNull().default("active"),
+  companyId: varchar("company_id"),
+  branchId: varchar("branch_id"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const manufacturers = pgTable("manufacturers", {
@@ -639,8 +647,11 @@ export const salaryAdvances = pgTable("salary_advances", {
 
 // ==================== CLIENT MODULE ====================
 
+
+
 export const clients = pgTable("clients", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  brandId: varchar("brand_id"),
   name: text("name").notNull(),
   companyName: text("company_name"),
   email: text("email"),
@@ -926,6 +937,9 @@ export type Role = typeof roles.$inferSelect;
 export type InsertRole = z.infer<typeof insertRoleSchema>;
 export type Menu = typeof menus.$inferSelect;
 export type InsertMenu = z.infer<typeof insertMenuSchema>;
+
+export type Client = typeof clients.$inferSelect;
+export type InsertClient = z.infer<typeof insertClientSchema>;
 export type Permission = typeof permissions.$inferSelect;
 export type InsertPermission = z.infer<typeof insertPermissionSchema>;
 
@@ -1400,6 +1414,7 @@ export const insertEmployeeSchema = createInsertSchema(employees).omit({ id: tru
 export const insertPettyCashTransactionSchema = createInsertSchema(pettyCashTransactions).omit({ id: true });
 export const insertSalaryPaymentSchema = createInsertSchema(salaryPayments).omit({ id: true });
 export const insertSalaryAdvanceSchema = createInsertSchema(salaryAdvances).omit({ id: true });
+
 export const insertClientSchema = createInsertSchema(clients).omit({ id: true });
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true });
 export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true });
@@ -1641,8 +1656,22 @@ export const contracts = pgTable("contracts", {
   numVehicles: integer("num_vehicles").default(0),
   otCharges: decimal("ot_charges", { precision: 12, scale: 3 }).default("0.000"),
   holidayCharges: decimal("holiday_charges", { precision: 12, scale: 3 }).default("0.000"),
-  documents: jsonb("documents").$type<{ name: string; url: string }[]>().default([]),
+  documents: jsonb("documents").$type<{ name: string; url: string; version?: number; uploadedAt?: string }[]>().default([]),
   status: text("status").notNull().default("active"),
+  // Service Terms
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  includedDeliveriesPerDay: integer("included_deliveries_per_day").default(0),
+  workingHoursPerDay: integer("working_hours_per_day").default(10),
+  graceHours: decimal("grace_hours", { precision: 5, scale: 2 }).default("0"),
+  otStartsAfterHours: decimal("ot_starts_after_hours", { precision: 5, scale: 2 }).default("10"),
+  publicHolidayRules: jsonb("public_holiday_rules").$type<{ dates?: string[]; multiplier?: number }>().default({}),
+  // Additional Charge Rules
+  extraTruckCharge: decimal("extra_truck_charge", { precision: 12, scale: 3 }).default("0"),
+  emergencyDeliveryCharge: decimal("emergency_delivery_charge", { precision: 12, scale: 3 }).default("0"),
+  redeliveryCharge: decimal("redelivery_charge", { precision: 12, scale: 3 }).default("0"),
+  outsourcedVehicleCharge: decimal("outsourced_vehicle_charge", { precision: 12, scale: 3 }).default("0"),
+  breakdownCharge: decimal("breakdown_charge", { precision: 12, scale: 3 }).default("0"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1652,9 +1681,16 @@ export const vehicles = pgTable("vehicles", {
   plateNumber: text("plate_number").notNull(),
   type: text("type").notNull(), // "owned" or "outsourced"
   capacity: text("capacity"),
+  photos: jsonb("photos").$type<string[]>().default([]),
+  documents: jsonb("documents").$type<string[]>().default([]),
+  chassisNumber: text("chassis_number"),
+  manufactureYear: text("manufacture_year"),
+  purchaseDate: text("purchase_date"),
   complianceDetails: jsonb("compliance_details").$type<{ insuranceExpiry?: string; permitExpiry?: string; registrationExpiry?: string; lastService?: string }>().default({}),
   status: text("status").notNull().default("available"), // "available", "in_transit", "maintenance"
   currentZoneId: varchar("current_zone_id"), // points to zones.id
+  assignedBrandId: varchar("assigned_brand_id"), // points to brands.id
+  assignedDriverId: varchar("assigned_driver_id"), // points to users.id
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1681,6 +1717,15 @@ export const rfqs = pgTable("rfqs", {
   clearanceAgentCharges: decimal("clearance_agent_charges", { precision: 12, scale: 3 }).default("0.000"),
   totalCharges: decimal("total_charges", { precision: 12, scale: 3 }).default("0.000"),
   status: text("status").notNull().default("pending"), // "pending", "approved", "rejected", "converted"
+  
+  // New fields
+  cargoType: text("cargo_type"),
+  truckType: text("truck_type"),
+  freightType: text("freight_type"),
+  origins: jsonb("origins").$type<{ originCountry: string; originCity: string; destinationCountry: string; destinationCity: string; loadingDate?: string; offloadingDate?: string; transitDays?: number }[]>().default([]),
+  detentionChargesPerDay: decimal("detention_charges_per_day", { precision: 12, scale: 3 }).default("0.000"),
+  extraCharges: jsonb("extra_charges").$type<{ name: string; cost: number }[]>().default([]),
+
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1699,16 +1744,42 @@ export const orders = pgTable("orders", {
   // New comprehensive booking fields
   orderDate: timestamp("order_date"),
   paymentDueDate: timestamp("payment_due_date"),
-  truckType: text("truck_type"), // 'own' or 'rented'
+  truckOwnership: text("truck_ownership"), // 'own' or 'rented'
+  truckType: text("truck_type"), // e.g. Flatbed, Reefer
+  truckModel: text("truck_model"),
+  truckPlateNumber: text("truck_plate_number"),
+  chassisNumber: text("chassis_number"),
+  cargoType: text("cargo_type"),
+  freightType: text("freight_type"),
+  detentionChargesPerDay: decimal("detention_charges_per_day", { precision: 12, scale: 3 }).default("0.000"),
   driverName: text("driver_name"),
   driverContact: text("driver_contact"),
-  originCountry: text("origin_country"),
-  originCity: text("origin_city"),
-  destinations: jsonb("destinations").$type<{ country: string; city: string }[]>().default([]),
+  originCountry: text("origin_country"), // legacy
+  originCity: text("origin_city"), // legacy
+  destinations: jsonb("destinations").$type<{ country: string; city: string }[]>().default([]), // legacy
+  routeLegs: jsonb("route_legs").$type<{ originCountry: string; originCity: string; destinationCountry: string; destinationCity: string; loadingDate: string; offloadingDate: string; transitDays: number; status?: string; deliveryDate?: string; podDocuments?: { name: string; url: string }[] }[]>().default([]),
   grandTotal: decimal("grand_total", { precision: 12, scale: 3 }).default("0.000"),
+  operationalZone: text("operational_zone"), // Inbound/Import, Outbound, Local, External/Export
   
   status: text("status").notNull().default("pending"), // "pending", "confirmed", "cancelled", "incomplete", "completed"
+  paymentStatus: text("payment_status").notNull().default("unpaid"), // "unpaid", "partial", "paid"
+  paidAmount: decimal("paid_amount", { precision: 12, scale: 3 }).default("0.000"),
   zoneId: varchar("zone_id"), // points to zones.id
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const invoicePayments = pgTable("invoice_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(), // points to orders.id
+  customerId: varchar("customer_id").notNull(), // points to clients.id
+  amount: decimal("amount", { precision: 12, scale: 3 }).notNull(),
+  paymentDate: timestamp("payment_date").defaultNow(),
+  paymentMethod: text("payment_method").notNull(), // "cash", "bank_transfer", "cheque"
+  bankAccountId: varchar("bank_account_id"), // if paid via bank
+  pettyCashId: varchar("petty_cash_id"), // if paid via cash
+  reference: text("reference"),
+  notes: text("notes"),
+  processedBy: varchar("processed_by"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1720,6 +1791,16 @@ export const orderCharges = pgTable("order_charges", {
   unitRate: decimal("unit_rate", { precision: 12, scale: 3 }).notNull().default("0.000"),
   total: decimal("total", { precision: 12, scale: 3 }).notNull().default("0.000"),
   isProfit: boolean("is_profit").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const orderExpenses = pgTable("order_expenses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  orderId: varchar("order_id").notNull(), // points to orders.id
+  description: text("description").notNull(),
+  qty: decimal("qty", { precision: 12, scale: 3 }).notNull().default("1.000"),
+  unitRate: decimal("unit_rate", { precision: 12, scale: 3 }).notNull().default("0.000"),
+  total: decimal("total", { precision: 12, scale: 3 }).notNull().default("0.000"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1786,6 +1867,7 @@ export const vehicleMaintenance = pgTable("vehicle_maintenance", {
   serviceDate: date("service_date"),
   serviceSchedule: text("service_schedule"), // title or details
   repairLogs: text("repair_logs"),
+  photos: jsonb("photos").$type<string[]>().default([]),
   cost: decimal("cost", { precision: 12, scale: 3 }).default("0.000"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1796,6 +1878,7 @@ export const fuelLogs = pgTable("fuel_logs", {
   tripId: varchar("trip_id"), // points to trips.id
   fuelExpense: decimal("fuel_expense", { precision: 12, scale: 3 }).default("0.000"),
   liters: decimal("liters", { precision: 10, scale: 3 }),
+  photos: jsonb("photos").$type<string[]>().default([]),
   date: date("date"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1903,6 +1986,7 @@ export const insertUserActivityLogSchema = createInsertSchema(userActivityLogs).
 export const insertDriverSchema = createInsertSchema(drivers).omit({ id: true, createdAt: true });
 export const insertDriverEarningsSchema = createInsertSchema(driverEarnings).omit({ id: true, createdAt: true });
 export const insertInvoiceSchema = createInsertSchema(invoices).omit({ id: true, createdAt: true });
+export const insertInvoicePaymentSchema = createInsertSchema(invoicePayments).omit({ id: true, createdAt: true });
 export const insertDynamicExpenseSchema = createInsertSchema(dynamicExpenses).omit({ id: true, createdAt: true });
 export const insertCompanyAssetSchema = createInsertSchema(companyAssets).omit({ id: true, createdAt: true });
 export const insertCompanySettingSchema = createInsertSchema(companySettings).omit({ id: true, updatedAt: true });
@@ -1944,6 +2028,8 @@ export type DriverEarning = typeof driverEarnings.$inferSelect;
 export type InsertDriverEarning = z.infer<typeof insertDriverEarningsSchema>;
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type InvoicePayment = typeof invoicePayments.$inferSelect;
+export type InsertInvoicePayment = z.infer<typeof insertInvoicePaymentSchema>;
 export type DynamicExpense = typeof dynamicExpenses.$inferSelect;
 export type InsertDynamicExpense = z.infer<typeof insertDynamicExpenseSchema>;
 export type CompanyAsset = typeof companyAssets.$inferSelect;
@@ -2008,6 +2094,8 @@ export const dispatchDeliveries = pgTable("dispatch_deliveries", {
   driverId: varchar("driver_id"),
   deliveredQty: decimal("delivered_qty", { precision: 10, scale: 3 }),
   remainingQty: decimal("remaining_qty", { precision: 10, scale: 3 }),
+  damagedQty: decimal("damaged_qty", { precision: 10, scale: 3 }),
+  damageReason: text("damage_reason"),
   remark: text("remark"),
   status: text("status").notNull().default("pending"),
   deliveredAt: timestamp("delivered_at"),
@@ -2034,3 +2122,123 @@ export const insertDispatchDeliverySchema = createInsertSchema(dispatchDeliverie
 export type DispatchDelivery = typeof dispatchDeliveries.$inferSelect;
 export type InsertDispatchDelivery = z.infer<typeof insertDispatchDeliverySchema>;
 
+// ==================== DISPATCH TRUCK PLANNING ====================
+export const dispatchTruckAssignments = pgTable("dispatch_truck_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sheetId: varchar("sheet_id").notNull(),
+  truckId: varchar("truck_id").notNull(),
+  driverId: varchar("driver_id"),
+  zoneId: varchar("zone_id").notNull(),
+  usedCapacity: decimal("used_capacity", { precision: 10, scale: 3 }).default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dispatchOutletTruckAssignments = pgTable("dispatch_outlet_truck_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  truckAssignmentId: varchar("truck_assignment_id").notNull(),
+  outletCode: text("outlet_code").notNull(),
+  outletId: varchar("outlet_id"),
+  assignedWeight: decimal("assigned_weight", { precision: 10, scale: 3 }).default("0"),
+  overrideReason: text("override_reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dispatchPendingQuantities = pgTable("dispatch_pending_quantities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  outletId: varchar("outlet_id"),
+  outletCode: text("outlet_code").notNull(),
+  itemCode: text("item_code").notNull(),
+  description: text("description"),
+  pendingQty: decimal("pending_qty", { precision: 10, scale: 3 }).notNull(),
+  sourceSheetId: varchar("source_sheet_id"),
+  reason: text("reason"),
+  isCarriedForward: boolean("is_carried_forward").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const truckTransfers = pgTable("truck_transfers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  truckId: varchar("truck_id").notNull(),
+  fromZoneId: varchar("from_zone_id"),
+  toZoneId: varchar("to_zone_id").notNull(),
+  transferType: text("transfer_type").notNull(), // 'temporary' | 'permanent'
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date"),
+  reason: text("reason"),
+  approvedBy: varchar("approved_by"),
+  remarks: text("remarks"),
+  status: text("status").default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// ==================== CONTRACT INVOICE ENGINE ====================
+export const contractInvoices = pgTable("contract_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  contractId: varchar("contract_id").notNull(),
+  customerId: varchar("customer_id").notNull(),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  baseAmount: decimal("base_amount", { precision: 12, scale: 3 }).default("0"),
+  otHours: decimal("ot_hours", { precision: 10, scale: 2 }).default("0"),
+  otAmount: decimal("ot_amount", { precision: 12, scale: 3 }).default("0"),
+  holidayDays: integer("holiday_days").default(0),
+  holidayAmount: decimal("holiday_amount", { precision: 12, scale: 3 }).default("0"),
+  extraTruckTrips: integer("extra_truck_trips").default(0),
+  extraTruckAmount: decimal("extra_truck_amount", { precision: 12, scale: 3 }).default("0"),
+  emergencyTrips: integer("emergency_trips").default(0),
+  emergencyAmount: decimal("emergency_amount", { precision: 12, scale: 3 }).default("0"),
+  redeliveryTrips: integer("redelivery_trips").default(0),
+  redeliveryAmount: decimal("redelivery_amount", { precision: 12, scale: 3 }).default("0"),
+  outsourcedTrips: integer("outsourced_trips").default(0),
+  outsourcedAmount: decimal("outsourced_amount", { precision: 12, scale: 3 }).default("0"),
+  discount: decimal("discount", { precision: 12, scale: 3 }).default("0"),
+  creditAmount: decimal("credit_amount", { precision: 12, scale: 3 }).default("0"),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 3 }).default("0"),
+  status: text("status").notNull().default("draft"), // draft|approved|sent|paid|partially_paid|overdue
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const contractMonthlyUsage = pgTable("contract_monthly_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  contractId: varchar("contract_id").notNull(),
+  periodMonth: date("period_month").notNull(),
+  otHours: decimal("ot_hours", { precision: 10, scale: 2 }).default("0"),
+  holidayDays: integer("holiday_days").default(0),
+  extraTruckTrips: integer("extra_truck_trips").default(0),
+  emergencyTrips: integer("emergency_trips").default(0),
+  redeliveryTrips: integer("redelivery_trips").default(0),
+  outsourcedTrips: integer("outsourced_trips").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Insert schemas & types
+export const insertDispatchTruckAssignmentSchema = createInsertSchema(dispatchTruckAssignments).omit({ id: true, createdAt: true });
+export type DispatchTruckAssignment = typeof dispatchTruckAssignments.$inferSelect;
+export type InsertDispatchTruckAssignment = z.infer<typeof insertDispatchTruckAssignmentSchema>;
+
+export const insertDispatchOutletTruckAssignmentSchema = createInsertSchema(dispatchOutletTruckAssignments).omit({ id: true, createdAt: true });
+export type DispatchOutletTruckAssignment = typeof dispatchOutletTruckAssignments.$inferSelect;
+export type InsertDispatchOutletTruckAssignment = z.infer<typeof insertDispatchOutletTruckAssignmentSchema>;
+
+export const insertDispatchPendingQuantitySchema = createInsertSchema(dispatchPendingQuantities).omit({ id: true, createdAt: true });
+export type DispatchPendingQuantity = typeof dispatchPendingQuantities.$inferSelect;
+export type InsertDispatchPendingQuantity = z.infer<typeof insertDispatchPendingQuantitySchema>;
+
+export const insertTruckTransferSchema = createInsertSchema(truckTransfers).omit({ id: true, createdAt: true });
+export type TruckTransfer = typeof truckTransfers.$inferSelect;
+export type InsertTruckTransfer = z.infer<typeof insertTruckTransferSchema>;
+
+export const insertContractInvoiceSchema = createInsertSchema(contractInvoices).omit({ id: true, createdAt: true, updatedAt: true });
+export type ContractInvoice = typeof contractInvoices.$inferSelect;
+export type InsertContractInvoice = z.infer<typeof insertContractInvoiceSchema>;
+
+export const insertContractMonthlyUsageSchema = createInsertSchema(contractMonthlyUsage).omit({ id: true, createdAt: true });
+export type ContractMonthlyUsage = typeof contractMonthlyUsage.$inferSelect;
+export type InsertContractMonthlyUsage = z.infer<typeof insertContractMonthlyUsageSchema>;
+
+export const insertOrderExpenseSchema = createInsertSchema(orderExpenses).omit({ id: true, createdAt: true });
+export type OrderExpense = typeof orderExpenses.$inferSelect;
+export type InsertOrderExpense = z.infer<typeof insertOrderExpenseSchema>;

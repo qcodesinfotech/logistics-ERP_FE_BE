@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2 } from "lucide-react";
+import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2, Truck } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
-import type { Zone, User } from "@shared/schema";
+import type { Zone, User, Vehicle } from "@shared/schema";
 
 const zoneSchema = z.object({
   name: z.string().min(1, "Zone name is required"),
@@ -68,6 +68,9 @@ export default function ZonesPage() {
   const [selectedZoneIdForOutlets, setSelectedZoneIdForOutlets] = useState<string>("");
   const [selectedOutletIds, setSelectedOutletIds] = useState<string[]>([]);
   const [outletSearchQuery, setOutletSearchQuery] = useState("");
+
+  const [isManageTrucksDialogOpen, setIsManageTrucksDialogOpen] = useState(false);
+  const [selectedZoneIdForTrucks, setSelectedZoneIdForTrucks] = useState<string>("");
   
   // Excel import simulation state
   const [simulatedData, setSimulatedData] = useState<ExcelSimRow[]>([]);
@@ -94,6 +97,10 @@ export default function ZonesPage() {
 
   const { data: outletsList } = useQuery<any[]>({
     queryKey: ["/api/outlets"],
+  });
+
+  const { data: vehiclesList } = useQuery<Vehicle[]>({
+    queryKey: ["/api/vehicles"],
   });
 
   const { data: zoneOutlets } = useQuery<any[]>({
@@ -175,6 +182,30 @@ export default function ZonesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/zones/${selectedZoneIdForOutlets}/outlets`] });
       toast({ title: "Outlet removed from zone" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const assignTruckMutation = useMutation({
+    mutationFn: (data: { vehicleId: string; zoneId: string }) => 
+      apiRequest("PATCH", `/api/vehicles/${data.vehicleId}/zone`, { zoneId: data.zoneId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      toast({ title: "Truck assigned to zone" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const removeTruckMutation = useMutation({
+    mutationFn: (data: { vehicleId: string }) => 
+      apiRequest("PATCH", `/api/vehicles/${data.vehicleId}/zone`, { zoneId: null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      toast({ title: "Truck removed from zone" });
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -273,6 +304,10 @@ export default function ZonesPage() {
       (outlet.address && outlet.address.toLowerCase().includes(outletSearchQuery.toLowerCase()));
   }) || [];
 
+  const currentZoneForTrucks = zonesList?.find(z => z.id === selectedZoneIdForTrucks);
+  const zoneTrucks = vehiclesList?.filter(v => v.currentZoneId === selectedZoneIdForTrucks) || [];
+  const availableTrucks = vehiclesList?.filter(v => v.currentZoneId !== selectedZoneIdForTrucks && v.status === "available") || [];
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <PageHeader 
@@ -364,6 +399,17 @@ export default function ZonesPage() {
                             }}
                           >
                             Edit
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-amber-600 hover:text-amber-700" 
+                            onClick={() => {
+                              setSelectedZoneIdForTrucks(zone.id);
+                              setIsManageTrucksDialogOpen(true);
+                            }}
+                          >
+                            Manage Trucks
                           </Button>
                           <Button 
                             variant="ghost" 
@@ -741,6 +787,98 @@ export default function ZonesPage() {
           </div>
           <DialogFooter className="pt-2">
             <Button type="button" onClick={() => setIsAppendOutletsDialogOpen(false)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Trucks Dialog */}
+      <Dialog open={isManageTrucksDialogOpen} onOpenChange={setIsManageTrucksDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Manage Trucks for {currentZoneForTrucks?.name || "Zone"}</DialogTitle>
+            <DialogDescription>
+              Assign available trucks to this zone. They will be auto-allocated during daily dispatch.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-2">
+            <Tabs defaultValue="appended" className="w-full">
+              <TabsList className="grid grid-cols-2 mb-4">
+                <TabsTrigger value="appended" className="relative">
+                  Zone Trucks
+                  {zoneTrucks.length > 0 && (
+                    <span className="ml-2 bg-primary/25 text-primary font-bold rounded-full px-2.5 py-0.5 text-xs">
+                      {zoneTrucks.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="available">
+                  Available Fleet
+                  {availableTrucks.length > 0 && (
+                    <span className="ml-2 bg-muted text-muted-foreground font-semibold rounded-full px-2.5 py-0.5 text-xs">
+                      {availableTrucks.length}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="appended" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                {zoneTrucks.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    No trucks assigned to this zone yet.
+                  </div>
+                ) : (
+                  zoneTrucks.map(truck => (
+                    <div key={truck.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/40 hover:bg-accent/30 transition-colors">
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className="text-sm font-semibold text-foreground truncate">{truck.name}</span>
+                        <span className="text-xs text-muted-foreground truncate">{truck.plateNumber}</span>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 shrink-0"
+                        onClick={() => removeTruckMutation.mutate({ vehicleId: truck.id })}
+                        disabled={removeTruckMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+
+              <TabsContent value="available" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                {availableTrucks.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    No available trucks found in the fleet.
+                  </div>
+                ) : (
+                  availableTrucks.map(truck => (
+                    <div key={truck.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/30 transition-colors">
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className="text-sm font-semibold text-foreground truncate">{truck.name}</span>
+                        <span className="text-xs text-muted-foreground truncate">{truck.plateNumber}</span>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-8 gap-1 shrink-0 text-xs hover:bg-primary hover:text-white transition-colors"
+                        onClick={() => assignTruckMutation.mutate({ vehicleId: truck.id, zoneId: selectedZoneIdForTrucks })}
+                        disabled={assignTruckMutation.isPending}
+                      >
+                        <Plus className="h-3 w-3" /> Add
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+          <DialogFooter className="pt-2">
+            <Button type="button" onClick={() => setIsManageTrucksDialogOpen(false)}>
               Done
             </Button>
           </DialogFooter>

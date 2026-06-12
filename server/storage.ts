@@ -36,9 +36,17 @@ import {
   type CrmLead, type CrmDeal, type CrmActivity, type CrmLeadNote, type CrmCalendarEvent, type CrmReminder, type CrmCustomerContact, type CrmNotification, type CrmTask,
   type InsertCrmLead, type InsertCrmDeal, type InsertCrmActivity, type InsertCrmLeadNote, type InsertCrmCalendarEvent, type InsertCrmReminder, type InsertCrmCustomerContact, type InsertCrmNotification, type InsertCrmTask,
   userScopes, type UserScope,
-  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, trips, tripOrders, deliveries, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
-  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone,
+  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, orderExpenses, invoicePayments, trips, tripOrders, deliveries, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
+  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type OrderExpense, type InsertOrderExpense, type InvoicePayment, type InsertInvoicePayment, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone,
   driverZones, dispatchSheets, dispatchItems, dispatchOutletZoneOverrides, dispatchDeliveries,
+  dispatchTruckAssignments, dispatchOutletTruckAssignments, dispatchPendingQuantities, truckTransfers,
+  contractInvoices, contractMonthlyUsage,
+  type DispatchTruckAssignment, type InsertDispatchTruckAssignment,
+  type DispatchOutletTruckAssignment, type InsertDispatchOutletTruckAssignment,
+  type DispatchPendingQuantity, type InsertDispatchPendingQuantity,
+  type TruckTransfer, type InsertTruckTransfer,
+  type ContractInvoice, type InsertContractInvoice,
+  type ContractMonthlyUsage, type InsertContractMonthlyUsage,
 } from "@shared/schema";
 import { db, pool } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -536,9 +544,10 @@ export interface IStorage {
   // Logistics Orders
   getOrders(customerId?: string, zoneId?: string, status?: string): Promise<Order[]>;
   getOrder(id: string): Promise<Order | undefined>;
-  getOrderWithCharges(id: string): Promise<{ order: Order; charges: any[] } | undefined>;
+  getOrderWithCharges(id: string): Promise<{ order: Order; charges: any[]; expenses: any[] } | undefined>;
   createOrder(data: InsertOrder & { charges?: any[] }): Promise<Order>;
-  updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[] }): Promise<Order | undefined>;
+  updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[], expenses?: any[] }): Promise<Order | undefined>;
+  payOrderInvoice(id: string, payment: InsertInvoicePayment): Promise<Order>;
   deleteOrder(id: string): Promise<void>;
 
   // Logistics Trips
@@ -575,6 +584,10 @@ export interface IStorage {
   // Logistics User Activity Logs
   getUserActivityLogs(userId?: string): Promise<UserActivityLog[]>;
   createUserActivityLog(data: InsertUserActivityLog): Promise<UserActivityLog>;
+
+  // Dispatch Engine Automation
+  autoAssignZoneTrucksToSheet(sheetId: string): Promise<void>;
+  autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }>;
 }
 
 // Database storage implementation
@@ -868,24 +881,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Brands
-  async getBrands(): Promise<Brand[]> {
-    return [];
+  async getBrands(companyId?: string, branchId?: string): Promise<Brand[]> {
+    const conditions = [];
+    if (companyId) conditions.push(eq(brands.companyId, companyId));
+    if (branchId) conditions.push(eq(brands.branchId, branchId));
+    
+    if (conditions.length > 0) {
+      return db.select().from(brands).where(and(...conditions)).orderBy(desc(brands.createdAt));
+    }
+    return db.select().from(brands).orderBy(desc(brands.createdAt));
   }
 
   async getBrand(id: string): Promise<Brand | undefined> {
-    return undefined;
+    const [brand] = await db.select().from(brands).where(eq(brands.id, id));
+    return brand || undefined;
   }
 
   async createBrand(data: InsertBrand): Promise<Brand> {
-    return {} as any;
+    const [brand] = await db.insert(brands).values(data).returning();
+    return brand;
   }
 
   async updateBrand(id: string, data: Partial<InsertBrand>): Promise<Brand | undefined> {
-    return undefined;
+    const [brand] = await db.update(brands).set(data).where(eq(brands.id, id)).returning();
+    return brand || undefined;
   }
 
   async deleteBrand(id: string): Promise<void> {
-    return;
+    await db.delete(brands).where(eq(brands.id, id));
   }
 
   // Manufacturers
@@ -2373,8 +2396,23 @@ export class DatabaseStorage implements IStorage {
 
     // Get all driver names
     const allDriverIds = Array.from(new Set(allDriverZones.map(dz => dz.driverId)));
-    const allDrivers = allDriverIds.length > 0 ? await db.select().from(drivers).where(inArray(drivers.id, allDriverIds)) : [];
+    const allDrivers = allDriverIds.length > 0 ? await db.select().from(users).where(inArray(users.id, allDriverIds)) : [];
     const driverMap = new Map(allDrivers.map(d => [d.id, d]));
+
+    // Get truck assignments for this sheet
+    const truckAssigns = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
+    const allTruckIds = Array.from(new Set(truckAssigns.map(t => t.truckId)));
+    const allTrucks = allTruckIds.length > 0 ? await db.select().from(vehicles).where(inArray(vehicles.id, allTruckIds)) : [];
+    const truckMap = new Map(allTrucks.map(t => [t.id, t]));
+
+    // Get outlet-to-truck assignments
+    const truckAssignIds = truckAssigns.map(t => t.id);
+    const outletTruckAssigns = truckAssignIds.length > 0 ? await db.select().from(dispatchOutletTruckAssignments).where(inArray(dispatchOutletTruckAssignments.truckAssignmentId, truckAssignIds)) : [];
+    const outletToTruck = new Map<string, string>();
+    for (const ota of outletTruckAssigns) {
+      if (ota.outletId) outletToTruck.set(ota.outletId, ota.truckAssignmentId);
+      else outletToTruck.set(ota.outletCode, ota.truckAssignmentId);
+    }
 
     // Get delivery statuses for all items
     const itemIds = items.map(i => i.id);
@@ -2385,7 +2423,7 @@ export class DatabaseStorage implements IStorage {
     const board: Record<string, any> = {};
 
     // Add "Unassigned" bucket
-    board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], outlets: {} };
+    board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], trucks: [], outlets: {} };
 
     for (const item of items) {
       const effectiveZoneId = item.outletId ? (outletToZone.get(item.outletId) || "unassigned") : "unassigned";
@@ -2398,6 +2436,11 @@ export class DatabaseStorage implements IStorage {
           zoneId: effectiveZoneId,
           zoneName: zone?.name || "Unknown Zone",
           drivers: driverIds.map(id => driverMap.get(id)).filter(Boolean),
+          trucks: truckAssigns.filter(t => t.zoneId === effectiveZoneId).map(t => ({
+             ...t,
+             vehicle: truckMap.get(t.truckId),
+             driver: t.driverId ? driverMap.get(t.driverId) : null
+          })),
           outlets: {},
         };
       }
@@ -2411,6 +2454,7 @@ export class DatabaseStorage implements IStorage {
           outletName: outlet?.name || item.outletCode,
           isOverridden,
           overrideZoneId: isOverridden ? item.outletId ? overrideMap.get(item.outletId) : null : null,
+          truckAssignmentId: outletToTruck.get(item.outletId) || outletToTruck.get(item.outletCode) || null,
           items: [],
         };
       }
@@ -5729,11 +5773,12 @@ export class DatabaseStorage implements IStorage {
     return row || undefined;
   }
   
-  async getOrderWithCharges(id: string): Promise<{ order: Order; charges: any[] } | undefined> {
+  async getOrderWithCharges(id: string): Promise<{ order: Order; charges: any[]; expenses: any[] } | undefined> {
     const order = await this.getOrder(id);
     if (!order) return undefined;
     const chargesList = await db.select().from(orderCharges).where(eq(orderCharges.orderId, id));
-    return { order, charges: chargesList };
+    const expensesList = await db.select().from(orderExpenses).where(eq(orderExpenses.orderId, id));
+    return { order, charges: chargesList, expenses: expensesList };
   }
 
   async createOrder(data: InsertOrder & { charges?: any[] }): Promise<Order> {
@@ -5745,27 +5790,112 @@ export class DatabaseStorage implements IStorage {
       const chargesData = charges.map(c => ({ ...c, orderId: row.id }));
       await db.insert(orderCharges).values(chargesData);
     }
+    
+    // Update the corresponding RFQ status if rfqId is provided
+    if (orderData.rfqId) {
+      await db.update(rfqs).set({ status: 'converted' }).where(eq(rfqs.id, orderData.rfqId));
+    }
+    
     return row;
   }
 
-  async updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[] }): Promise<Order | undefined> {
-    const { charges, ...orderData } = data;
+  async updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[], expenses?: any[] }): Promise<Order | undefined> {
+    const { charges, expenses, ...orderData } = data;
+    delete (orderData as any).id;
+    delete (orderData as any).createdAt;
     if (orderData.orderDate && typeof orderData.orderDate === 'string') orderData.orderDate = new Date(orderData.orderDate) as any;
     if (orderData.paymentDueDate && typeof orderData.paymentDueDate === 'string') orderData.paymentDueDate = new Date(orderData.paymentDueDate) as any;
     const [row] = await db.update(orders).set(orderData as any).where(eq(orders.id, id)).returning();
-    if (row && charges) {
+    
+    if (row && charges !== undefined) {
       await db.delete(orderCharges).where(eq(orderCharges.orderId, id));
       if (charges.length > 0) {
         const chargesData = charges.map(c => ({ ...c, orderId: id }));
         await db.insert(orderCharges).values(chargesData);
       }
     }
+
+    if (row && expenses !== undefined) {
+      await db.delete(orderExpenses).where(eq(orderExpenses.orderId, id));
+      if (expenses.length > 0) {
+        const expensesData = expenses.map(e => ({ ...e, orderId: id }));
+        await db.insert(orderExpenses).values(expensesData);
+      }
+    }
+
     return row || undefined;
   }
 
   async deleteOrder(id: string): Promise<void> {
     await db.delete(orderCharges).where(eq(orderCharges.orderId, id));
     await db.delete(orders).where(eq(orders.id, id));
+  }
+
+  async payOrderInvoice(id: string, payment: InsertInvoicePayment): Promise<Order> {
+    const order = await this.getOrder(id);
+    if (!order) throw new Error("Order not found");
+
+    // Insert payment record
+    const [insertedPayment] = await db.insert(invoicePayments).values({
+      ...payment,
+      orderId: id,
+    }).returning();
+
+    // Update order paidAmount and paymentStatus
+    const newPaidAmount = Number(order.paidAmount || 0) + Number(payment.amount);
+    const grandTotal = Number(order.grandTotal || 0);
+    const paymentStatus = newPaidAmount >= grandTotal ? "paid" : "partial";
+
+    const [updatedOrder] = await db.update(orders)
+      .set({ paidAmount: newPaidAmount.toFixed(3), paymentStatus })
+      .where(eq(orders.id, id))
+      .returning();
+
+    const client = await this.getClient(payment.customerId);
+
+    // Create a transaction in Chart of Accounts ledger (bank or petty cash)
+    // Using createBankTransaction ensures currentBalance is updated on the bank account
+    if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
+      if (payment.bankAccountId) {
+        await this.createBankTransaction({
+          bankAccountId: payment.bankAccountId,
+          branchId: "1", // will be overridden by createBankTransaction from the account's own branchId
+          type: "deposit",
+          amount: String(payment.amount),
+          reference: payment.reference || null,
+          description: `Logistics Invoice Payment for Order ${order.orderNumber}`,
+          relatedType: "logistics_invoice",
+          relatedId: id,
+        });
+      }
+    } else if (payment.paymentMethod === 'cash') {
+      if (payment.pettyCashId) {
+        // Directly insert a receipt transaction and update petty cash balance
+        // (Cash received from client is an incoming receipt, not an internal petty cash deposit)
+        await db.transaction(async (tx) => {
+          const [pc] = await tx.select().from(pettyCash).where(eq(pettyCash.id, payment.pettyCashId!));
+          if (!pc) throw new Error("Petty cash account not found");
+
+          await tx.insert(pettyCashTransactions).values({
+            pettyCashId: payment.pettyCashId!,
+            branchId: pc.branchId || client?.branchId || "1",
+            type: "receipt",
+            amount: String(payment.amount),
+            reference: payment.reference || null,
+            description: `Logistics Invoice Cash Receipt for Order ${order.orderNumber}`,
+          });
+
+          // Add to petty cash balance (cash received = increase balance)
+          const currentBalance = parseFloat(pc.currentBalance || "0");
+          const newBalance = currentBalance + Number(payment.amount);
+          await tx.update(pettyCash)
+            .set({ currentBalance: newBalance.toFixed(3) })
+            .where(eq(pettyCash.id, payment.pettyCashId!));
+        });
+      }
+    }
+
+    return updatedOrder;
   }
 
   // Logistics Trips
@@ -5966,6 +6096,277 @@ export class DatabaseStorage implements IStorage {
 
   async createUserActivityLog(data: InsertUserActivityLog): Promise<UserActivityLog> {
     const [row] = await db.insert(userActivityLogs).values(data).returning();
+    return row;
+  }
+
+  // ====================== DISPATCH TRUCK PLANNING ======================
+  async getDispatchTruckAssignments(sheetId: string): Promise<DispatchTruckAssignment[]> {
+    return db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
+  }
+
+  async createDispatchTruckAssignment(data: InsertDispatchTruckAssignment): Promise<DispatchTruckAssignment> {
+    const [row] = await db.insert(dispatchTruckAssignments).values(data).returning();
+    return row;
+  }
+
+  async updateDispatchTruckAssignment(id: string, data: Partial<InsertDispatchTruckAssignment>): Promise<DispatchTruckAssignment | undefined> {
+    const [row] = await db.update(dispatchTruckAssignments).set(data as any).where(eq(dispatchTruckAssignments.id, id)).returning();
+    return row;
+  }
+
+  async deleteDispatchTruckAssignment(id: string): Promise<void> {
+    await db.delete(dispatchOutletTruckAssignments).where(eq(dispatchOutletTruckAssignments.truckAssignmentId, id));
+    await db.delete(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.id, id));
+  }
+
+  async getDispatchOutletTruckAssignments(truckAssignmentId: string): Promise<DispatchOutletTruckAssignment[]> {
+    return db.select().from(dispatchOutletTruckAssignments).where(eq(dispatchOutletTruckAssignments.truckAssignmentId, truckAssignmentId));
+  }
+
+  async getDispatchOutletTruckAssignmentsBySheet(sheetId: string): Promise<DispatchOutletTruckAssignment[]> {
+    const truckAssigns = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
+    if (truckAssigns.length === 0) return [];
+    const ids = truckAssigns.map(t => t.id);
+    return db.select().from(dispatchOutletTruckAssignments).where(inArray(dispatchOutletTruckAssignments.truckAssignmentId, ids));
+  }
+
+  async upsertDispatchOutletTruckAssignment(data: InsertDispatchOutletTruckAssignment): Promise<DispatchOutletTruckAssignment> {
+    const [row] = await db.insert(dispatchOutletTruckAssignments).values(data).returning();
+    return row;
+  }
+
+  async moveOutletBetweenTrucks(outletCode: string, newTruckAssignmentId: string, reason?: string): Promise<void> {
+    await db.update(dispatchOutletTruckAssignments)
+      .set({ truckAssignmentId: newTruckAssignmentId, overrideReason: reason || null } as any)
+      .where(eq(dispatchOutletTruckAssignments.outletCode, outletCode));
+  }
+
+  async autoAssignZoneTrucksToSheet(sheetId: string): Promise<void> {
+    // 1. Get all dispatch items for this sheet
+    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
+    if (outletIds.length === 0) return;
+
+    // 2. Look up zones for these outlets
+    const assignedZones = await db.select().from(outletZones).where(inArray(outletZones.outletId, outletIds));
+    const zoneIds = Array.from(new Set(assignedZones.map(z => z.zoneId)));
+    if (zoneIds.length === 0) return;
+
+    // 3. Find all available vehicles currently assigned to these zones
+    const zoneVehicles = await db.select().from(vehicles)
+      .where(
+        and(
+          inArray(vehicles.currentZoneId, zoneIds),
+          eq(vehicles.status, "available")
+        )
+      );
+    if (zoneVehicles.length === 0) return;
+
+    // 4. Create dispatchTruckAssignments for these vehicles
+    // First clear any existing ones for safety
+    await db.delete(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
+
+    const assignmentsToInsert = zoneVehicles.map(v => ({
+      sheetId,
+      truckId: v.id,
+      driverId: v.assignedDriverId || null,
+      zoneId: v.currentZoneId!,
+      usedCapacity: "0"
+    }));
+
+    if (assignmentsToInsert.length > 0) {
+      await db.insert(dispatchTruckAssignments).values(assignmentsToInsert);
+    }
+  }
+
+  async autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }> {
+    // Get all dispatch items for this sheet, grouped by outlet
+    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    const outletMap: Record<string, { outletCode: string; outletId: string | null; totalWeight: number }> = {};
+    for (const item of items) {
+      if (!outletMap[item.outletCode]) {
+        outletMap[item.outletCode] = { outletCode: item.outletCode, outletId: item.outletId, totalWeight: 0 };
+      }
+      outletMap[item.outletCode].totalWeight += parseFloat(item.weight || "0");
+    }
+    const outlets = Object.values(outletMap).sort((a, b) => b.totalWeight - a.totalWeight); // Descending weight (FFD)
+
+    // Get truck assignments for this sheet
+    const truckAssigns = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
+    const truckCaps = await Promise.all(truckAssigns.map(async t => {
+      const veh = await db.select().from(vehicles).where(eq(vehicles.id, t.truckId));
+      const cap = parseFloat(veh[0]?.capacity || "0");
+      return { ...t, capacity: cap, remaining: cap - parseFloat(t.usedCapacity || "0") };
+    }));
+
+    // Clear existing outlet assignments for this sheet before re-allocating
+    const truckIds = truckCaps.map(t => t.id);
+    if (truckIds.length > 0) {
+      await db.delete(dispatchOutletTruckAssignments).where(inArray(dispatchOutletTruckAssignments.truckAssignmentId, truckIds));
+    }
+
+    const overflow: string[] = [];
+    let allocated = 0;
+
+    for (const outlet of outlets) {
+      const truck = truckCaps.find(t => t.remaining >= outlet.totalWeight);
+      if (!truck) {
+        overflow.push(outlet.outletCode);
+        continue;
+      }
+      await db.insert(dispatchOutletTruckAssignments).values({
+        truckAssignmentId: truck.id,
+        outletCode: outlet.outletCode,
+        outletId: outlet.outletId || null,
+        assignedWeight: outlet.totalWeight.toFixed(3),
+      });
+      truck.remaining -= outlet.totalWeight;
+      // Update usedCapacity on truck assignment
+      await db.update(dispatchTruckAssignments)
+        .set({ usedCapacity: (truck.capacity - truck.remaining).toFixed(3) } as any)
+        .where(eq(dispatchTruckAssignments.id, truck.id));
+      allocated++;
+    }
+    return { allocated, overflow };
+  }
+
+  // Pending quantities
+  async getPendingQuantities(): Promise<DispatchPendingQuantity[]> {
+    return db.select().from(dispatchPendingQuantities).where(eq(dispatchPendingQuantities.isCarriedForward, false));
+  }
+
+  async createPendingQuantity(data: InsertDispatchPendingQuantity): Promise<DispatchPendingQuantity> {
+    const [row] = await db.insert(dispatchPendingQuantities).values(data).returning();
+    return row;
+  }
+
+  async markPendingCarriedForward(id: string): Promise<void> {
+    await db.update(dispatchPendingQuantities).set({ isCarriedForward: true } as any).where(eq(dispatchPendingQuantities.id, id));
+  }
+
+  // Truck transfers
+  async getTruckTransfers(truckId?: string): Promise<TruckTransfer[]> {
+    if (truckId) {
+      return db.select().from(truckTransfers).where(eq(truckTransfers.truckId, truckId));
+    }
+    return db.select().from(truckTransfers).orderBy(desc(truckTransfers.createdAt));
+  }
+
+  async createTruckTransfer(data: InsertTruckTransfer): Promise<TruckTransfer> {
+    // If permanent, update the vehicle's zone
+    if (data.transferType === "permanent" && data.toZoneId) {
+      await db.update(vehicles).set({ currentZoneId: data.toZoneId } as any).where(eq(vehicles.id, data.truckId));
+    }
+    const [row] = await db.insert(truckTransfers).values(data).returning();
+    return row;
+  }
+
+  async updateTruckTransfer(id: string, data: Partial<InsertTruckTransfer>): Promise<TruckTransfer | undefined> {
+    const [row] = await db.update(truckTransfers).set(data as any).where(eq(truckTransfers.id, id)).returning();
+    return row;
+  }
+
+  // ====================== CONTRACT INVOICE ENGINE ======================
+  async getContractInvoices(contractId?: string, customerId?: string): Promise<ContractInvoice[]> {
+    const conditions = [];
+    if (contractId) conditions.push(eq(contractInvoices.contractId, contractId));
+    if (customerId) conditions.push(eq(contractInvoices.customerId, customerId));
+    if (conditions.length > 0) {
+      return db.select().from(contractInvoices).where(and(...conditions)).orderBy(desc(contractInvoices.createdAt));
+    }
+    return db.select().from(contractInvoices).orderBy(desc(contractInvoices.createdAt));
+  }
+
+  async getContractInvoice(id: string): Promise<ContractInvoice | undefined> {
+    const [row] = await db.select().from(contractInvoices).where(eq(contractInvoices.id, id));
+    return row;
+  }
+
+  async generateContractInvoice(contractId: string, periodStart: string, periodEnd: string): Promise<ContractInvoice> {
+    const contract = await this.getContract(contractId);
+    if (!contract) throw new Error("Contract not found");
+
+    // Fetch or default monthly usage
+    const usageRows = await db.select().from(contractMonthlyUsage)
+      .where(and(eq(contractMonthlyUsage.contractId, contractId), eq(contractMonthlyUsage.periodMonth, periodStart)));
+    const usage = usageRows[0];
+
+    const otHours = parseFloat(usage?.otHours || "0");
+    const holidayDays = usage?.holidayDays || 0;
+    const extraTruckTrips = usage?.extraTruckTrips || 0;
+    const emergencyTrips = usage?.emergencyTrips || 0;
+    const redeliveryTrips = usage?.redeliveryTrips || 0;
+    const outsourcedTrips = usage?.outsourcedTrips || 0;
+
+    const otRate = parseFloat(contract.otCharges || "0");
+    const holidayRate = parseFloat(contract.holidayCharges || "0");
+    const extraTruckRate = parseFloat(contract.extraTruckCharge || "0");
+    const emergencyRate = parseFloat(contract.emergencyDeliveryCharge || "0");
+    const redeliveryRate = parseFloat(contract.redeliveryCharge || "0");
+    const outsourcedRate = parseFloat(contract.outsourcedVehicleCharge || "0");
+
+    const baseAmount = parseFloat(contract.monthlyRate || "0") * (contract.numVehicles || 1);
+    const otAmount = otHours * otRate;
+    const holidayAmount = holidayDays * holidayRate;
+    const extraTruckAmount = extraTruckTrips * extraTruckRate;
+    const emergencyAmount = emergencyTrips * emergencyRate;
+    const redeliveryAmount = redeliveryTrips * redeliveryRate;
+    const outsourcedAmount = outsourcedTrips * outsourcedRate;
+
+    const totalAmount = baseAmount + otAmount + holidayAmount + extraTruckAmount + emergencyAmount + redeliveryAmount + outsourcedAmount;
+
+    const invoiceNumber = `CINV-${Date.now()}`;
+
+    const [row] = await db.insert(contractInvoices).values({
+      invoiceNumber,
+      contractId,
+      customerId: contract.customerId,
+      periodStart,
+      periodEnd,
+      baseAmount: baseAmount.toFixed(3),
+      otHours: otHours.toFixed(2),
+      otAmount: otAmount.toFixed(3),
+      holidayDays,
+      holidayAmount: holidayAmount.toFixed(3),
+      extraTruckTrips,
+      extraTruckAmount: extraTruckAmount.toFixed(3),
+      emergencyTrips,
+      emergencyAmount: emergencyAmount.toFixed(3),
+      redeliveryTrips,
+      redeliveryAmount: redeliveryAmount.toFixed(3),
+      outsourcedTrips,
+      outsourcedAmount: outsourcedAmount.toFixed(3),
+      discount: "0",
+      creditAmount: "0",
+      totalAmount: totalAmount.toFixed(3),
+      status: "draft",
+    } as any).returning();
+    return row;
+  }
+
+  async updateContractInvoice(id: string, data: Partial<InsertContractInvoice>): Promise<ContractInvoice | undefined> {
+    const [row] = await db.update(contractInvoices)
+      .set({ ...data as any, updatedAt: new Date() })
+      .where(eq(contractInvoices.id, id))
+      .returning();
+    return row;
+  }
+
+  // Monthly usage
+  async getContractMonthlyUsage(contractId: string, month?: string): Promise<ContractMonthlyUsage[]> {
+    if (month) {
+      return db.select().from(contractMonthlyUsage).where(and(eq(contractMonthlyUsage.contractId, contractId), eq(contractMonthlyUsage.periodMonth, month)));
+    }
+    return db.select().from(contractMonthlyUsage).where(eq(contractMonthlyUsage.contractId, contractId));
+  }
+
+  async upsertContractMonthlyUsage(contractId: string, month: string, data: Partial<InsertContractMonthlyUsage>): Promise<ContractMonthlyUsage> {
+    const existing = await this.getContractMonthlyUsage(contractId, month);
+    if (existing.length > 0) {
+      const [row] = await db.update(contractMonthlyUsage).set(data as any).where(eq(contractMonthlyUsage.id, existing[0].id)).returning();
+      return row;
+    }
+    const [row] = await db.insert(contractMonthlyUsage).values({ contractId, periodMonth: month, ...data } as any).returning();
     return row;
   }
 }

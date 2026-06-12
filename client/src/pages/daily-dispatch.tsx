@@ -41,10 +41,12 @@ interface DispatchItem {
 interface OutletGroup {
   outletId: string | null; outletCode: string; outletName: string;
   isOverridden: boolean; overrideZoneId: string | null; items: DispatchItem[];
+  truckAssignmentId: string | null;
 }
 interface ZoneGroup {
   zoneId: string; zoneName: string;
   drivers: { id: string; name: string }[];
+  trucks?: { id: string; usedCapacity: string; vehicle: any; driver: any }[];
   outlets: OutletGroup[];
 }
 interface BoardData { zones: ZoneGroup[]; overrides: any[]; }
@@ -102,6 +104,8 @@ function DeliveryDialog({
   const [status, setStatus] = useState(item.delivery?.status || "pending");
   const [deliveredQty, setDeliveredQty] = useState(item.delivery?.deliveredQty || item.totalDelivered || item.weight || "");
   const [remainingQty, setRemainingQty] = useState(item.delivery?.remainingQty || item.remaining || "0");
+  const [damagedQty, setDamagedQty] = useState(item.delivery?.damagedQty || "0");
+  const [damageReason, setDamageReason] = useState(item.delivery?.damageReason || "");
   const [remark, setRemark] = useState(item.delivery?.remark || "");
 
   return (
@@ -141,14 +145,27 @@ function DeliveryDialog({
               <Input type="number" value={remainingQty} onChange={e => setRemainingQty(e.target.value)} placeholder="0" />
             </div>
           </div>
+          
+          {/* Damaged fields */}
+          <div className="grid grid-cols-2 gap-3 p-3 bg-red-50/50 rounded-lg border border-red-100">
+            <div className="space-y-2">
+              <Label className="text-red-700">Damaged Qty</Label>
+              <Input type="number" value={damagedQty} onChange={e => setDamagedQty(e.target.value)} placeholder="0" className="border-red-200" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-red-700">Damage Reason</Label>
+              <Input value={damageReason} onChange={e => setDamageReason(e.target.value)} placeholder="Reason..." className="border-red-200" />
+            </div>
+          </div>
+
           <div className="space-y-2">
-            <Label>Remark (damage, reason, etc.)</Label>
+            <Label>General Remark</Label>
             <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="Optional notes..." rows={2} />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => onSave({ status, deliveredQty, remainingQty, remark })}>Save Delivery</Button>
+          <Button onClick={() => onSave({ status, deliveredQty, remainingQty, damagedQty, damageReason, remark })}>Save Delivery</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -197,9 +214,10 @@ function ZoneOverrideDialog({
 
 // ===== Outlet Card =====
 function OutletCard({
-  outlet, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride,
+  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
+  assignedTruck?: { vehicle: any; driver: any } | null;
   onDeliveryUpdate: (item: DispatchItem) => void;
   onOverride: (outlet: OutletGroup) => void;
 }) {
@@ -222,6 +240,12 @@ function OutletCard({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {assignedTruck && (
+            <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 text-[10px] h-6 px-1.5 gap-1 shadow-sm" title={`Assigned to truck: ${assignedTruck.vehicle?.name}`}>
+              <Truck className="h-3 w-3" />
+              <span className="max-w-[60px] truncate">{assignedTruck.vehicle?.name || "Truck"}</span>
+            </Badge>
+          )}
           {outlet.isOverridden && (
             <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-xs">Override</Badge>
           )}
@@ -301,8 +325,37 @@ function ZoneColumn({
             {deliveredItems}/{totalItems}
           </Badge>
         </div>
-        {zone.drivers.length > 0 && (
-          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+        {zone.trucks && zone.trucks.length > 0 ? (
+          <div className="flex flex-col gap-2 mt-2">
+            {zone.trucks.map(t => {
+              const capacity = parseFloat(t.vehicle?.capacity || "0");
+              const used = parseFloat(t.usedCapacity || "0");
+              const isOver = used > capacity && capacity > 0;
+              return (
+                <div key={t.id} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
+                  <div className="flex items-center justify-between font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <Truck className="h-3.5 w-3.5 text-primary" />
+                      <span className="truncate max-w-[100px]" title={t.vehicle?.name}>{t.vehicle?.name || 'Unknown Truck'}</span>
+                    </div>
+                    {capacity > 0 && (
+                      <span className={isOver ? "text-red-600 font-bold" : "text-emerald-600"}>
+                        {used.toFixed(1)} / {capacity.toFixed(0)} kg
+                      </span>
+                    )}
+                  </div>
+                  {t.driver && (
+                    <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1">
+                      <User className="h-3 w-3" />
+                      <span className="truncate">{t.driver.name}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : zone.drivers.length > 0 ? (
+          <div className="flex items-center gap-1.5 flex-wrap mt-2">
             {zone.drivers.map(d => (
               <div key={d.id} className="flex items-center gap-1 bg-background rounded-full px-2 py-0.5 border text-xs">
                 <User className="h-3 w-3 text-primary" />
@@ -310,9 +363,8 @@ function ZoneColumn({
               </div>
             ))}
           </div>
-        )}
-        {!isUnassigned && zone.drivers.length === 0 && (
-          <p className="text-xs text-muted-foreground italic mt-1">No driver assigned to this zone</p>
+        ) : !isUnassigned && (
+          <p className="text-xs text-muted-foreground italic mt-2">No trucks or drivers assigned</p>
         )}
       </div>
       {/* Outlets */}
@@ -320,14 +372,18 @@ function ZoneColumn({
         {zone.outlets.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground text-sm">No outlets in this zone</div>
         ) : (
-          zone.outlets.map((outlet, i) => (
-            <OutletCard key={outlet.outletId || outlet.outletCode + i}
-              outlet={outlet} sheetId={sheetId} zones={zones}
-              isSupervisor={isSupervisor}
-              onDeliveryUpdate={onDeliveryUpdate}
-              onOverride={onOverride}
-            />
-          ))
+          zone.outlets.map((outlet, i) => {
+            const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
+            return (
+              <OutletCard key={outlet.outletId || outlet.outletCode + i}
+                outlet={outlet} sheetId={sheetId} zones={zones}
+                isSupervisor={isSupervisor}
+                assignedTruck={assignedTruck}
+                onDeliveryUpdate={onDeliveryUpdate}
+                onOverride={onOverride}
+              />
+            );
+          })
         )}
       </div>
     </div>
@@ -491,10 +547,13 @@ export default function DailyDispatchPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
         <div className="px-6 pt-4 border-b bg-background">
-          <TabsList className="gap-1">
+        <TabsList className="gap-1 flex-wrap">
             <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
+            <TabsTrigger value="trucks" className="gap-2"><Truck className="h-4 w-4" />Truck Planning</TabsTrigger>
+            <TabsTrigger value="pending" className="gap-2"><Package className="h-4 w-4" />Pending</TabsTrigger>
             <TabsTrigger value="upload" className="gap-2"><Upload className="h-4 w-4" />Upload Sheet</TabsTrigger>
             <TabsTrigger value="drivers" className="gap-2"><User className="h-4 w-4" />Driver Zones</TabsTrigger>
+            <TabsTrigger value="transfers" className="gap-2"><ArrowRight className="h-4 w-4" />Transfers</TabsTrigger>
           </TabsList>
         </div>
 
@@ -570,6 +629,16 @@ export default function DailyDispatchPage() {
               </div>
             </div>
           )}
+        </TabsContent>
+
+        {/* ===== TRUCK PLANNING TAB ===== */}
+        <TabsContent value="trucks" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
+          <TruckPlanningTab boardSheetId={boardSheetId} zones={zones} drivers={drivers} selectedDate={selectedDate} onSelectSheet={(id) => { setBoardSheetId(id); }} sheets={sheets} />
+        </TabsContent>
+
+        {/* ===== PENDING QUANTITIES TAB ===== */}
+        <TabsContent value="pending" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
+          <PendingQuantitiesTab />
         </TabsContent>
 
         {/* ===== UPLOAD TAB ===== */}
@@ -792,6 +861,11 @@ export default function DailyDispatchPage() {
             </Card>
           </div>
         </TabsContent>
+
+        {/* ===== TRANSFERS TAB ===== */}
+        <TabsContent value="transfers" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
+          <TruckTransfersTab zones={zones} vehicles={[]} />
+        </TabsContent>
       </Tabs>
 
       {/* Delivery Dialog */}
@@ -815,6 +889,390 @@ export default function DailyDispatchPage() {
           })}
         />
       )}
+    </div>
+  );
+}
+
+// ===== TRUCK PLANNING TAB =====
+function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelectSheet, sheets }: any) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "" });
+
+  const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
+
+  const { data: truckData, refetch } = useQuery<any>({
+    queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`],
+    enabled: !!boardSheetId,
+  });
+
+  const sheetForDate = sheets.find((s: any) => s.date === selectedDate);
+  const truckAssignments = truckData?.trucks || [];
+  const outletAssignments = truckData?.outletAssignments || [];
+
+  const addTruckMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", `/api/dispatch/sheets/${boardSheetId}/trucks`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] }); toast({ title: "Truck added to dispatch!" }); setTruckForm({ truckId: "", driverId: "", zoneId: "" }); },
+    onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
+  });
+
+  const removeTruckMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/trucks/${id}`),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] }); toast({ title: "Truck removed" }); },
+  });
+
+  const autoAllocateMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/dispatch/sheets/${boardSheetId}/trucks/auto-allocate`, {}),
+    onSuccess: async (res) => {
+      const data = await res.json();
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      const msg = data.overflow?.length > 0 ? `Allocated ${data.allocated} outlets. ⚠ ${data.overflow.length} outlets couldn't fit any truck.` : `✅ Allocated ${data.allocated} outlets across trucks.`;
+      toast({ title: msg });
+    },
+    onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
+  });
+
+  const getVehicleInfo = (id: string) => vehiclesList.find((v: any) => v.id === id);
+  const getDriverName = (id: string) => drivers.find((d: any) => d.id === id)?.name || "Unassigned";
+  const getZoneName = (id: string) => zones.find((z: any) => z.id === id)?.name || "Unknown";
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      {!boardSheetId ? (
+        <Card>
+          <CardContent className="p-12 text-center text-muted-foreground">
+            <Truck className="h-10 w-10 mx-auto mb-3 text-primary/40" />
+            <p className="font-medium">Select a dispatch sheet first</p>
+            <p className="text-sm">Go to the Dispatch Board tab, pick a date, and load a sheet. Then return here to plan trucks.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Add Truck */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Plus className="h-4 w-4 text-primary" /> Add Truck to Today's Dispatch
+              </CardTitle>
+              <CardDescription>Assign a vehicle and driver to a zone for this dispatch sheet.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Vehicle / Truck</Label>
+                  <Select value={truckForm.truckId} onValueChange={v => setTruckForm(f => ({ ...f, truckId: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select vehicle..." /></SelectTrigger>
+                    <SelectContent>
+                      {vehiclesList.filter((v: any) => v.status === "available").map((v: any) => (
+                        <SelectItem key={v.id} value={v.id}>{v.plateNumber} — {v.name} ({v.capacity || "?"} T)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Driver (Optional)</Label>
+                  <Select value={truckForm.driverId} onValueChange={v => setTruckForm(f => ({ ...f, driverId: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select driver..." /></SelectTrigger>
+                    <SelectContent>
+                      {drivers.filter((d: any) => d.status === "active").map((d: any) => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Zone</Label>
+                  <Select value={truckForm.zoneId} onValueChange={v => setTruckForm(f => ({ ...f, zoneId: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
+                    <SelectContent>
+                      {zones.map((z: any) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => addTruckMutation.mutate(truckForm)} disabled={!truckForm.truckId || !truckForm.zoneId || addTruckMutation.isPending} className="gap-2">
+                  <Plus className="h-4 w-4" /> Add Truck
+                </Button>
+                <Button variant="outline" onClick={() => autoAllocateMutation.mutate()} disabled={truckAssignments.length === 0 || autoAllocateMutation.isPending} className="gap-2">
+                  <RefreshCw className={`h-4 w-4 ${autoAllocateMutation.isPending ? "animate-spin" : ""}`} /> Auto-Allocate Outlets (FFD)
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Truck Capacity Board */}
+          {truckAssignments.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {truckAssignments.map((ta: any) => {
+                const veh = getVehicleInfo(ta.truckId);
+                const cap = parseFloat(veh?.capacity || "0");
+                const used = parseFloat(ta.usedCapacity || "0");
+                const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+                const outletsOnTruck = outletAssignments.filter((o: any) => o.truckAssignmentId === ta.id);
+
+                return (
+                  <Card key={ta.id} className={`border ${pct >= 90 ? "border-red-300 bg-red-50/30" : pct >= 70 ? "border-amber-300" : "border-border"}`}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-bold text-sm font-mono">{veh?.plateNumber || ta.truckId}</p>
+                          <p className="text-xs text-muted-foreground">{veh?.name} · {getZoneName(ta.zoneId)}</p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <User className="h-3 w-3" />{getDriverName(ta.driverId)}
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => removeTruckMutation.mutate(ta.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2 pt-0">
+                      {/* Capacity Bar */}
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-muted-foreground">Capacity</span>
+                          <span className={pct >= 90 ? "text-red-600 font-semibold" : "text-muted-foreground"}>{used.toFixed(1)}T / {cap.toFixed(1)}T ({pct.toFixed(0)}%)</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                      {/* Outlets */}
+                      {outletsOnTruck.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          <p className="text-xs font-semibold text-muted-foreground">Assigned Outlets:</p>
+                          {outletsOnTruck.map((o: any) => (
+                            <div key={o.id} className="flex justify-between text-xs bg-muted/40 px-2 py-1 rounded">
+                              <span className="font-medium">{o.outletCode}</span>
+                              <span className="text-muted-foreground">{parseFloat(o.assignedWeight || "0").toFixed(1)}T</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {pct >= 90 && (
+                        <div className="flex items-center gap-1 text-xs text-red-600 font-medium">
+                          <AlertTriangle className="h-3 w-3" /> Near capacity overflow risk!
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===== PENDING QUANTITIES TAB =====
+function PendingQuantitiesTab() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: pending = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/dispatch/pending"] });
+
+  const carryForwardMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("PATCH", `/api/dispatch/pending/${id}/carry-forward`, {}),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending"] }); toast({ title: "Marked as carried forward" }); },
+  });
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Package className="h-4 w-4 text-primary" /> Pending Delivery Quantities
+          </CardTitle>
+          <CardDescription>
+            These quantities were not delivered in previous dispatch sheets. They are automatically included in future planning.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-8 text-center text-muted-foreground">Loading...</div>
+          ) : pending.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground">
+              <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-emerald-500/60" />
+              <p className="font-medium">No pending quantities!</p>
+              <p className="text-sm">All deliveries are up to date.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Outlet</TableHead>
+                  <TableHead>Item Code</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Pending Qty</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Source Sheet</TableHead>
+                  <TableHead className="w-24"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pending.map((p: any) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-medium">{p.outletCode}</TableCell>
+                    <TableCell className="font-mono text-xs">{p.itemCode}</TableCell>
+                    <TableCell className="text-muted-foreground text-xs">{p.description || "—"}</TableCell>
+                    <TableCell className="text-right font-semibold text-amber-600">{parseFloat(p.pendingQty).toFixed(3)}</TableCell>
+                    <TableCell className="text-xs">{p.reason || "—"}</TableCell>
+                    <TableCell className="text-xs font-mono text-muted-foreground">{p.sourceSheetId?.slice(0, 8)}...</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => carryForwardMutation.mutate(p.id)}>
+                        <Check className="h-3 w-3 mr-1" /> Resolve
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ===== TRUCK TRANSFERS TAB =====
+function TruckTransfersTab({ zones, vehicles: _v }: any) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({ truckId: "", fromZoneId: "", toZoneId: "", transferType: "temporary", startDate: "", endDate: "", reason: "", remarks: "" });
+
+  const { data: transfers = [] } = useQuery<any[]>({ queryKey: ["/api/truck-transfers"] });
+  const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
+
+  const createMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/truck-transfers", form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/truck-transfers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      toast({ title: "Truck transfer recorded!" });
+      setForm({ truckId: "", fromZoneId: "", toZoneId: "", transferType: "temporary", startDate: "", endDate: "", reason: "", remarks: "" });
+    },
+    onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
+  });
+
+  const getVehiclePlate = (id: string) => vehiclesList.find((v: any) => v.id === id)?.plateNumber || id;
+  const getZoneName = (id: string) => zones.find((z: any) => z.id === id)?.name || "—";
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <ArrowRight className="h-4 w-4 text-primary" /> Log Truck Transfer
+          </CardTitle>
+          <CardDescription>Record temporary or permanent truck zone transfers. Permanent transfers will update the vehicle's home zone.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>Truck</Label>
+              <Select value={form.truckId} onValueChange={v => setForm(f => ({ ...f, truckId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select truck..." /></SelectTrigger>
+                <SelectContent>{vehiclesList.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plateNumber} — {v.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>From Zone</Label>
+              <Select value={form.fromZoneId} onValueChange={v => setForm(f => ({ ...f, fromZoneId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Current zone..." /></SelectTrigger>
+                <SelectContent>{zones.map((z: any) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>To Zone *</Label>
+              <Select value={form.toZoneId} onValueChange={v => setForm(f => ({ ...f, toZoneId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Target zone..." /></SelectTrigger>
+                <SelectContent>{zones.map((z: any) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Transfer Type</Label>
+              <Select value={form.transferType} onValueChange={v => setForm(f => ({ ...f, transferType: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="temporary">Temporary (Date-limited)</SelectItem>
+                  <SelectItem value="permanent">Permanent (Zone change)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Start Date *</Label>
+              <Input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} />
+            </div>
+            {form.transferType === "temporary" && (
+              <div className="space-y-2">
+                <Label>End Date (Return Date)</Label>
+                <Input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} />
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} placeholder="e.g. Capacity exceeded, breakdown..." />
+            </div>
+            <div className="space-y-2">
+              <Label>Remarks</Label>
+              <Input value={form.remarks} onChange={e => setForm(f => ({ ...f, remarks: e.target.value }))} placeholder="Additional notes..." />
+            </div>
+          </div>
+          <Button onClick={() => createMutation.mutate()} disabled={!form.truckId || !form.toZoneId || !form.startDate || createMutation.isPending} className="gap-2">
+            <Plus className="h-4 w-4" />{createMutation.isPending ? "Saving..." : "Record Transfer"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Transfer History */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Transfer History</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {transfers.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">No transfers recorded yet.</div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Truck</TableHead>
+                  <TableHead>From Zone</TableHead>
+                  <TableHead>To Zone</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Start</TableHead>
+                  <TableHead>End</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transfers.map((t: any) => (
+                  <TableRow key={t.id}>
+                    <TableCell className="font-mono font-semibold">{getVehiclePlate(t.truckId)}</TableCell>
+                    <TableCell className="text-xs">{getZoneName(t.fromZoneId)}</TableCell>
+                    <TableCell className="text-xs font-semibold">{getZoneName(t.toZoneId)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={t.transferType === "permanent" ? "bg-red-50 text-red-700 border-red-200" : "bg-blue-50 text-blue-700 border-blue-200"}>
+                        {t.transferType}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs font-mono">{t.startDate}</TableCell>
+                    <TableCell className="text-xs font-mono">{t.endDate || "Open"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{t.reason || "—"}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={t.status === "active" ? "bg-emerald-50 text-emerald-700" : ""}>{t.status}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

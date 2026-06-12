@@ -53,6 +53,7 @@ import DailyDispatchPage from "@/pages/daily-dispatch";
 import DriverHubPage from "@/pages/driver-hub";
 import FinanceExpandedPage from "@/pages/finance-expanded";
 import SettingsPage from "@/pages/settings";
+import ContractInvoicesPage from "@/pages/contract-invoices";
 
 function PrivateRouter() {
   return (
@@ -85,6 +86,7 @@ function PrivateRouter() {
       <Route path="/logistics/daily-dispatch" component={DailyDispatchPage} />
       <Route path="/logistics/driver-hub" component={DriverHubPage} />
       <Route path="/logistics/finance" component={FinanceExpandedPage} />
+      <Route path="/logistics/contract-invoices" component={ContractInvoicesPage} />
       <Route path="/settings" component={SettingsPage} />
 
       <Route component={NotFound} />

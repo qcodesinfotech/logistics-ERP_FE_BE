@@ -62,7 +62,15 @@ import {
   dispatchOutletZoneOverrides,
   dispatchDeliveries,
   driverZones,
-  orderCharges
+  orderCharges,
+  brands,
+  dispatchTruckAssignments,
+  dispatchOutletTruckAssignments,
+  truckTransfers,
+  dispatchPendingQuantities,
+  contractMonthlyUsage,
+  contractInvoices,
+  orderExpenses
 } from "./schema";
 
 export {
@@ -129,5 +137,13 @@ export {
   dispatchOutletZoneOverrides,
   dispatchDeliveries,
   driverZones,
-  orderCharges
+  orderCharges,
+  brands,
+  dispatchTruckAssignments,
+  dispatchOutletTruckAssignments,
+  truckTransfers,
+  dispatchPendingQuantities,
+  contractMonthlyUsage,
+  contractInvoices,
+  orderExpenses
 };

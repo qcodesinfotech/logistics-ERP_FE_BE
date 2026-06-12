@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { FileText, Plus, Calculator, MapPin, RefreshCw, Trash2, ArrowRight } from "lucide-react";
+import { FileText, Plus, Calculator, MapPin, RefreshCw, Trash2, ArrowRight, Eye, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -41,14 +41,29 @@ import type { Rfq, Location, Client } from "@shared/schema";
 // Form Schema
 const rfqFormSchema = z.object({
   customerId: z.string().min(1, "Customer is required"),
-  originLocationId: z.string().min(1, "Origin location is required"),
-  destinationLocationId: z.string().min(1, "Destination location is required"),
   transitRoute: z.string().min(1, "Transit route summary is required"),
   transportationCharges: z.string().transform((v) => parseFloat(v) || 0),
   outsourcedTruckCost: z.string().transform((v) => parseFloat(v) || 0),
-  tollTransitCharges: z.string().transform((v) => parseFloat(v) || 0),
-  clearanceAgentCharges: z.string().transform((v) => parseFloat(v) || 0),
   status: z.enum(["pending", "approved", "rejected", "converted"]),
+  cargoType: z.string().optional(),
+  truckType: z.string().optional(),
+  freightType: z.string().optional(),
+  routeLegs: z.array(z.object({
+    originCountry: z.string().min(1, "Country required"),
+    originCity: z.string().min(1, "City required"),
+    destinationCountry: z.string().min(1, "Country required"),
+    destinationCity: z.string().min(1, "City required"),
+    loadingDate: z.string().optional(),
+    offloadingDate: z.string().optional(),
+    transitDays: z.number().optional()
+  })).default([]),
+  detentionChargesPerDay: z.string().transform((v) => parseFloat(v) || 0).optional(),
+  extraCharges: z.array(z.object({
+    name: z.string().min(1, "Name required"),
+    qty: z.number().min(0).default(1),
+    unitRate: z.number().min(0).default(0),
+    cost: z.number().min(0)
+  })).default([])
 });
 
 type RfqFormData = z.input<typeof rfqFormSchema>;
@@ -65,6 +80,7 @@ export default function RfqPage() {
   const [isRfqDialogOpen, setIsRfqDialogOpen] = useState(false);
   const [isLocationDialogOpen, setIsLocationDialogOpen] = useState(false);
   const [selectedRfq, setSelectedRfq] = useState<Rfq | null>(null);
+  const [isViewOnly, setIsViewOnly] = useState(false);
 
   const { toast } = useToast();
 
@@ -86,15 +102,27 @@ export default function RfqPage() {
     resolver: zodResolver(rfqFormSchema),
     defaultValues: {
       customerId: "",
-      originLocationId: "",
-      destinationLocationId: "",
       transitRoute: "",
       transportationCharges: "0",
       outsourcedTruckCost: "0",
-      tollTransitCharges: "0",
-      clearanceAgentCharges: "0",
       status: "pending",
+      cargoType: "",
+      truckType: "",
+      freightType: "",
+      routeLegs: [],
+      detentionChargesPerDay: "0",
+      extraCharges: [],
     },
+  });
+
+  const { fields: routeFields, append: appendRoute, remove: removeRoute } = useFieldArray({
+    control: form.control,
+    name: "routeLegs",
+  });
+
+  const { fields: extraFields, append: appendExtra, remove: removeExtra } = useFieldArray({
+    control: form.control,
+    name: "extraCharges",
   });
 
   const locationForm = useForm({
@@ -110,15 +138,13 @@ export default function RfqPage() {
 
   // Watch fields for live calculations
   const watchedTransportation = form.watch("transportationCharges");
-  const watchedToll = form.watch("tollTransitCharges");
-  const watchedClearance = form.watch("clearanceAgentCharges");
   const watchedOutsourced = form.watch("outsourcedTruckCost");
+  const watchedExtraCharges = form.watch("extraCharges");
 
   const calcTotal = () => {
     const t = parseFloat(String(watchedTransportation)) || 0;
-    const toll = parseFloat(String(watchedToll)) || 0;
-    const cl = parseFloat(String(watchedClearance)) || 0;
-    return t + toll + cl;
+    const extra = watchedExtraCharges?.reduce((sum, item) => sum + (Number(item.cost) || 0), 0) || 0;
+    return t + extra;
   };
 
   const calcMargin = () => {
@@ -130,17 +156,16 @@ export default function RfqPage() {
   // Mutations
   const createRfqMutation = useMutation({
     mutationFn: (data: any) => {
-      const total = parseFloat(data.transportationCharges) + 
-                    parseFloat(data.tollTransitCharges) + 
-                    parseFloat(data.clearanceAgentCharges);
+      const extraTotal = data.extraCharges?.reduce((sum: number, item: any) => sum + (Number(item.cost) || 0), 0) || 0;
+      const total = parseFloat(data.transportationCharges) + extraTotal;
       const payload = {
         ...data,
+        origins: data.routeLegs,
         rfqNumber: `RFQ-${Date.now()}`,
         totalCharges: total.toFixed(3),
         transportationCharges: parseFloat(data.transportationCharges).toFixed(3),
         outsourcedTruckCost: parseFloat(data.outsourcedTruckCost).toFixed(3),
-        tollTransitCharges: parseFloat(data.tollTransitCharges).toFixed(3),
-        clearanceAgentCharges: parseFloat(data.clearanceAgentCharges).toFixed(3),
+        detentionChargesPerDay: parseFloat(data.detentionChargesPerDay || 0).toFixed(3),
       };
       return apiRequest(selectedRfq ? "PUT" : "POST", selectedRfq ? `/api/rfqs/${selectedRfq.id}` : "/api/rfqs", payload);
     },
@@ -161,6 +186,17 @@ export default function RfqPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/rfqs"] });
       toast({ title: "RFQ deleted successfully" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) => apiRequest("PUT", `/api/rfqs/${id}`, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rfqs"] });
+      toast({ title: "Status updated successfully" });
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -228,15 +264,18 @@ export default function RfqPage() {
           setSelectedRfq(null);
           form.reset({
             customerId: "",
-            originLocationId: "",
-            destinationLocationId: "",
             transitRoute: "",
             transportationCharges: "0",
             outsourcedTruckCost: "0",
-            tollTransitCharges: "0",
-            clearanceAgentCharges: "0",
             status: "pending",
+            cargoType: "",
+            truckType: "",
+            freightType: "",
+            routeLegs: [],
+            detentionChargesPerDay: "0",
+            extraCharges: [],
           });
+          setIsViewOnly(false);
           setIsRfqDialogOpen(true);
         }} className="gap-2">
           <Plus className="h-4 w-4" /> Create RFQ
@@ -280,11 +319,8 @@ export default function RfqPage() {
                   <TableBody>
                     {rfqsList.map((rfq) => {
                       const client = clientsList?.find(c => c.id === rfq.customerId);
-                      const origin = locationsList?.find(l => l.id === rfq.originLocationId);
-                      const dest = locationsList?.find(l => l.id === rfq.destinationLocationId);
                       const trans = parseFloat(String(rfq.transportationCharges)) || 0;
-                      const toll = parseFloat(String(rfq.tollTransitCharges)) || 0;
-                      const cl = parseFloat(String(rfq.clearanceAgentCharges)) || 0;
+                      const extraTotal = (rfq.extraCharges as any[])?.reduce((sum: number, item: any) => sum + (Number(item.cost) || 0), 0) || 0;
                       const out = parseFloat(String(rfq.outsourcedTruckCost)) || 0;
                       const total = parseFloat(String(rfq.totalCharges)) || 0;
                       const margin = total - out;
@@ -298,9 +334,13 @@ export default function RfqPage() {
                           </TableCell>
                           <TableCell className="text-xs">
                             <div className="flex items-center gap-1 font-medium">
-                              <span className="text-blue-600 dark:text-blue-400">{origin?.name || "Start"}</span>
+                              <span className="text-blue-600 dark:text-blue-400">
+                                {rfq.origins && (rfq.origins as any[]).length > 0 ? `${(rfq.origins as any[])[0].originCity}, ${(rfq.origins as any[])[0].originCountry}` + ((rfq.origins as any[]).length > 1 ? ` (+${(rfq.origins as any[]).length - 1})` : '') : "Start"}
+                              </span>
                               <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                              <span className="text-emerald-600 dark:text-emerald-400">{dest?.name || "End"}</span>
+                              <span className="text-emerald-600 dark:text-emerald-400">
+                                {rfq.origins && (rfq.origins as any[]).length > 0 ? `${(rfq.origins as any[])[0].destinationCity}, ${(rfq.origins as any[])[0].destinationCountry}` + ((rfq.origins as any[]).length > 1 ? ` (+${(rfq.origins as any[]).length - 1})` : '') : "End"}
+                              </span>
                             </div>
                             <div className="text-[10px] text-muted-foreground max-w-[150px] truncate" title={rfq.transitRoute || ""}>
                               Route: {rfq.transitRoute || "Direct"}
@@ -308,7 +348,7 @@ export default function RfqPage() {
                           </TableCell>
                           <TableCell className="text-xs space-y-0.5">
                             <div>Base: <span className="font-semibold">{formatCurrency(trans)}</span></div>
-                            <div>Clearance & Tolls: <span className="text-muted-foreground">{formatCurrency(cl + toll)}</span></div>
+                            <div>Extra Charges: <span className="text-muted-foreground">{formatCurrency(extraTotal)}</span></div>
                             <div className="font-bold border-t pt-0.5">Total: {formatCurrency(total)}</div>
                           </TableCell>
                           <TableCell className="text-xs">
@@ -318,7 +358,20 @@ export default function RfqPage() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <StatusBadge status={rfq.status} />
+                            <Select 
+                              defaultValue={rfq.status} 
+                              onValueChange={(val) => updateStatusMutation.mutate({ id: rfq.id, status: val })}
+                            >
+                              <SelectTrigger className={`h-8 w-[130px] text-xs ${rfq.status === 'approved' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : rfq.status === 'rejected' ? 'text-red-600 bg-red-50 border-red-200' : rfq.status === 'converted' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="pending">Pending Review</SelectItem>
+                                <SelectItem value="approved">Approved / Won</SelectItem>
+                                <SelectItem value="rejected">Rejected / Lost</SelectItem>
+                                <SelectItem value="converted">Converted to Order</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell className="text-right space-x-1">
                             {rfq.status === "approved" && (
@@ -331,19 +384,42 @@ export default function RfqPage() {
                                 Convert to Order
                               </Button>
                             )}
+                            <Button variant="ghost" size="sm" title="View Details" onClick={() => {
+                              setSelectedRfq(rfq);
+                              form.reset({
+                                customerId: rfq.customerId,
+                                transitRoute: rfq.transitRoute || "",
+                                transportationCharges: String(rfq.transportationCharges),
+                                outsourcedTruckCost: String(rfq.outsourcedTruckCost),
+                                status: rfq.status as any,
+                                cargoType: rfq.cargoType || "",
+                                truckType: rfq.truckType || "",
+                                freightType: rfq.freightType || "",
+                                routeLegs: (rfq.origins as any[]) || [],
+                                detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
+                                extraCharges: (rfq.extraCharges as any[]) || [],
+                              });
+                              setIsViewOnly(true);
+                              setIsRfqDialogOpen(true);
+                            }}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="sm" onClick={() => {
                               setSelectedRfq(rfq);
                               form.reset({
                                 customerId: rfq.customerId,
-                                originLocationId: rfq.originLocationId || "",
-                                destinationLocationId: rfq.destinationLocationId || "",
                                 transitRoute: rfq.transitRoute || "",
                                 transportationCharges: String(rfq.transportationCharges),
                                 outsourcedTruckCost: String(rfq.outsourcedTruckCost),
-                                tollTransitCharges: String(rfq.tollTransitCharges),
-                                clearanceAgentCharges: String(rfq.clearanceAgentCharges),
                                 status: rfq.status as any,
+                                cargoType: rfq.cargoType || "",
+                                truckType: rfq.truckType || "",
+                                freightType: rfq.freightType || "",
+                                routeLegs: (rfq.origins as any[]) || [],
+                                detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
+                                extraCharges: (rfq.extraCharges as any[]) || [],
                               });
+                              setIsViewOnly(false);
                               setIsRfqDialogOpen(true);
                             }}>
                               Edit
@@ -377,12 +453,13 @@ export default function RfqPage() {
       {/* RFQ Creation / Modification Dialog */}
       <Dialog open={isRfqDialogOpen} onOpenChange={setIsRfqDialogOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{selectedRfq ? "Modify RFQ Worksheet" : "Calculate Logistics RFQ"}</DialogTitle>
+          <DialogHeader className="print:hidden">
+            <DialogTitle>{isViewOnly ? "View Quotation Document" : selectedRfq ? "Modify RFQ Worksheet" : "Calculate Logistics RFQ"}</DialogTitle>
             <DialogDescription>
               Build a comprehensive freight costing worksheet for transit routes.
             </DialogDescription>
           </DialogHeader>
+          {!isViewOnly ? (
           <Form {...form}>
             <form onSubmit={form.handleSubmit(d => createRfqMutation.mutate(d))} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -409,51 +486,6 @@ export default function RfqPage() {
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="originLocationId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Origin Hub *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select origin" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {locationsList?.map(l => (
-                            <SelectItem key={l.id} value={l.id}>{l.name} ({l.code})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="destinationLocationId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Destination Terminal *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select destination" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {locationsList?.map(l => (
-                            <SelectItem key={l.id} value={l.id}>{l.name} ({l.code})</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <FormField
                   control={form.control}
@@ -497,33 +529,6 @@ export default function RfqPage() {
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="tollTransitCharges"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Toll & Port Charges (BD)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="clearanceAgentCharges"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Clearance/Customs Fees (BD)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <FormField
                   control={form.control}
@@ -548,6 +553,196 @@ export default function RfqPage() {
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name="cargoType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cargo Type</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. General, Hazardous" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="truckType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Truck Type</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Flatbed, Reefer" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="freightType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Freight Type</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. FTL, LTL" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="detentionChargesPerDay"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Detention Charges / Day (BD)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Dynamic Lists */}
+              <div className="space-y-4 pt-4 border-t">
+                {/* Route Legs */}
+                <div className="p-4 border rounded-md bg-card shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <FormLabel className="text-base font-semibold">Origin & Destination Routes</FormLabel>
+                      <p className="text-xs text-muted-foreground">Add multiple transit legs with loading and offloading dates.</p>
+                    </div>
+                    {!isViewOnly && (
+                      <Button type="button" variant="outline" size="sm" onClick={() => appendRoute({ originCountry: "", originCity: "", destinationCountry: "", destinationCity: "", loadingDate: "", offloadingDate: "", transitDays: 0 })}>
+                        <Plus className="h-3 w-3 mr-1" /> Add Route Leg
+                      </Button>
+                    )}
+                  </div>
+                  {routeFields.map((field, index) => (
+                    <div key={field.id} className="mb-4 p-4 border rounded-md relative bg-background/50">
+                      <Button type="button" variant="ghost" size="icon" className="absolute -top-3 -right-3 h-6 w-6 rounded-full bg-red-100 text-red-500 hover:bg-red-200 border shadow-sm z-10" onClick={() => removeRoute(index)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                        <FormField control={form.control} name={`routeLegs.${index}.originCountry`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Origin Country</FormLabel><FormControl><Input placeholder="Country" className="h-8 text-xs" {...field} /></FormControl></FormItem>
+                        )} />
+                        <FormField control={form.control} name={`routeLegs.${index}.originCity`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Origin City</FormLabel><FormControl><Input placeholder="City" className="h-8 text-xs" {...field} /></FormControl></FormItem>
+                        )} />
+                        <FormField control={form.control} name={`routeLegs.${index}.destinationCountry`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Dest. Country</FormLabel><FormControl><Input placeholder="Country" className="h-8 text-xs" {...field} /></FormControl></FormItem>
+                        )} />
+                        <FormField control={form.control} name={`routeLegs.${index}.destinationCity`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Dest. City</FormLabel><FormControl><Input placeholder="City" className="h-8 text-xs" {...field} /></FormControl></FormItem>
+                        )} />
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+                        <FormField control={form.control} name={`routeLegs.${index}.loadingDate`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Loading</FormLabel><FormControl><Input type="date" className="h-8 text-xs" {...field} 
+                            onChange={(e) => {
+                              field.onChange(e);
+                              const offload = form.getValues(`routeLegs.${index}.offloadingDate`);
+                              if (e.target.value && offload) {
+                                const days = Math.ceil((new Date(offload).getTime() - new Date(e.target.value).getTime()) / (1000 * 3600 * 24));
+                                form.setValue(`routeLegs.${index}.transitDays`, days > 0 ? days : 0);
+                              }
+                            }}
+                          /></FormControl></FormItem>
+                        )} />
+                        <FormField control={form.control} name={`routeLegs.${index}.offloadingDate`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Offloading</FormLabel><FormControl><Input type="date" className="h-8 text-xs" {...field} 
+                            onChange={(e) => {
+                              field.onChange(e);
+                              const load = form.getValues(`routeLegs.${index}.loadingDate`);
+                              if (e.target.value && load) {
+                                const days = Math.ceil((new Date(e.target.value).getTime() - new Date(load).getTime()) / (1000 * 3600 * 24));
+                                form.setValue(`routeLegs.${index}.transitDays`, days > 0 ? days : 0);
+                              }
+                            }}
+                          /></FormControl></FormItem>
+                        )} />
+                        <FormField control={form.control} name={`routeLegs.${index}.transitDays`} render={({ field }) => (
+                          <FormItem><FormLabel className="text-[10px] uppercase text-muted-foreground font-semibold">Transit Days</FormLabel><FormControl><Input type="number" className="h-8 text-xs" {...field} readOnly /></FormControl></FormItem>
+                        )} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Extra Charges */}
+                <div className="p-4 border rounded-md bg-card shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <FormLabel className="text-base font-semibold">Extra Charges</FormLabel>
+                      <p className="text-xs text-muted-foreground">Add specific operational costs.</p>
+                    </div>
+                    {!isViewOnly && (
+                      <Button type="button" variant="outline" size="sm" onClick={() => appendExtra({ name: "Toll", qty: 1, unitRate: 0, cost: 0 })}>
+                        <Plus className="h-3 w-3 mr-1" /> Add Charge
+                      </Button>
+                    )}
+                  </div>
+                  {extraFields.map((field, index) => (
+                    <div key={field.id} className="grid grid-cols-12 gap-3 items-end mb-3 bg-background/50 p-2 rounded-md border">
+                      <FormField control={form.control} name={`extraCharges.${index}.name`} render={({ field }) => (
+                        <FormItem className="col-span-12 sm:col-span-4">
+                          <FormLabel className="text-xs">Charge Type</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Type" /></SelectTrigger></FormControl>
+                            <SelectContent>
+                              <SelectItem value="Toll">Toll</SelectItem>
+                              <SelectItem value="Port">Port</SelectItem>
+                              <SelectItem value="Border Crossing">Border Crossing</SelectItem>
+                              <SelectItem value="Customs Fee">Customs Fee</SelectItem>
+                              <SelectItem value="Other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name={`extraCharges.${index}.qty`} render={({ field }) => (
+                        <FormItem className="col-span-4 sm:col-span-2">
+                          <FormLabel className="text-xs">Qty</FormLabel>
+                          <FormControl><Input type="number" step="0.01" className="h-8 text-xs" {...field} onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            field.onChange(val);
+                            const rate = form.getValues(`extraCharges.${index}.unitRate`) || 0;
+                            form.setValue(`extraCharges.${index}.cost`, val * rate);
+                          }} /></FormControl>
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name={`extraCharges.${index}.unitRate`} render={({ field }) => (
+                        <FormItem className="col-span-4 sm:col-span-3">
+                          <FormLabel className="text-xs">Unit Rate (BD)</FormLabel>
+                          <FormControl><Input type="number" step="0.001" className="h-8 text-xs" {...field} onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            field.onChange(val);
+                            const qty = form.getValues(`extraCharges.${index}.qty`) || 0;
+                            form.setValue(`extraCharges.${index}.cost`, val * qty);
+                          }} /></FormControl>
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name={`extraCharges.${index}.cost`} render={({ field }) => (
+                        <FormItem className="col-span-3 sm:col-span-2">
+                          <FormLabel className="text-xs">Total (BD)</FormLabel>
+                          <FormControl><Input type="number" step="0.001" className="h-8 text-xs bg-slate-50 font-semibold" readOnly {...field} /></FormControl>
+                        </FormItem>
+                      )} />
+                      <div className="col-span-1 sm:col-span-1 flex justify-end pb-0.5">
+                        <Button type="button" variant="ghost" size="sm" className="text-red-500 h-8 w-8 p-0 border bg-white hover:bg-red-50" onClick={() => removeExtra(index)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Financial Worksheet Card */}
@@ -560,10 +755,13 @@ export default function RfqPage() {
                   <span>Base Transportation</span>
                   <span>{formatCurrency(watchedTransportation)}</span>
                 </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Clearance + Tolls</span>
-                  <span>{formatCurrency(parseFloat(String(watchedClearance)) + parseFloat(String(watchedToll)))}</span>
-                </div>
+
+                {watchedExtraCharges && watchedExtraCharges.length > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Extra Charges ({watchedExtraCharges.length})</span>
+                    <span>{formatCurrency(watchedExtraCharges.reduce((sum, item) => sum + (Number(item.cost) || 0), 0))}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t pt-1 font-bold text-foreground">
                   <span>Customer Billing (Total)</span>
                   <span>{formatCurrency(calcTotal())}</span>
@@ -580,7 +778,7 @@ export default function RfqPage() {
                 </div>
               </div>
 
-              <DialogFooter className="pt-4">
+              <DialogFooter className="pt-4 print:hidden">
                 <Button type="button" variant="outline" onClick={() => setIsRfqDialogOpen(false)}>
                   Cancel
                 </Button>
@@ -590,6 +788,105 @@ export default function RfqPage() {
               </DialogFooter>
             </form>
           </Form>
+          ) : (
+            <div className="space-y-6">
+              {/* Professional RFQ View */}
+              <div className="border p-6 sm:p-8 rounded-md bg-white text-black text-sm relative print:border-none print:p-0 print:w-full">
+                <div className="text-center border-b-2 border-slate-200 pb-4 mb-6">
+                  <h2 className="text-2xl font-bold uppercase tracking-wider text-slate-800">Request For Quotation</h2>
+                  <p className="text-slate-500 mt-1">Ref: {selectedRfq?.id ? `RFQ-${selectedRfq.id}` : 'DRAFT'} | Date: {new Date().toLocaleDateString()}</p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-8 mb-8">
+                  <div>
+                    <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Customer Information</h3>
+                    <p className="mb-1"><span className="font-semibold inline-block w-20">Client:</span> {clientsList?.find(c => c.id === form.getValues().customerId)?.name || "N/A"}</p>
+                    <p className="mb-1"><span className="font-semibold inline-block w-20">Company:</span> {clientsList?.find(c => c.id === form.getValues().customerId)?.companyName || "N/A"}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Cargo Specifications</h3>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Cargo Type:</span> {form.getValues().cargoType || "N/A"}</p>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Truck Type:</span> {form.getValues().truckType || "N/A"}</p>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Freight Type:</span> {form.getValues().freightType || "N/A"}</p>
+                  </div>
+                </div>
+
+                <div className="mb-8">
+                  <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Transit Route & Legs</h3>
+                  <p className="mb-3"><span className="font-semibold">Main Route Summary:</span> {form.getValues().transitRoute}</p>
+                  
+                  {form.getValues().routeLegs && form.getValues().routeLegs.length > 0 && (
+                    <table className="w-full border-collapse text-xs mt-2">
+                      <thead>
+                        <tr className="bg-slate-100 border-y-2 border-slate-200 text-left text-slate-700">
+                          <th className="p-2 font-bold">Origin</th>
+                          <th className="p-2 font-bold">Destination</th>
+                          <th className="p-2 font-bold">Loading Date</th>
+                          <th className="p-2 font-bold">Offloading Date</th>
+                          <th className="p-2 font-bold text-center">Transit Days</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {form.getValues().routeLegs.map((leg: any, idx: number) => (
+                          <tr key={idx} className="border-b">
+                            <td className="p-2">{leg.originCity}, {leg.originCountry}</td>
+                            <td className="p-2">{leg.destinationCity}, {leg.destinationCountry}</td>
+                            <td className="p-2">{leg.loadingDate ? new Date(leg.loadingDate).toLocaleDateString() : 'N/A'}</td>
+                            <td className="p-2">{leg.offloadingDate ? new Date(leg.offloadingDate).toLocaleDateString() : 'N/A'}</td>
+                            <td className="p-2 text-center">{leg.transitDays || 0}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                <div className="mb-4">
+                  <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Quotation Breakdown (BD)</h3>
+                  <table className="w-full border-collapse mt-2">
+                    <tbody>
+                      <tr className="border-b bg-slate-100 text-slate-700 text-xs uppercase tracking-wider">
+                        <th className="p-2 text-left font-bold">Description</th>
+                        <th className="p-2 text-right font-bold">Qty</th>
+                        <th className="p-2 text-right font-bold">Unit Rate</th>
+                        <th className="p-2 text-right font-bold">Total (BD)</th>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="p-3 font-medium">Base Transportation Cost</td>
+                        <td className="p-3 text-right text-slate-500">-</td>
+                        <td className="p-3 text-right text-slate-500">-</td>
+                        <td className="p-3 text-right font-medium">{formatCurrency(parseFloat(String(form.getValues().transportationCharges)) || 0)}</td>
+                      </tr>
+                      {form.getValues().extraCharges && form.getValues().extraCharges.map((charge: any, idx: number) => (
+                        <tr key={idx} className="border-b text-slate-600 bg-slate-50/50">
+                          <td className="p-3 pl-6">+ {charge.name}</td>
+                          <td className="p-3 text-right text-sm">{charge.qty || 1}</td>
+                          <td className="p-3 text-right text-sm">{formatCurrency(parseFloat(String(charge.unitRate)) || 0)}</td>
+                          <td className="p-3 text-right font-medium text-slate-900">{formatCurrency(parseFloat(String(charge.cost)) || 0)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-slate-100 font-bold text-lg border-y-2 border-slate-200">
+                        <td className="p-4 uppercase text-slate-800">Total Estimated Amount</td>
+                        <td className="p-4 text-right text-emerald-700">{formatCurrency(calcTotal())}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  
+                  {form.getValues().detentionChargesPerDay && parseFloat(String(form.getValues().detentionChargesPerDay)) > 0 && (
+                    <p className="text-xs text-red-600 mt-4 italic font-medium">* Note: Detention charges apply at {formatCurrency(parseFloat(String(form.getValues().detentionChargesPerDay)))} per day after allowed free time.</p>
+                  )}
+                </div>
+              </div>
+              <DialogFooter className="print:hidden border-t pt-4">
+                <Button type="button" onClick={() => window.print()} className="mr-auto" variant="outline">
+                  <Printer className="h-4 w-4 mr-2" /> Print Document
+                </Button>
+                <Button type="button" onClick={() => setIsRfqDialogOpen(false)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

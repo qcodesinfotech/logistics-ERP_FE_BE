@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Truck, Plus, Calendar, Wrench, Fuel, DollarSign, PenTool, CheckCircle, ShieldAlert } from "lucide-react";
+import { Truck, Plus, Calendar, Wrench, Fuel, DollarSign, PenTool, CheckCircle, ShieldAlert, Upload, X, Edit, FileText, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,19 +39,26 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/status-badge";
 import { CurrencyDisplay } from "@/components/currency-display";
 import { MetricCard } from "@/components/metric-card";
-import type { Vehicle, Zone } from "@shared/schema";
+import type { Vehicle, Zone, User } from "@shared/schema";
 
 const vehicleSchema = z.object({
   name: z.string().min(1, "Vehicle name/model is required"),
   plateNumber: z.string().min(1, "Plate number is required"),
   type: z.enum(["owned", "outsourced"]),
   capacity: z.string().optional(),
+  photos: z.array(z.string()).default([]),
+  chassisNumber: z.string().optional(),
+  manufactureYear: z.string().optional(),
+  purchaseDate: z.string().optional(),
   status: z.enum(["available", "in_transit", "maintenance"]),
   currentZoneId: z.string().optional(),
+  assignedBrandId: z.string().optional(),
+  assignedDriverId: z.string().optional(),
   insuranceExpiry: z.string().optional(),
   permitExpiry: z.string().optional(),
   registrationExpiry: z.string().optional(),
   lastService: z.string().optional(),
+  documents: z.array(z.string()).default([]),
 });
 
 type VehicleFormData = z.infer<typeof vehicleSchema>;
@@ -62,6 +69,7 @@ const maintenanceSchema = z.object({
   serviceSchedule: z.string().min(1, "Service details are required"),
   repairLogs: z.string().optional(),
   cost: z.string().default("0"),
+  photos: z.array(z.string()).default([]),
 });
 
 type MaintenanceFormData = z.infer<typeof maintenanceSchema>;
@@ -71,6 +79,7 @@ const fuelSchema = z.object({
   date: z.string().min(1, "Refueling date is required"),
   liters: z.string().min(1, "Liters is required"),
   fuelExpense: z.string().min(1, "Expense amount is required"),
+  photos: z.array(z.string()).default([]),
 });
 
 type FuelFormData = z.infer<typeof fuelSchema>;
@@ -80,6 +89,12 @@ export default function FleetPage() {
   const [isVehicleDialogOpen, setIsVehicleDialogOpen] = useState(false);
   const [isMaintDialogOpen, setIsMaintDialogOpen] = useState(false);
   const [isFuelDialogOpen, setIsFuelDialogOpen] = useState(false);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
+  const [uploadingMaintPhotos, setUploadingMaintPhotos] = useState(false);
+  const [uploadingFuelPhotos, setUploadingFuelPhotos] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
 
   const { toast } = useToast();
 
@@ -90,12 +105,19 @@ export default function FleetPage() {
       plateNumber: "",
       type: "owned",
       capacity: "",
+      photos: [],
+      chassisNumber: "",
+      manufactureYear: "",
+      purchaseDate: "",
       status: "available",
       currentZoneId: "",
+      assignedBrandId: "",
+      assignedDriverId: "",
       insuranceExpiry: "",
       permitExpiry: "",
       registrationExpiry: "",
       lastService: "",
+      documents: [],
     },
   });
 
@@ -107,6 +129,7 @@ export default function FleetPage() {
       serviceSchedule: "",
       repairLogs: "",
       cost: "0",
+      photos: [],
     },
   });
 
@@ -117,6 +140,7 @@ export default function FleetPage() {
       date: new Date().toISOString().split("T")[0],
       liters: "",
       fuelExpense: "",
+      photos: [],
     },
   });
 
@@ -128,6 +152,16 @@ export default function FleetPage() {
     queryKey: ["/api/zones"],
   });
 
+  const { data: brandsList } = useQuery<any[]>({
+    queryKey: ["/api/brands"],
+  });
+
+  const { data: usersList } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+  });
+
+  const driversList = usersList?.filter(u => u.role === "driver" || u.role === "admin") || [];
+
   const { data: maintLogs } = useQuery<any[]>({
     queryKey: ["/api/vehicles/maintenance"],
     enabled: activeTab === "maintenance" || true,
@@ -138,19 +172,117 @@ export default function FleetPage() {
     enabled: activeTab === "fuel" || true,
   });
 
+  const handleGenericUpload = async (e: React.ChangeEvent<HTMLInputElement>, setUploading: (v: boolean) => void, onComplete: (base64Files: string[]) => void) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const promises = files.map((file) => {
+        return new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      });
+      const base64Files = await Promise.all(promises);
+      onComplete(base64Files);
+      setUploading(false);
+    } catch {
+      setUploading(false);
+    }
+  };
+
+  const handlePhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleGenericUpload(e, setUploadingPhotos, (base64Files) => {
+      const current = vehicleForm.getValues("photos") || [];
+      vehicleForm.setValue("photos", [...current, ...base64Files]);
+    });
+  };
+
+  const removePhoto = (index: number) => {
+    const current = vehicleForm.getValues("photos") || [];
+    vehicleForm.setValue("photos", current.filter((_, i) => i !== index));
+  };
+
+  const handleDocumentsUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleGenericUpload(e, setUploadingDocuments, (base64Files) => {
+      const current = vehicleForm.getValues("documents") || [];
+      vehicleForm.setValue("documents", [...current, ...base64Files]);
+    });
+  };
+
+  const removeDocument = (index: number) => {
+    const current = vehicleForm.getValues("documents") || [];
+    vehicleForm.setValue("documents", current.filter((_, i) => i !== index));
+  };
+
+  const handleMaintPhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleGenericUpload(e, setUploadingMaintPhotos, (base64Files) => {
+      const current = maintForm.getValues("photos") || [];
+      maintForm.setValue("photos", [...current, ...base64Files]);
+    });
+  };
+
+  const removeMaintPhoto = (index: number) => {
+    const current = maintForm.getValues("photos") || [];
+    maintForm.setValue("photos", current.filter((_, i) => i !== index));
+  };
+
+  const handleFuelPhotosUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleGenericUpload(e, setUploadingFuelPhotos, (base64Files) => {
+      const current = fuelForm.getValues("photos") || [];
+      fuelForm.setValue("photos", [...current, ...base64Files]);
+    });
+  };
+
+  const removeFuelPhoto = (index: number) => {
+    const current = fuelForm.getValues("photos") || [];
+    fuelForm.setValue("photos", current.filter((_, i) => i !== index));
+  };
+
+  const editVehicle = (vehicle: Vehicle) => {
+    const compliance = (vehicle.complianceDetails || {}) as any;
+    vehicleForm.reset({
+      name: vehicle.name,
+      plateNumber: vehicle.plateNumber,
+      type: vehicle.type as any,
+      capacity: vehicle.capacity || "",
+      photos: vehicle.photos || [],
+      documents: vehicle.documents || [],
+      chassisNumber: vehicle.chassisNumber || "",
+      manufactureYear: vehicle.manufactureYear || "",
+      purchaseDate: vehicle.purchaseDate || "",
+      status: vehicle.status as any,
+      currentZoneId: vehicle.currentZoneId || "",
+      assignedBrandId: vehicle.assignedBrandId || "",
+      assignedDriverId: vehicle.assignedDriverId || "",
+      insuranceExpiry: compliance.insuranceExpiry || "",
+      permitExpiry: compliance.permitExpiry || "",
+      registrationExpiry: compliance.registrationExpiry || "",
+      lastService: compliance.lastService || "",
+    });
+    setEditingVehicleId(vehicle.id);
+    setIsVehicleDialogOpen(true);
+  };
+
   const createVehicleMutation = useMutation({
     mutationFn: (data: VehicleFormData) => {
       const { insuranceExpiry, permitExpiry, registrationExpiry, lastService, ...rest } = data;
-      return apiRequest("POST", "/api/vehicles", {
+      const payload = {
         ...rest,
         complianceDetails: { insuranceExpiry, permitExpiry, registrationExpiry, lastService }
-      });
+      };
+      if (editingVehicleId) {
+        return apiRequest("PUT", `/api/vehicles/${editingVehicleId}`, payload);
+      }
+      return apiRequest("POST", "/api/vehicles", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
-      toast({ title: "Vehicle added successfully" });
+      toast({ title: editingVehicleId ? "Vehicle updated successfully" : "Vehicle added successfully" });
       setIsVehicleDialogOpen(false);
       vehicleForm.reset();
+      setEditingVehicleId(null);
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -199,6 +331,11 @@ export default function FleetPage() {
     return zonesList?.find(z => z.id === id)?.name || "N/A";
   };
 
+  const getBrandName = (id: string | null) => {
+    if (!id) return null;
+    return brandsList?.find(b => b.id === id)?.name || null;
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <PageHeader 
@@ -211,7 +348,7 @@ export default function FleetPage() {
         <Button onClick={() => setIsMaintDialogOpen(true)} variant="secondary" className="gap-2">
           <PenTool className="h-4 w-4" /> Log Maintenance
         </Button>
-        <Button onClick={() => setIsVehicleDialogOpen(true)} className="gap-2">
+        <Button onClick={() => { setEditingVehicleId(null); vehicleForm.reset(); setIsVehicleDialogOpen(true); }}>
           <Plus className="h-4 w-4" /> Add Vehicle
         </Button>
       </PageHeader>
@@ -270,10 +407,11 @@ export default function FleetPage() {
                       <TableHead>Vehicle Type / Model</TableHead>
                       <TableHead>Ownership</TableHead>
                       <TableHead>Capacity</TableHead>
-                      <TableHead>Current Zone</TableHead>
+                      <TableHead>Assigned Zone / Brand</TableHead>
                       <TableHead>Insurance Expiry</TableHead>
                       <TableHead>Permit Expiry</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -285,11 +423,19 @@ export default function FleetPage() {
                           <TableCell className="font-semibold">{vehicle.name}</TableCell>
                           <TableCell className="capitalize text-xs font-semibold text-muted-foreground">{vehicle.type}</TableCell>
                           <TableCell className="text-xs">{vehicle.capacity || "N/A"}</TableCell>
-                          <TableCell>{getZoneName(vehicle.currentZoneId)}</TableCell>
+                          <TableCell>
+                            <div>{getZoneName(vehicle.currentZoneId)}</div>
+                            {vehicle.assignedBrandId && <div className="text-xs text-muted-foreground">{getBrandName(vehicle.assignedBrandId)}</div>}
+                          </TableCell>
                           <TableCell className="text-xs font-mono">{compliance.insuranceExpiry || "N/A"}</TableCell>
                           <TableCell className="text-xs font-mono">{compliance.permitExpiry || "N/A"}</TableCell>
                           <TableCell>
                             <StatusBadge status={vehicle.status} />
+                          </TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="icon" onClick={() => editVehicle(vehicle)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -324,6 +470,7 @@ export default function FleetPage() {
                       <TableHead>Permit Expiry</TableHead>
                       <TableHead>Registration Expiry</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -338,6 +485,11 @@ export default function FleetPage() {
                           <TableCell className="text-xs font-mono">{compliance.registrationExpiry || "N/A"}</TableCell>
                           <TableCell>
                             <StatusBadge status={vehicle.status} />
+                          </TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="icon" onClick={() => editVehicle(vehicle)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -371,7 +523,18 @@ export default function FleetPage() {
                         <TableCell className="font-mono font-bold">{getVehiclePlate(log.vehicleId)}</TableCell>
                         <TableCell className="text-xs font-mono">{log.serviceDate}</TableCell>
                         <TableCell className="font-semibold text-xs">{log.serviceSchedule}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs">{log.repairLogs || "Regular repair"}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {log.repairLogs || "Regular repair"}
+                          {log.photos && log.photos.length > 0 && (
+                            <div className="flex gap-1 mt-1">
+                              {log.photos.map((p: string, i: number) => (
+                                <button key={i} onClick={() => setViewingImage(p)} type="button" className="text-primary hover:underline flex items-center text-[10px]">
+                                  <ImageIcon className="h-3 w-3 mr-1" /> Photo {i+1}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right"><CurrencyDisplay amount={log.cost} /></TableCell>
                       </TableRow>
                     ))}
@@ -403,7 +566,18 @@ export default function FleetPage() {
                       <TableRow key={log.id} className="hover:bg-accent/40 transition-colors">
                         <TableCell className="font-mono font-bold">{getVehiclePlate(log.vehicleId)}</TableCell>
                         <TableCell className="text-xs font-mono">{log.date}</TableCell>
-                        <TableCell className="text-right font-mono">{log.liters} L</TableCell>
+                        <TableCell className="font-semibold text-xs text-right">
+                          {log.liters} L
+                          {log.photos && log.photos.length > 0 && (
+                            <div className="flex gap-1 mt-1 justify-end">
+                              {log.photos.map((p: string, i: number) => (
+                                <button key={i} onClick={() => setViewingImage(p)} type="button" className="text-primary hover:underline flex items-center text-[10px]">
+                                  <ImageIcon className="h-3 w-3 mr-1" /> Bill {i+1}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right"><CurrencyDisplay amount={log.fuelExpense} /></TableCell>
                         <TableCell className="text-right font-mono text-xs text-muted-foreground">
                           {(parseFloat(log.fuelExpense || "0") / parseFloat(log.liters || "1")).toFixed(3)} BD/L
@@ -420,14 +594,14 @@ export default function FleetPage() {
 
       {/* Add Vehicle Dialog */}
       <Dialog open={isVehicleDialogOpen} onOpenChange={setIsVehicleDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Register Logistics Vehicle</DialogTitle>
             <DialogDescription>Input vehicle model, license plate number, and compliance metrics.</DialogDescription>
           </DialogHeader>
           <Form {...vehicleForm}>
             <form onSubmit={vehicleForm.handleSubmit(d => createVehicleMutation.mutate(d))} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={vehicleForm.control}
                   name="name"
@@ -454,9 +628,35 @@ export default function FleetPage() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={vehicleForm.control}
+                  name="chassisNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Chassis Number</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. VIN..." {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={vehicleForm.control}
+                  name="manufactureYear"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Manufacture Year</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. 2021" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <FormField
                   control={vehicleForm.control}
                   name="type"
@@ -515,6 +715,58 @@ export default function FleetPage() {
                 />
               </div>
 
+              {vehicleForm.watch("type") === "owned" && (
+                <FormField
+                  control={vehicleForm.control}
+                  name="purchaseDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date of Purchase</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <div className="space-y-2">
+                <FormLabel>Vehicle Photos</FormLabel>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {(vehicleForm.watch("photos") || []).map((photo, i) => (
+                    <div key={i} className="relative h-16 w-16 border rounded-md overflow-hidden">
+                      <img src={photo} className="h-full w-full object-cover" alt="Vehicle" />
+                      <button type="button" onClick={() => removePhoto(i)} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-md p-0.5">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="relative h-16 w-16 border border-dashed rounded-md flex items-center justify-center hover:bg-accent/50 cursor-pointer overflow-hidden">
+                    <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handlePhotosUpload} disabled={uploadingPhotos} />
+                    {uploadingPhotos ? <div className="text-[10px]">...</div> : <Upload className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <FormLabel>Vehicle Documents (Permit, Registration, etc.)</FormLabel>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {(vehicleForm.watch("documents") || []).map((doc, i) => (
+                    <div key={i} className="relative h-16 w-16 border rounded-md overflow-hidden bg-muted flex items-center justify-center">
+                      <FileText className="h-6 w-6 text-muted-foreground" />
+                      <button type="button" onClick={() => removeDocument(i)} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-md p-0.5">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="relative h-16 w-16 border border-dashed rounded-md flex items-center justify-center hover:bg-accent/50 cursor-pointer overflow-hidden">
+                    <input type="file" multiple accept="image/*,.pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleDocumentsUpload} disabled={uploadingDocuments} />
+                    {uploadingDocuments ? <div className="text-[10px]">...</div> : <Upload className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </div>
+              </div>
+
               <FormField
                 control={vehicleForm.control}
                 name="currentZoneId"
@@ -538,7 +790,53 @@ export default function FleetPage() {
                 )}
               />
 
-              <div className="grid grid-cols-3 gap-4 border-t pt-4">
+              <FormField
+                control={vehicleForm.control}
+                name="assignedBrandId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Assigned Brand (Optional)</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select brand" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {brandsList?.map(b => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={vehicleForm.control}
+                name="assignedDriverId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Assigned Driver</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select driver" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {driversList.map(d => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t pt-4">
                 <FormField
                   control={vehicleForm.control}
                   name="insuranceExpiry"
@@ -682,6 +980,24 @@ export default function FleetPage() {
                 )}
               />
 
+              <div className="space-y-2">
+                <FormLabel>Attach Photos / Invoices</FormLabel>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {(maintForm.watch("photos") || []).map((photo, i) => (
+                    <div key={i} className="relative h-16 w-16 border rounded-md overflow-hidden">
+                      <img src={photo} className="h-full w-full object-cover" alt="Maint" />
+                      <button type="button" onClick={() => removeMaintPhoto(i)} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-md p-0.5">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="relative h-16 w-16 border border-dashed rounded-md flex items-center justify-center hover:bg-accent/50 cursor-pointer overflow-hidden">
+                    <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleMaintPhotosUpload} disabled={uploadingMaintPhotos} />
+                    {uploadingMaintPhotos ? <div className="text-[10px]">...</div> : <Upload className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </div>
+              </div>
+
               <DialogFooter className="pt-4">
                 <Button type="button" variant="outline" onClick={() => setIsMaintDialogOpen(false)}>
                   Cancel
@@ -770,6 +1086,24 @@ export default function FleetPage() {
                 )}
               />
 
+              <div className="space-y-2">
+                <FormLabel>Attach Photos / Fuel Bills</FormLabel>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {(fuelForm.watch("photos") || []).map((photo, i) => (
+                    <div key={i} className="relative h-16 w-16 border rounded-md overflow-hidden">
+                      <img src={photo} className="h-full w-full object-cover" alt="Fuel Bill" />
+                      <button type="button" onClick={() => removeFuelPhoto(i)} className="absolute top-0 right-0 bg-red-500 text-white rounded-bl-md p-0.5">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="relative h-16 w-16 border border-dashed rounded-md flex items-center justify-center hover:bg-accent/50 cursor-pointer overflow-hidden">
+                    <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFuelPhotosUpload} disabled={uploadingFuelPhotos} />
+                    {uploadingFuelPhotos ? <div className="text-[10px]">...</div> : <Upload className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </div>
+              </div>
+
               <DialogFooter className="pt-4">
                 <Button type="button" variant="outline" onClick={() => setIsFuelDialogOpen(false)}>
                   Cancel
@@ -780,6 +1114,20 @@ export default function FleetPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Image Viewer Dialog */}
+      <Dialog open={!!viewingImage} onOpenChange={() => setViewingImage(null)}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-transparent border-none shadow-none flex justify-center">
+          {viewingImage && (
+            <div className="relative">
+              <button onClick={() => setViewingImage(null)} className="absolute -top-10 right-0 text-white bg-black/50 hover:bg-black/80 p-2 rounded-full backdrop-blur-sm transition-colors z-50">
+                <X className="h-5 w-5" />
+              </button>
+              <img src={viewingImage} alt="Attachment Viewer" className="max-w-full max-h-[85vh] object-contain rounded-md shadow-2xl bg-black/20" />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

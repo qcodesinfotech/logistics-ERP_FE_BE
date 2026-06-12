@@ -1297,7 +1297,10 @@ export async function registerRoutes(
 
   // Brands - RBAC protected
   app.get("/api/brands", authMiddleware, permissionMiddleware("brands"), async (req: AuthRequest, res) => {
-    const brands = await storage.getBrands();
+    const brands = await storage.getBrands(
+      req.query.companyId as string,
+      req.query.branchId as string
+    );
     res.json(brands);
   });
 
@@ -7179,6 +7182,11 @@ export async function registerRoutes(
       }));
 
       await storage.createDispatchItems(resolvedItems);
+
+      // Trigger Dispatch Engine Automation
+      await storage.autoAssignZoneTrucksToSheet(sheet.id);
+      await storage.autoAllocateFfd(sheet.id);
+
       res.status(201).json({ sheet, itemCount: resolvedItems.length });
     } catch (e) {
       console.error("Create dispatch sheet error:", e);
@@ -7341,6 +7349,50 @@ export async function registerRoutes(
     }
   });
 
+  // Fleet Advanced API
+  app.get("/api/vehicles/maintenance", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const vehicleId = req.query.vehicleId as string | undefined;
+      const maintenance = await storage.getVehicleMaintenance(vehicleId);
+      res.json(maintenance);
+    } catch (error) {
+      console.error("Get maintenance error:", error);
+      res.status(500).json({ error: "Failed to fetch vehicle maintenance logs" });
+    }
+  });
+
+  app.post("/api/vehicles/maintenance", authMiddleware, validateBody(insertVehicleMaintenanceSchema), async (req: AuthRequest, res) => {
+    try {
+      const log = await storage.createVehicleMaintenance(req.body);
+      res.status(201).json(log);
+    } catch (error) {
+      console.error("Create maintenance log error:", error);
+      res.status(500).json({ error: "Failed to create vehicle maintenance log" });
+    }
+  });
+
+  app.get("/api/vehicles/fuel", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const vehicleId = req.query.vehicleId as string | undefined;
+      const tripId = req.query.tripId as string | undefined;
+      const logs = await storage.getFuelLogs(vehicleId, tripId);
+      res.json(logs);
+    } catch (error) {
+      console.error("Get fuel logs error:", error);
+      res.status(500).json({ error: "Failed to fetch fuel logs" });
+    }
+  });
+
+  app.post("/api/vehicles/fuel", authMiddleware, validateBody(insertFuelLogSchema), async (req: AuthRequest, res) => {
+    try {
+      const log = await storage.createFuelLog(req.body);
+      res.status(201).json(log);
+    } catch (error) {
+      console.error("Create fuel log error:", error);
+      res.status(500).json({ error: "Failed to create fuel log" });
+    }
+  });
+
   // Logistics Vehicles API
   app.get("/api/vehicles", authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -7393,6 +7445,18 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Delete vehicle error:", error);
       res.status(500).json({ error: "Failed to delete vehicle" });
+    }
+  });
+
+  // Assign vehicle to a zone
+  app.patch("/api/vehicles/:id/zone", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const vehicle = await storage.updateVehicle(req.params.id, { currentZoneId: req.body.zoneId });
+      if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+      res.json(vehicle);
+    } catch (error) {
+      console.error("Assign vehicle zone error:", error);
+      res.status(500).json({ error: "Failed to assign vehicle to zone" });
     }
   });
 
@@ -7555,6 +7619,16 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Delete order error:", error);
       res.status(500).json({ error: "Failed to delete order" });
+    }
+  });
+
+  app.post("/api/orders/:id/pay", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const order = await storage.payOrderInvoice(req.params.id, req.body);
+      res.json(order);
+    } catch (error: any) {
+      console.error("Pay order error:", error);
+      res.status(500).json({ error: "Failed to process payment: " + error.message });
     }
   });
 
@@ -7765,50 +7839,6 @@ export async function registerRoutes(
     }
   });
 
-  // Fleet Advanced API
-  app.get("/api/vehicles/maintenance", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const vehicleId = req.query.vehicleId as string | undefined;
-      const maintenance = await storage.getVehicleMaintenance(vehicleId);
-      res.json(maintenance);
-    } catch (error) {
-      console.error("Get maintenance error:", error);
-      res.status(500).json({ error: "Failed to fetch vehicle maintenance logs" });
-    }
-  });
-
-  app.post("/api/vehicles/maintenance", authMiddleware, validateBody(insertVehicleMaintenanceSchema), async (req: AuthRequest, res) => {
-    try {
-      const log = await storage.createVehicleMaintenance(req.body);
-      res.status(201).json(log);
-    } catch (error) {
-      console.error("Create maintenance log error:", error);
-      res.status(500).json({ error: "Failed to create vehicle maintenance log" });
-    }
-  });
-
-  app.get("/api/vehicles/fuel", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const vehicleId = req.query.vehicleId as string | undefined;
-      const tripId = req.query.tripId as string | undefined;
-      const logs = await storage.getFuelLogs(vehicleId, tripId);
-      res.json(logs);
-    } catch (error) {
-      console.error("Get fuel logs error:", error);
-      res.status(500).json({ error: "Failed to fetch fuel logs" });
-    }
-  });
-
-  app.post("/api/vehicles/fuel", authMiddleware, validateBody(insertFuelLogSchema), async (req: AuthRequest, res) => {
-    try {
-      const log = await storage.createFuelLog(req.body);
-      res.status(201).json(log);
-    } catch (error) {
-      console.error("Create fuel log error:", error);
-      res.status(500).json({ error: "Failed to create fuel log" });
-    }
-  });
-
   // User Activity Logs API
   app.get("/api/user-activity-logs", authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -7832,6 +7862,197 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Create activity log error:", error);
       res.status(500).json({ error: "Failed to create activity log" });
+    }
+  });
+
+  // ==================== DISPATCH TRUCK PLANNING ROUTES ====================
+  app.get("/api/dispatch/sheets/:sheetId/trucks", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const trucks = await storage.getDispatchTruckAssignments(req.params.sheetId);
+      const outletAssignments = await storage.getDispatchOutletTruckAssignmentsBySheet(req.params.sheetId);
+      res.json({ trucks, outletAssignments });
+    } catch (error) {
+      console.error("Get truck assignments error:", error);
+      res.status(500).json({ error: "Failed to fetch truck assignments" });
+    }
+  });
+
+  app.post("/api/dispatch/sheets/:sheetId/trucks", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const truck = await storage.createDispatchTruckAssignment({ ...req.body, sheetId: req.params.sheetId });
+      res.status(201).json(truck);
+    } catch (error) {
+      console.error("Create truck assignment error:", error);
+      res.status(500).json({ error: "Failed to add truck to dispatch" });
+    }
+  });
+
+  app.delete("/api/dispatch/trucks/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await storage.deleteDispatchTruckAssignment(req.params.id);
+      res.sendStatus(204);
+    } catch (error) {
+      console.error("Delete truck assignment error:", error);
+      res.status(500).json({ error: "Failed to remove truck" });
+    }
+  });
+
+  app.post("/api/dispatch/sheets/:sheetId/trucks/auto-allocate", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const result = await storage.autoAllocateFfd(req.params.sheetId);
+      res.json(result);
+    } catch (error) {
+      console.error("Auto-allocate error:", error);
+      res.status(500).json({ error: "Failed to auto-allocate outlets to trucks" });
+    }
+  });
+
+  app.post("/api/dispatch/trucks/:truckAssignmentId/move-outlet", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { outletCode, reason } = req.body;
+      await storage.moveOutletBetweenTrucks(outletCode, req.params.truckAssignmentId, reason);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Move outlet error:", error);
+      res.status(500).json({ error: "Failed to move outlet" });
+    }
+  });
+
+  // Pending quantities
+  app.get("/api/dispatch/pending", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const pending = await storage.getPendingQuantities();
+      res.json(pending);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch pending quantities" });
+    }
+  });
+
+  app.post("/api/dispatch/pending", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const item = await storage.createPendingQuantity(req.body);
+      res.status(201).json(item);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create pending quantity" });
+    }
+  });
+
+  app.patch("/api/dispatch/pending/:id/carry-forward", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await storage.markPendingCarriedForward(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to mark as carried forward" });
+    }
+  });
+
+  // ==================== TRUCK TRANSFERS ROUTES ====================
+  app.get("/api/truck-transfers", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const truckId = req.query.truckId as string | undefined;
+      const transfers = await storage.getTruckTransfers(truckId);
+      res.json(transfers);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch truck transfers" });
+    }
+  });
+
+  app.post("/api/truck-transfers", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const transfer = await storage.createTruckTransfer(req.body);
+      res.status(201).json(transfer);
+    } catch (error) {
+      console.error("Create truck transfer error:", error);
+      res.status(500).json({ error: "Failed to create truck transfer" });
+    }
+  });
+
+  app.put("/api/truck-transfers/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const transfer = await storage.updateTruckTransfer(req.params.id, req.body);
+      if (!transfer) return res.status(404).json({ error: "Transfer not found" });
+      res.json(transfer);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update truck transfer" });
+    }
+  });
+
+  // ==================== CONTRACT INVOICE ENGINE ROUTES ====================
+  app.get("/api/contract-invoices", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const contractId = req.query.contractId as string | undefined;
+      const customerId = req.query.customerId as string | undefined;
+      const invoices = await storage.getContractInvoices(contractId, customerId);
+      res.json(invoices);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch contract invoices" });
+    }
+  });
+
+  app.get("/api/contract-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.getContractInvoice(req.params.id);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.post("/api/contract-invoices/generate", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { contractId, periodStart, periodEnd } = req.body;
+      if (!contractId || !periodStart || !periodEnd) {
+        return res.status(400).json({ error: "contractId, periodStart, and periodEnd are required" });
+      }
+      const invoice = await storage.generateContractInvoice(contractId, periodStart, periodEnd);
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error("Generate invoice error:", error);
+      res.status(500).json({ error: "Failed to generate invoice" });
+    }
+  });
+
+  app.put("/api/contract-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.updateContractInvoice(req.params.id, req.body);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice" });
+    }
+  });
+
+  app.patch("/api/contract-invoices/:id/status", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { status } = req.body;
+      const invoice = await storage.updateContractInvoice(req.params.id, { status });
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice status" });
+    }
+  });
+
+  // Monthly usage for a contract
+  app.get("/api/contracts/:id/usage", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const month = req.query.month as string | undefined;
+      const usage = await storage.getContractMonthlyUsage(req.params.id, month);
+      res.json(usage);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch usage data" });
+    }
+  });
+
+  app.put("/api/contracts/:id/usage", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { month, ...data } = req.body;
+      if (!month) return res.status(400).json({ error: "month is required" });
+      const usage = await storage.upsertContractMonthlyUsage(req.params.id, month, data);
+      res.json(usage);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update usage data" });
     }
   });
 

@@ -33,8 +33,20 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import type { Zone } from "@shared/schema";
 
 // ===================== Types =====================
+interface Brand {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  status: string;
+  createdAt?: string;
+}
+
 interface Client {
   id: string;
+  brandId?: string;
   name: string;
   companyName?: string;
   email?: string;
@@ -61,7 +73,17 @@ interface Outlet {
 }
 
 // ===================== Schemas =====================
+const brandSchema = z.object({
+  name: z.string().min(1, "Brand name is required"),
+  email: z.string().email("Invalid email").optional().or(z.literal("")),
+  phone: z.string().optional(),
+  website: z.string().optional(),
+  address: z.string().optional(),
+  status: z.enum(["active", "inactive"]).default("active"),
+});
+
 const clientSchema = z.object({
+  brandId: z.string().optional(),
   name: z.string().min(1, "Client name is required"),
   companyName: z.string().optional(),
   email: z.string().email("Invalid email").optional().or(z.literal("")),
@@ -84,6 +106,7 @@ const outletSchema = z.object({
   status: z.enum(["active", "inactive"]).default("active"),
 });
 
+type BrandFormData = z.infer<typeof brandSchema>;
 type ClientFormData = z.infer<typeof clientSchema>;
 type OutletFormData = z.infer<typeof outletSchema>;
 
@@ -130,11 +153,16 @@ function ZoneMultiSelect({
 // ===================== Main Page =====================
 export default function ClientsPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"clients" | "outlets">("clients");
+  const [activeTab, setActiveTab] = useState<"brands" | "clients" | "outlets">("brands");
+
+  // Brand state
+  const [brandDialog, setBrandDialog] = useState<{ open: boolean; editing?: Brand }>({ open: false });
+  const [deleteBrandId, setDeleteBrandId] = useState<string | null>(null);
 
   // Client state
   const [clientDialog, setClientDialog] = useState<{ open: boolean; editing?: Client }>({ open: false });
   const [deleteClientId, setDeleteClientId] = useState<string | null>(null);
+  const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>("all");
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string>("");
 
@@ -145,6 +173,10 @@ export default function ClientsPage() {
   const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
 
   // ---- Queries ----
+  const { data: brands = [], isLoading: brandsLoading } = useQuery<Brand[]>({
+    queryKey: ["/api/brands"],
+  });
+
   const { data: clients = [], isLoading: clientsLoading } = useQuery<Client[]>({
     queryKey: ["/api/clients"],
   });
@@ -161,15 +193,77 @@ export default function ClientsPage() {
     enabled: true,
   });
 
+  // ---- Brand Form ----
+  const brandForm = useForm<BrandFormData>({
+    resolver: zodResolver(brandSchema),
+    defaultValues: { name: "", email: "", phone: "", website: "", address: "", status: "active" },
+  });
+
+  const openBrandDialog = (brand?: Brand) => {
+    if (brand) {
+      brandForm.reset({
+        name: brand.name,
+        email: brand.email || "",
+        phone: brand.phone || "",
+        website: brand.website || "",
+        address: brand.address || "",
+        status: brand.status as "active" | "inactive",
+      });
+    } else {
+      brandForm.reset({ name: "", email: "", phone: "", website: "", address: "", status: "active" });
+    }
+    setBrandDialog({ open: true, editing: brand });
+  };
+
+  const createBrandMutation = useMutation({
+    mutationFn: (data: BrandFormData) => apiRequest("POST", "/api/brands", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/brands"] });
+      setBrandDialog({ open: false });
+      toast({ title: "Brand created successfully" });
+    },
+    onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const updateBrandMutation = useMutation({
+    mutationFn: (data: BrandFormData) =>
+      apiRequest("PATCH", `/api/brands/${brandDialog.editing?.id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/brands"] });
+      setBrandDialog({ open: false });
+      toast({ title: "Brand updated successfully" });
+    },
+    onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const deleteBrandMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/brands/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/brands"] });
+      setDeleteBrandId(null);
+      toast({ title: "Brand deleted" });
+    },
+    onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const onBrandSubmit = (data: BrandFormData) => {
+    if (brandDialog.editing) {
+      updateBrandMutation.mutate(data);
+    } else {
+      createBrandMutation.mutate(data);
+    }
+  };
+
   // ---- Client Form ----
   const clientForm = useForm<ClientFormData>({
     resolver: zodResolver(clientSchema),
-    defaultValues: { name: "", companyName: "", email: "", phone: "", address: "", logo: "", status: "active" },
+    defaultValues: { brandId: "", name: "", companyName: "", email: "", phone: "", address: "", logo: "", status: "active" },
   });
 
   const openClientDialog = (client?: Client) => {
     if (client) {
       clientForm.reset({
+        brandId: client.brandId || "",
         name: client.name,
         companyName: client.companyName || "",
         email: client.email || "",
@@ -180,7 +274,7 @@ export default function ClientsPage() {
       });
       setLogoPreview(client.logo || "");
     } else {
-      clientForm.reset({ name: "", companyName: "", email: "", phone: "", address: "", logo: "", status: "active" });
+      clientForm.reset({ brandId: "", name: "", companyName: "", email: "", phone: "", address: "", logo: "", status: "active" });
       setLogoPreview("");
     }
     setClientDialog({ open: true, editing: client });
@@ -332,6 +426,7 @@ export default function ClientsPage() {
   };
 
   const selectedClient = clients.find((c) => c.id === selectedClientId);
+  const filteredClients = selectedBrandFilter === "all" ? clients : clients.filter((c) => c.brandId === selectedBrandFilter);
   const outlets = Array.isArray(outletsList) ? outletsList : [];
   const filteredOutlets = selectedClientId ? outlets.filter((o) => o.clientId === selectedClientId) : outlets;
 
@@ -352,6 +447,10 @@ export default function ClientsPage() {
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
         <TabsList className="mb-2">
+          <TabsTrigger value="brands" className="gap-2">
+            <Globe className="h-4 w-4" />
+            Brands
+          </TabsTrigger>
           <TabsTrigger value="clients" className="gap-2">
             <Building2 className="h-4 w-4" />
             Clients
@@ -362,17 +461,118 @@ export default function ClientsPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ==================== CLIENTS TAB ==================== */}
-        <TabsContent value="clients">
+        {/* ==================== BRANDS TAB ==================== */}
+        <TabsContent value="brands">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3 border-b">
               <div>
-                <CardTitle>Clients</CardTitle>
-                <CardDescription>All logistics client companies</CardDescription>
+                <CardTitle>Brands</CardTitle>
+                <CardDescription>Manage your brands</CardDescription>
               </div>
-              <Button onClick={() => openClientDialog()} className="gap-2">
-                <Plus className="h-4 w-4" /> Add Client
+              <Button onClick={() => openBrandDialog()} className="gap-2">
+                <Plus className="h-4 w-4" /> Add Brand
               </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              {brandsLoading ? (
+                <div className="p-10 text-center text-muted-foreground">Loading brands...</div>
+              ) : brands.length === 0 ? (
+                <div className="p-16 flex flex-col items-center gap-3 text-muted-foreground">
+                  <Globe className="h-10 w-10 opacity-30" />
+                  <p className="text-sm">No brands yet. Add your first brand to get started.</p>
+                  <Button variant="outline" onClick={() => openBrandDialog()} className="gap-2 mt-1">
+                    <Plus className="h-4 w-4" /> Add Brand
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Website</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {brands.map((brand) => (
+                      <TableRow key={brand.id} className="hover:bg-accent/30 transition-colors">
+                        <TableCell className="font-semibold">{brand.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{brand.email || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{brand.phone || "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {brand.website ? (
+                            <a href={brand.website.startsWith('http') ? brand.website : `https://${brand.website}`} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                              {brand.website}
+                            </a>
+                          ) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={brand.status === "active"
+                              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
+                          >
+                            {brand.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost" size="sm"
+                              onClick={() => { setSelectedBrandFilter(brand.id); setActiveTab("clients"); }}
+                              className="gap-1 text-xs"
+                            >
+                              <Building2 className="h-3.5 w-3.5" /> Clients
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => openBrandDialog(brand)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
+                              onClick={() => setDeleteBrandId(brand.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ==================== CLIENTS TAB ==================== */}
+        <TabsContent value="clients">
+          <Card>
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-3 border-b">
+              <div>
+                <CardTitle>Clients</CardTitle>
+                <CardDescription>
+                  {selectedBrandFilter === "all" 
+                    ? "All logistics client companies" 
+                    : `Clients for ${brands.find(b => b.id === selectedBrandFilter)?.name || 'Selected Brand'}`}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Select value={selectedBrandFilter} onValueChange={setSelectedBrandFilter}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="All Brands" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Brands</SelectItem>
+                    {brands.map(b => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={() => openClientDialog()} className="gap-2">
+                  <Plus className="h-4 w-4" /> Add Client
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {clientsLoading ? (
@@ -399,7 +599,7 @@ export default function ClientsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {clients.map((client) => (
+                    {filteredClients.map((client) => (
                       <TableRow key={client.id} className="hover:bg-accent/30 transition-colors">
                         <TableCell>
                           {client.logo ? (
@@ -586,6 +786,76 @@ export default function ClientsPage() {
         </TabsContent>
       </Tabs>
 
+      {/* ==================== BRAND DIALOG ==================== */}
+      <Dialog open={brandDialog.open} onOpenChange={(o) => setBrandDialog({ open: o })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{brandDialog.editing ? "Edit Brand" : "Add New Brand"}</DialogTitle>
+            <DialogDescription>
+              Fill in the brand details.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...brandForm}>
+            <form onSubmit={brandForm.handleSubmit(onBrandSubmit)} className="space-y-4">
+              <FormField control={brandForm.control} name="name" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Brand Name *</FormLabel>
+                  <FormControl><Input placeholder="e.g. Acme Corp" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={brandForm.control} name="email" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email</FormLabel>
+                  <FormControl><Input type="email" placeholder="contact@example.com" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={brandForm.control} name="phone" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Phone</FormLabel>
+                  <FormControl><Input placeholder="+968 9000 0000" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={brandForm.control} name="website" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Website</FormLabel>
+                  <FormControl><Input placeholder="example.com" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={brandForm.control} name="address" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Address</FormLabel>
+                  <FormControl><Textarea placeholder="Full address..." rows={2} {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={brandForm.control} name="status" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Status</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setBrandDialog({ open: false })}>Cancel</Button>
+                <Button type="submit" disabled={createBrandMutation.isPending || updateBrandMutation.isPending}>
+                  {createBrandMutation.isPending || updateBrandMutation.isPending ? "Saving..." : brandDialog.editing ? "Update Brand" : "Create Brand"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
       {/* ==================== CLIENT DIALOG ==================== */}
       <Dialog open={clientDialog.open} onOpenChange={(o) => setClientDialog({ open: o })}>
         <DialogContent className="max-w-lg">
@@ -632,6 +902,25 @@ export default function ClientsPage() {
                   <FormItem className="col-span-2">
                     <FormLabel>Client Name *</FormLabel>
                     <FormControl><Input placeholder="e.g. Muscat Traders LLC" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={clientForm.control} name="brandId" render={({ field }) => (
+                  <FormItem className="col-span-2">
+                    <FormLabel>Linked Brand (Optional)</FormLabel>
+                    <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a brand to link" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">No Brand Selected</SelectItem>
+                        {brands.map(brand => (
+                          <SelectItem key={brand.id} value={brand.id}>{brand.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )} />

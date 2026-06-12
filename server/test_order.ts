@@ -47,6 +47,7 @@ async function test() {
     await db.delete(orders).where(eq(orders.id, row.id));
     process.exit(0);
   } catch (error) {
+    
     console.error("DEBUG ERROR:", error);
     process.exit(1);
   }

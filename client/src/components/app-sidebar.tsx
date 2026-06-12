@@ -68,7 +68,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Users", url: "/users", icon: Users, menuKey: "users", superAdminOnly: true },
       // { title: "Compliance Reminders", url: "/compliance/reminders", icon: Clock, menuKey: "compliance" },
       { title: "Roles & Permissions", url: "/rbac", icon: Shield, menuKey: "rbac", superAdminOnly: true },
-      { title: "System Settings", url: "/settings", icon: Settings, menuKey: "settings", superAdminOnly: true },
+      // { title: "System Settings", url: "/settings", icon: Settings, menuKey: "settings", superAdminOnly: true },
     ],
   },
   {
@@ -84,6 +84,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Daily Dispatch", url: "/logistics/daily-dispatch", icon: Truck },
       { title: "Delivery Receipts", url: "/logistics/deliveries", icon: FileCheck },
       { title: "Trucking Invoices", url: "/logistics/invoices", icon: Receipt },
+      { title: "Contract Invoices", url: "/logistics/contract-invoices", icon: Receipt },
       { title: "Driver Geo-Hub", url: "/logistics/driver-hub", icon: UserCircle },
       { title: "Logistics Finance", url: "/logistics/finance", icon: Calculator },
     ],
