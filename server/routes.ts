@@ -7918,6 +7918,114 @@ export async function registerRoutes(
     }
   });
 
+  // Manually assign a specific outlet to a specific truck (with capacity check)
+  app.post("/api/dispatch/outlets/assign", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { outletCode, truckAssignmentId, outletWeight, sheetId } = req.body;
+      if (!outletCode || !truckAssignmentId) {
+        return res.status(400).json({ error: "outletCode and truckAssignmentId are required" });
+      }
+
+      // Load the truck assignment to check capacity
+      const [truckAssign] = await db.select().from(schema.dispatchTruckAssignments)
+        .where(eq(schema.dispatchTruckAssignments.id, truckAssignmentId));
+      if (!truckAssign) return res.status(404).json({ error: "Truck assignment not found" });
+
+      // Load the vehicle to get capacity
+      const [vehicle] = await db.select().from(schema.vehicles)
+        .where(eq(schema.vehicles.id, truckAssign.truckId));
+      const capacity = parseFloat(vehicle?.capacity || "0");
+      const usedCapacity = parseFloat(truckAssign.usedCapacity?.toString() || "0");
+      const weight = parseFloat(outletWeight || "0");
+
+      if (capacity > 0 && usedCapacity + weight > capacity) {
+        return res.status(422).json({
+          error: `Capacity exceeded: Adding this outlet (${weight.toFixed(3)}T) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${capacity}T. Current load: ${usedCapacity.toFixed(3)}T.`
+        });
+      }
+
+      // Remove existing assignment for this outlet (if any) in this sheet to avoid duplicates
+      if (sheetId) {
+        const existingTrucks = await db.select().from(schema.dispatchTruckAssignments)
+          .where(eq(schema.dispatchTruckAssignments.sheetId, sheetId));
+        const existingTruckIds = existingTrucks.map((t: any) => t.id);
+        if (existingTruckIds.length > 0) {
+          const existing = await db.select().from(schema.dispatchOutletTruckAssignments)
+            .where(and(
+              inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, existingTruckIds),
+              eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode)
+            ));
+          for (const e of existing) {
+            // Reduce old truck's usedCapacity
+            const [oldTruck] = await db.select().from(schema.dispatchTruckAssignments)
+              .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
+            if (oldTruck) {
+              const oldUsed = parseFloat(oldTruck.usedCapacity?.toString() || "0");
+              const oldWeight = parseFloat(e.assignedWeight?.toString() || "0");
+              await db.update(schema.dispatchTruckAssignments)
+                .set({ usedCapacity: Math.max(0, oldUsed - oldWeight).toFixed(3) } as any)
+                .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
+            }
+            await db.delete(schema.dispatchOutletTruckAssignments)
+              .where(eq(schema.dispatchOutletTruckAssignments.id, e.id));
+          }
+        }
+      }
+
+      // Insert new assignment
+      await db.insert(schema.dispatchOutletTruckAssignments).values({
+        truckAssignmentId,
+        outletCode,
+        assignedWeight: weight.toFixed(3),
+      });
+
+      // Update truck usedCapacity
+      await db.update(schema.dispatchTruckAssignments)
+        .set({ usedCapacity: (usedCapacity + weight).toFixed(3) } as any)
+        .where(eq(schema.dispatchTruckAssignments.id, truckAssignmentId));
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Assign outlet error:", error);
+      res.status(500).json({ error: "Failed to assign outlet: " + error.message });
+    }
+  });
+
+  // Unassign an outlet from its current truck
+  app.delete("/api/dispatch/outlets/assign", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { outletCode, sheetId } = req.body;
+      const allTrucks = await db.select().from(schema.dispatchTruckAssignments)
+        .where(eq(schema.dispatchTruckAssignments.sheetId, sheetId));
+      const truckIds = allTrucks.map((t: any) => t.id);
+      if (truckIds.length === 0) return res.json({ success: true });
+
+      const existing = await db.select().from(schema.dispatchOutletTruckAssignments)
+        .where(and(
+          inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckIds),
+          eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode)
+        ));
+
+      for (const e of existing) {
+        const [truck] = await db.select().from(schema.dispatchTruckAssignments)
+          .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
+        if (truck) {
+          const oldUsed = parseFloat(truck.usedCapacity?.toString() || "0");
+          const w = parseFloat(e.assignedWeight?.toString() || "0");
+          await db.update(schema.dispatchTruckAssignments)
+            .set({ usedCapacity: Math.max(0, oldUsed - w).toFixed(3) } as any)
+            .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
+        }
+        await db.delete(schema.dispatchOutletTruckAssignments)
+          .where(eq(schema.dispatchOutletTruckAssignments.id, e.id));
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Unassign outlet error:", error);
+      res.status(500).json({ error: "Failed to unassign outlet" });
+    }
+  });
+
   // Pending quantities
   app.get("/api/dispatch/pending", authMiddleware, async (req: AuthRequest, res) => {
     try {

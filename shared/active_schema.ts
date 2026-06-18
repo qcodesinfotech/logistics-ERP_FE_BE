@@ -70,7 +70,8 @@ import {
   dispatchPendingQuantities,
   contractMonthlyUsage,
   contractInvoices,
-  orderExpenses
+  orderExpenses,
+  invoicePayments
 } from "./schema";
 
 export {
@@ -145,5 +146,6 @@ export {
   dispatchPendingQuantities,
   contractMonthlyUsage,
   contractInvoices,
-  orderExpenses
+  orderExpenses,
+  invoicePayments
 };

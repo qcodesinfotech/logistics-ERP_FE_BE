@@ -306,7 +306,7 @@ export default function ZonesPage() {
 
   const currentZoneForTrucks = zonesList?.find(z => z.id === selectedZoneIdForTrucks);
   const zoneTrucks = vehiclesList?.filter(v => v.currentZoneId === selectedZoneIdForTrucks) || [];
-  const availableTrucks = vehiclesList?.filter(v => v.currentZoneId !== selectedZoneIdForTrucks && v.status === "available") || [];
+  const availableTrucks = vehiclesList?.filter(v => !v.currentZoneId && v.status === "available") || [];
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">

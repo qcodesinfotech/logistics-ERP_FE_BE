@@ -906,19 +906,51 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     enabled: !!boardSheetId,
   });
 
-  const sheetForDate = sheets.find((s: any) => s.date === selectedDate);
-  const truckAssignments = truckData?.trucks || [];
-  const outletAssignments = truckData?.outletAssignments || [];
+  // Fetch board data to get zone outlets with weights
+  const { data: boardData } = useQuery<any>({
+    queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
+    enabled: !!boardSheetId,
+  });
+
+  const truckAssignments: any[] = truckData?.trucks || [];
+  const outletAssignments: any[] = truckData?.outletAssignments || [];
 
   const addTruckMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", `/api/dispatch/sheets/${boardSheetId}/trucks`, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] }); toast({ title: "Truck added to dispatch!" }); setTruckForm({ truckId: "", driverId: "", zoneId: "" }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      toast({ title: "Truck added to dispatch!" });
+      setTruckForm({ truckId: "", driverId: "", zoneId: "" });
+    },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
 
   const removeTruckMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/trucks/${id}`),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] }); toast({ title: "Truck removed" }); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      toast({ title: "Truck removed" });
+    },
+  });
+
+  const assignOutletMutation = useMutation({
+    mutationFn: (data: { outletCode: string; truckAssignmentId: string; outletWeight: string; sheetId: string }) =>
+      apiRequest("POST", "/api/dispatch/outlets/assign", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      toast({ title: "Outlet assigned to truck!" });
+    },
+    onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
+  });
+
+  const unassignOutletMutation = useMutation({
+    mutationFn: (data: { outletCode: string; sheetId: string }) =>
+      apiRequest("DELETE", "/api/dispatch/outlets/assign", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      toast({ title: "Outlet unassigned" });
+    },
+    onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
 
   const autoAllocateMutation = useMutation({
@@ -926,18 +958,47 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
-      const msg = data.overflow?.length > 0 ? `Allocated ${data.allocated} outlets. ⚠ ${data.overflow.length} outlets couldn't fit any truck.` : `✅ Allocated ${data.allocated} outlets across trucks.`;
+      const msg = data.overflow?.length > 0
+        ? `Allocated ${data.allocated} outlets. ⚠ ${data.overflow.length} outlets couldn't fit any truck.`
+        : `✅ Allocated ${data.allocated} outlets across trucks.`;
       toast({ title: msg });
     },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
 
   const getVehicleInfo = (id: string) => vehiclesList.find((v: any) => v.id === id);
-  const getDriverName = (id: string) => drivers.find((d: any) => d.id === id)?.name || "Unassigned";
+  const getDriverName = (id: string) => drivers.find((d: any) => d.id === id)?.name || "No driver";
   const getZoneName = (id: string) => zones.find((z: any) => z.id === id)?.name || "Unknown";
 
+  // Build zone-based grouping of truck assignments
+  const zoneGroups = zones.map((zone: any) => {
+    const zoneTrucks = truckAssignments.filter((ta: any) => ta.zoneId === zone.id);
+
+    // Get all outlets in this zone from board data
+    const boardZone = boardData?.zones?.find((z: any) => z.zoneId === zone.id);
+    const outlets: any[] = boardZone?.outlets || [];
+
+    // Calculate total weight per outlet (sum of item weights) and sort heaviest first
+    const outletRows = outlets.map((outlet: any) => {
+      const totalWeight = outlet.items.reduce((sum: number, item: any) => {
+        return sum + parseFloat(item.weight || item.totalDelivered || "0");
+      }, 0);
+      // Find current truck assignment for this outlet
+      const assignment = outletAssignments.find((oa: any) =>
+        oa.outletCode === outlet.outletCode &&
+        zoneTrucks.some((zt: any) => zt.id === oa.truckAssignmentId)
+      );
+      return { ...outlet, totalWeight, assignment };
+    }).sort((a: any, b: any) => b.totalWeight - a.totalWeight);
+
+    return { zone, zoneTrucks, outletRows };
+  }).filter((g: any) => g.zoneTrucks.length > 0 || g.outletRows.length > 0);
+
+  // Trucks already assigned to the selected zone (to filter out from add form)
+  const trucksInSelectedZone = truckAssignments.filter((ta: any) => ta.zoneId === truckForm.zoneId).map((ta: any) => ta.truckId);
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {!boardSheetId ? (
         <Card>
           <CardContent className="p-12 text-center text-muted-foreground">
@@ -948,27 +1009,47 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
         </Card>
       ) : (
         <>
-          {/* Add Truck */}
+          {/* ─── Add Truck Form ─── */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <Plus className="h-4 w-4 text-primary" /> Add Truck to Today's Dispatch
+                <Plus className="h-4 w-4 text-primary" /> Add Truck to a Zone
               </CardTitle>
-              <CardDescription>Assign a vehicle and driver to a zone for this dispatch sheet.</CardDescription>
+              <CardDescription>Select a zone first, then assign a vehicle and optional driver.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Zone — primary field */}
                 <div className="space-y-2">
-                  <Label>Vehicle / Truck</Label>
-                  <Select value={truckForm.truckId} onValueChange={v => setTruckForm(f => ({ ...f, truckId: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select vehicle..." /></SelectTrigger>
+                  <Label>Zone <span className="text-red-500">*</span></Label>
+                  <Select value={truckForm.zoneId} onValueChange={v => setTruckForm(f => ({ ...f, zoneId: v, truckId: "" }))}>
+                    <SelectTrigger><SelectValue placeholder="Select zone first..." /></SelectTrigger>
                     <SelectContent>
-                      {vehiclesList.filter((v: any) => v.status === "available").map((v: any) => (
-                        <SelectItem key={v.id} value={v.id}>{v.plateNumber} — {v.name} ({v.capacity || "?"} T)</SelectItem>
-                      ))}
+                      {zones.map((z: any) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
+                {/* Vehicle */}
+                <div className="space-y-2">
+                  <Label>Vehicle / Truck <span className="text-red-500">*</span></Label>
+                  <Select
+                    value={truckForm.truckId}
+                    onValueChange={v => setTruckForm(f => ({ ...f, truckId: v }))}
+                    disabled={!truckForm.zoneId}
+                  >
+                    <SelectTrigger><SelectValue placeholder={truckForm.zoneId ? "Select vehicle..." : "Select zone first"} /></SelectTrigger>
+                    <SelectContent>
+                      {vehiclesList
+                        .filter((v: any) => v.status === "available" && !trucksInSelectedZone.includes(v.id))
+                        .map((v: any) => (
+                          <SelectItem key={v.id} value={v.id}>
+                            {v.plateNumber} — {v.name} ({v.capacity || "?"} T)
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Driver */}
                 <div className="space-y-2">
                   <Label>Driver (Optional)</Label>
                   <Select value={truckForm.driverId} onValueChange={v => setTruckForm(f => ({ ...f, driverId: v }))}>
@@ -980,85 +1061,214 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>Zone</Label>
-                  <Select value={truckForm.zoneId} onValueChange={v => setTruckForm(f => ({ ...f, zoneId: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
-                    <SelectContent>
-                      {zones.map((z: any) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
               <div className="flex gap-2">
-                <Button onClick={() => addTruckMutation.mutate(truckForm)} disabled={!truckForm.truckId || !truckForm.zoneId || addTruckMutation.isPending} className="gap-2">
+                <Button
+                  onClick={() => addTruckMutation.mutate(truckForm)}
+                  disabled={!truckForm.truckId || !truckForm.zoneId || addTruckMutation.isPending}
+                  className="gap-2"
+                >
                   <Plus className="h-4 w-4" /> Add Truck
                 </Button>
-                <Button variant="outline" onClick={() => autoAllocateMutation.mutate()} disabled={truckAssignments.length === 0 || autoAllocateMutation.isPending} className="gap-2">
-                  <RefreshCw className={`h-4 w-4 ${autoAllocateMutation.isPending ? "animate-spin" : ""}`} /> Auto-Allocate Outlets (FFD)
+                <Button
+                  variant="outline"
+                  onClick={() => autoAllocateMutation.mutate()}
+                  disabled={truckAssignments.length === 0 || autoAllocateMutation.isPending}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`h-4 w-4 ${autoAllocateMutation.isPending ? "animate-spin" : ""}`} />
+                  Auto-Allocate All (FFD)
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          {/* Truck Capacity Board */}
-          {truckAssignments.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {truckAssignments.map((ta: any) => {
-                const veh = getVehicleInfo(ta.truckId);
-                const cap = parseFloat(veh?.capacity || "0");
-                const used = parseFloat(ta.usedCapacity || "0");
-                const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
-                const outletsOnTruck = outletAssignments.filter((o: any) => o.truckAssignmentId === ta.id);
-
-                return (
-                  <Card key={ta.id} className={`border ${pct >= 90 ? "border-red-300 bg-red-50/30" : pct >= 70 ? "border-amber-300" : "border-border"}`}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
+          {/* ─── Zone Cards ─── */}
+          {zoneGroups.length === 0 ? (
+            <Card>
+              <CardContent className="p-10 text-center text-muted-foreground">
+                <MapPin className="h-8 w-8 mx-auto mb-2 text-primary/30" />
+                <p className="font-medium">No trucks assigned yet</p>
+                <p className="text-sm">Add trucks to zones above to start planning.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-6">
+              {zoneGroups.map(({ zone, zoneTrucks, outletRows }: any) => (
+                <Card key={zone.id} className="border-2">
+                  {/* Zone Header */}
+                  <CardHeader className="bg-gradient-to-r from-primary/8 to-transparent pb-3">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-xl bg-primary/15 flex items-center justify-center">
+                          <MapPin className="h-5 w-5 text-primary" />
+                        </div>
                         <div>
-                          <p className="font-bold text-sm font-mono">{veh?.plateNumber || ta.truckId}</p>
-                          <p className="text-xs text-muted-foreground">{veh?.name} · {getZoneName(ta.zoneId)}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                            <User className="h-3 w-3" />{getDriverName(ta.driverId)}
+                          <h3 className="font-bold text-base">{zone.name}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {zoneTrucks.length} truck(s) · {outletRows.length} outlets
                           </p>
                         </div>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500" onClick={() => removeTruckMutation.mutate(ta.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
                       </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2 pt-0">
-                      {/* Capacity Bar */}
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-muted-foreground">Capacity</span>
-                          <span className={pct >= 90 ? "text-red-600 font-semibold" : "text-muted-foreground"}>{used.toFixed(1)}T / {cap.toFixed(1)}T ({pct.toFixed(0)}%)</span>
-                        </div>
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                      {/* Outlets */}
-                      {outletsOnTruck.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          <p className="text-xs font-semibold text-muted-foreground">Assigned Outlets:</p>
-                          {outletsOnTruck.map((o: any) => (
-                            <div key={o.id} className="flex justify-between text-xs bg-muted/40 px-2 py-1 rounded">
-                              <span className="font-medium">{o.outletCode}</span>
-                              <span className="text-muted-foreground">{parseFloat(o.assignedWeight || "0").toFixed(1)}T</span>
+                      {/* Truck capacity bars */}
+                      <div className="flex flex-wrap gap-2">
+                        {zoneTrucks.map((ta: any) => {
+                          const veh = getVehicleInfo(ta.truckId);
+                          const cap = parseFloat(veh?.capacity || "0");
+                          const used = parseFloat(ta.usedCapacity || "0");
+                          const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+                          const isOver = used > cap && cap > 0;
+                          return (
+                            <div key={ta.id} className={`rounded-lg border p-2 bg-background text-xs min-w-[140px] shadow-sm ${isOver ? "border-red-400" : "border-border"}`}>
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-1 font-semibold">
+                                  <Truck className="h-3 w-3 text-primary" />
+                                  <span className="truncate max-w-[80px]" title={veh?.plateNumber}>{veh?.plateNumber || "Truck"}</span>
+                                </div>
+                                <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
+                                  onClick={() => removeTruckMutation.mutate(ta.id)}>
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              {cap > 0 && (
+                                <>
+                                  <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-1">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`}
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                  <p className={`text-[10px] ${isOver ? "text-red-600 font-bold" : "text-muted-foreground"}`}>
+                                    {used.toFixed(2)}T / {cap.toFixed(0)}T ({pct.toFixed(0)}%)
+                                    {isOver && " ⚠ OVER"}
+                                  </p>
+                                </>
+                              )}
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 mt-0.5">
+                                <User className="h-2.5 w-2.5" />{getDriverName(ta.driverId)}
+                              </p>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                      {pct >= 90 && (
-                        <div className="flex items-center gap-1 text-xs text-red-600 font-medium">
-                          <AlertTriangle className="h-3 w-3" /> Near capacity overflow risk!
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </CardHeader>
+
+                  {/* Outlets Table */}
+                  <CardContent className="p-0">
+                    {outletRows.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-6">No outlets in this zone's dispatch sheet.</p>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-muted/30">
+                            <TableHead className="pl-4">Outlet</TableHead>
+                            <TableHead className="text-right">Total Weight</TableHead>
+                            <TableHead className="text-right pr-4">Assigned Truck</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {outletRows.map((outlet: any, idx: number) => {
+                            const currentAssignment = outletAssignments.find(
+                              (oa: any) => oa.outletCode === outlet.outletCode &&
+                                zoneTrucks.some((zt: any) => zt.id === oa.truckAssignmentId)
+                            );
+                            const assignedTruck = currentAssignment
+                              ? zoneTrucks.find((zt: any) => zt.id === currentAssignment.truckAssignmentId)
+                              : null;
+                            const assignedVeh = assignedTruck ? getVehicleInfo(assignedTruck.truckId) : null;
+                            const outletWeightT = outlet.totalWeight; // treat as T
+
+                            return (
+                              <TableRow key={outlet.outletCode + idx} className={idx % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+                                <TableCell className="pl-4">
+                                  <div>
+                                    <p className="font-semibold text-sm">{outlet.outletName || outlet.outletCode}</p>
+                                    <p className="text-xs text-muted-foreground">{outlet.outletCode} · {outlet.items.length} item(s)</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <span className={`font-mono text-sm font-semibold ${outletWeightT > 10 ? "text-amber-600" : "text-foreground"}`}>
+                                    {outletWeightT.toFixed(3)} T
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right pr-4">
+                                  {assignedTruck ? (
+                                    <div className="flex items-center justify-end gap-2">
+                                      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
+                                        <Truck className="h-3 w-3" />
+                                        {assignedVeh?.plateNumber || "Truck"}
+                                      </Badge>
+                                      <Button
+                                        variant="ghost" size="sm"
+                                        className="h-6 w-6 p-0 text-red-400 hover:text-red-600"
+                                        onClick={() => unassignOutletMutation.mutate({
+                                          outletCode: outlet.outletCode,
+                                          sheetId: boardSheetId!
+                                        })}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <Select
+                                      value=""
+                                      onValueChange={(truckAssignId) => {
+                                        if (!truckAssignId) return;
+                                        const truck = zoneTrucks.find((t: any) => t.id === truckAssignId);
+                                        const veh = getVehicleInfo(truck?.truckId);
+                                        const cap = parseFloat(veh?.capacity || "0");
+                                        const used = parseFloat(truck?.usedCapacity || "0");
+                                        // Frontend capacity check
+                                        if (cap > 0 && used + outletWeightT > cap) {
+                                          toast({
+                                            title: `⚠️ Capacity exceeded! Adding ${outlet.outletCode} (${outletWeightT.toFixed(2)}T) would exceed ${veh?.plateNumber}'s limit of ${cap}T. Current load: ${used.toFixed(2)}T.`,
+                                            variant: "destructive"
+                                          });
+                                          return;
+                                        }
+                                        assignOutletMutation.mutate({
+                                          outletCode: outlet.outletCode,
+                                          truckAssignmentId: truckAssignId,
+                                          outletWeight: outletWeightT.toFixed(3),
+                                          sheetId: boardSheetId!,
+                                        });
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs w-36 border-dashed">
+                                        <SelectValue placeholder="Assign truck →" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {zoneTrucks.map((ta: any) => {
+                                          const veh = getVehicleInfo(ta.truckId);
+                                          const cap = parseFloat(veh?.capacity || "0");
+                                          const used = parseFloat(ta.usedCapacity || "0");
+                                          const remaining = cap > 0 ? cap - used : null;
+                                          const wouldOverflow = cap > 0 && used + outletWeightT > cap;
+                                          return (
+                                            <SelectItem
+                                              key={ta.id}
+                                              value={ta.id}
+                                              className={wouldOverflow ? "text-red-500" : ""}
+                                            >
+                                              {veh?.plateNumber || "Truck"} 
+                                              {remaining !== null ? ` (${remaining.toFixed(1)}T free${wouldOverflow ? " ⚠" : ""})` : ""}
+                                            </SelectItem>
+                                          );
+                                        })}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
         </>
