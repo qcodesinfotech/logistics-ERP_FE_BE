@@ -2,8 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { db } from "./db";
-import { users, roles, menus, permissions } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { users, roles, menus, permissions, employees } from "@shared/schema";
+import { eq, and, or } from "drizzle-orm";
 import { storage } from "./storage";
 
 const JWT_SECRET = process.env.JWT_SECRET || "tt-erp-jwt-secret-key-2024";
@@ -446,47 +446,97 @@ export const registerAuthRoutes = (app: any) => {
         return res.status(400).json({ error: "Username and password are required" });
       }
 
-      const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+      let [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
 
-      if (!user) {
+      if (user) {
+        if (user.status !== "active") {
+          return res.status(401).json({ error: "Account is not active" });
+        }
+
+        const isValidPassword = await verifyPassword(password, user.password);
+
+        if (!isValidPassword) {
+          return res.status(401).json({ error: "Incorrect password or username" });
+        }
+
+        const authUser: AuthUser = {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          role: user.role,
+          employeeId: user.employeeId,
+          companyId: user.companyId,
+          shopId: user.shopId,
+          branchId: user.branchId,
+          warehouseId: user.warehouseId,
+        };
+
+        const accessToken = generateAccessToken(authUser);
+        const refreshToken = generateRefreshToken(authUser);
+
+        await db.update(users)
+          .set({ refreshToken, lastLogin: new Date() })
+          .where(eq(users.id, user.id));
+
+        setRefreshTokenCookie(res, refreshToken);
+
+        return res.json({
+          user: authUser,
+          accessToken,
+          canChangeScope: canChangeScope(user.role),
+        });
+      }
+
+      // Fallback: Check employees table by employeeCode or phone (Driver/Employee Login)
+      const [emp] = await db.select().from(employees)
+        .where(or(eq(employees.employeeCode, username), eq(employees.phone, username)))
+        .limit(1);
+
+      if (!emp) {
         return res.status(401).json({ error: "Incorrect password or username" });
       }
 
-      if (user.status !== "active") {
+      if (emp.status !== "active") {
         return res.status(401).json({ error: "Account is not active" });
       }
 
-      const isValidPassword = await verifyPassword(password, user.password);
+      let isValidEmpPassword = (password === emp.password);
+      if (!isValidEmpPassword && emp.password) {
+        try {
+          isValidEmpPassword = await verifyPassword(password, emp.password);
+        } catch (e) {}
+      }
+      if (!isValidEmpPassword && emp.password) {
+        try {
+          isValidEmpPassword = await bcrypt.compare(password, emp.password);
+        } catch (e) {}
+      }
 
-      if (!isValidPassword) {
+      if (!isValidEmpPassword) {
         return res.status(401).json({ error: "Incorrect password or username" });
       }
 
       const authUser: AuthUser = {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        role: user.role,
-        employeeId: user.employeeId,
-        companyId: user.companyId,
-        shopId: user.shopId,
-        branchId: user.branchId,
-        warehouseId: user.warehouseId,
+        id: emp.id,
+        username: emp.employeeCode,
+        name: emp.name,
+        role: "driver",
+        employeeId: emp.id,
+        companyId: emp.companyId,
+        shopId: emp.shopId,
+        branchId: emp.branchId,
+        warehouseId: null,
       };
 
       const accessToken = generateAccessToken(authUser);
       const refreshToken = generateRefreshToken(authUser);
 
-      await db.update(users)
-        .set({ refreshToken, lastLogin: new Date() })
-        .where(eq(users.id, user.id));
-
       setRefreshTokenCookie(res, refreshToken);
 
-      res.json({
+      return res.json({
         user: authUser,
         accessToken,
-        canChangeScope: canChangeScope(user.role),
+        canChangeScope: false,
       });
     } catch (error) {
       console.error("Login error:", error);

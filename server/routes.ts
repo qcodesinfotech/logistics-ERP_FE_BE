@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db } from "./db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, or, inArray } from "drizzle-orm";
 import * as schema from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
@@ -6419,41 +6419,89 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Username and password are required" });
       }
 
-      const user = await storage.getUserByUsername(username);
+      let user = await storage.getUserByUsername(username);
+      let isEmployeeLogin = false;
+      let employeeObj: any = null;
+
       if (!user) {
-        return res.status(401).json({ message: "Invalid username or password" });
-      }
+        // Fallback: Check employees table by employeeCode or phone
+        const [emp] = await db.select().from(schema.employees)
+          .where(or(eq(schema.employees.employeeCode, username), eq(schema.employees.phone, username)))
+          .limit(1);
 
-      if (user.status !== "active") {
-        return res.status(401).json({ message: "Account is not active" });
-      }
+        if (!emp) {
+          return res.status(401).json({ message: "Invalid username or password" });
+        }
 
-      const bcryptLib = await import("bcrypt");
-      const isValid = await bcryptLib.default.compare(password, user.password);
-      if (!isValid) {
-        return res.status(401).json({ message: "Invalid username or password" });
+        if (emp.status !== "active") {
+          return res.status(401).json({ message: "Account is not active" });
+        }
+
+        let isValid = (password === emp.password);
+        if (!isValid && emp.password) {
+          try {
+            const bcryptLib = await import("bcrypt");
+            isValid = await bcryptLib.default.compare(password, emp.password);
+          } catch (e) {}
+        }
+
+        if (!isValid) {
+          return res.status(401).json({ message: "Invalid username or password" });
+        }
+
+        isEmployeeLogin = true;
+        employeeObj = emp;
+      } else {
+        if (user.status !== "active") {
+          return res.status(401).json({ message: "Account is not active" });
+        }
+
+        const bcryptLib = await import("bcrypt");
+        const isValid = await bcryptLib.default.compare(password, user.password);
+        if (!isValid) {
+          return res.status(401).json({ message: "Invalid username or password" });
+        }
       }
 
       const jwtLib = await import("jsonwebtoken");
       const jwtSecret = process.env.JWT_SECRET || "tt-erp-jwt-secret-key-2024";
 
+      const activeUser = isEmployeeLogin ? {
+        id: employeeObj.id,
+        username: employeeObj.employeeCode,
+        role: "driver",
+        name: employeeObj.name,
+        employeeId: employeeObj.id,
+        companyId: employeeObj.companyId,
+        shopId: employeeObj.shopId,
+        branchId: employeeObj.branchId,
+      } : {
+        id: user!.id,
+        username: user!.username,
+        role: user!.role,
+        name: user!.name,
+        employeeId: user!.employeeId,
+        companyId: user!.companyId,
+        shopId: user!.shopId,
+        branchId: user!.branchId,
+      };
+
       const token = jwtLib.default.sign(
-        { id: user.id, username: user.username, role: user.role, name: user.name, companyId: user.companyId, shopId: user.shopId, branchId: user.branchId },
+        activeUser,
         jwtSecret,
         { expiresIn: "7d" }
       );
 
       const refreshToken = jwtLib.default.sign(
-        { userId: user.id, type: "refresh" },
+        { userId: activeUser.id, type: "refresh" },
         jwtSecret,
         { expiresIn: "30d" }
       );
 
-      const { password: _, ...userWithoutPassword } = user;
-
       res.json({
-        user: userWithoutPassword,
+        user: activeUser,
         token,
+        accessToken: token,
         refreshToken,
       });
     } catch (error) {
