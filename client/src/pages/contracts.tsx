@@ -65,6 +65,9 @@ const contractSchema = z.object({
   redeliveryCharge: z.string().default("0"),
   outsourcedVehicleCharge: z.string().default("0"),
   breakdownCharge: z.string().default("0"),
+  // Multi-Mode Billing & Automation
+  invoiceGenerationType: z.enum(["brand", "outlet"]).default("brand"),
+  linkedOutlets: z.array(z.string()).default([]),
 });
 
 type ContractFormData = z.infer<typeof contractSchema>;
@@ -87,15 +90,20 @@ export default function ContractsPage() {
       graceHours: "0", otStartsAfterHours: "10",
       extraTruckCharge: "0", emergencyDeliveryCharge: "0", redeliveryCharge: "0",
       outsourcedVehicleCharge: "0", breakdownCharge: "0",
+      invoiceGenerationType: "brand", linkedOutlets: [],
     },
   });
 
   const watchType = useWatch({ control: form.control, name: "type" });
   const watchNumVehicles = useWatch({ control: form.control, name: "numVehicles" }) || 0;
   const watchMonthlyRate = useWatch({ control: form.control, name: "monthlyRate" }) || "0";
+  const watchInvoiceGenerationType = useWatch({ control: form.control, name: "invoiceGenerationType" });
+  const watchCustomerId = useWatch({ control: form.control, name: "customerId" });
 
   const { data: contractsList, isLoading } = useQuery<Contract[]>({ queryKey: ["/api/contracts"] });
   const { data: clientsList } = useQuery<Client[]>({ queryKey: ["/api/clients"] });
+  // Add outlets query (using any type if Outlet is not imported)
+  const { data: outletsList } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
   const saveMutation = useMutation({
     mutationFn: (data: ContractFormData) => {
@@ -193,6 +201,8 @@ export default function ContractsPage() {
       redeliveryCharge: contract.redeliveryCharge || "0",
       outsourcedVehicleCharge: contract.outsourcedVehicleCharge || "0",
       breakdownCharge: contract.breakdownCharge || "0",
+      invoiceGenerationType: contract.invoiceGenerationType as "brand" | "outlet" || "brand",
+      linkedOutlets: contract.linkedOutlets || [],
     });
     setUploadedFiles((contract.documents as any[]) || []);
     setIsDialogOpen(true);
@@ -412,7 +422,59 @@ export default function ContractsPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
+                <FormField control={form.control} name="invoiceGenerationType" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Invoice Generation Mode</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="brand">Brand-wise (Single Invoice)</SelectItem>
+                        <SelectItem value="outlet">Outlet-wise (Multiple Invoices)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
               </div>
+
+              {watchInvoiceGenerationType === "outlet" && (
+                <div className="grid grid-cols-1 gap-4">
+                  <FormField control={form.control} name="linkedOutlets" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Linked Outlets</FormLabel>
+                      <div className="border rounded-md p-4 max-h-48 overflow-y-auto space-y-2">
+                        {outletsList?.filter(o => !watchCustomerId || o.clientId === watchCustomerId).length === 0 ? (
+                          <div className="text-sm text-muted-foreground">No outlets found for this client.</div>
+                        ) : (
+                          outletsList?.filter(o => !watchCustomerId || o.clientId === watchCustomerId).map((outlet: any) => (
+                            <div key={outlet.id} className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id={`outlet-${outlet.id}`}
+                                checked={field.value.includes(outlet.id)}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  if (checked) {
+                                    field.onChange([...field.value, outlet.id]);
+                                  } else {
+                                    field.onChange(field.value.filter((id) => id !== outlet.id));
+                                  }
+                                }}
+                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                              />
+                              <label htmlFor={`outlet-${outlet.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                                {outlet.name} {outlet.code ? `(${outlet.code})` : ""}
+                              </label>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <FormDescription>Select which outlets should have individual invoices generated.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              )}
 
               {/* ── SERVICE TERMS (collapsible) ── */}
               <div className="border rounded-lg overflow-hidden">

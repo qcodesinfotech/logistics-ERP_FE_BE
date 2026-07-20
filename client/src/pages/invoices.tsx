@@ -68,7 +68,7 @@ export default function InvoicesPage() {
       toast({ title: "Please enter a valid amount", variant: "destructive" });
       return;
     }
-    if (paymentMethod === "bank_transfer" && !paymentAccountId) {
+    if ((paymentMethod === "bank_transfer" || paymentMethod === "cheque") && !paymentAccountId) {
       toast({ title: "Please select a bank account", variant: "destructive" });
       return;
     }
@@ -82,7 +82,7 @@ export default function InvoicesPage() {
       amount: paymentAmount,
       paymentMethod,
       reference: paymentReference,
-      bankAccountId: paymentMethod === "bank_transfer" ? paymentAccountId : null,
+      bankAccountId: (paymentMethod === "bank_transfer" || paymentMethod === "cheque") ? paymentAccountId : null,
       pettyCashId: paymentMethod === "cash" ? paymentAccountId : null,
     });
   };

@@ -80,6 +80,10 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 (async () => {
   await registerRoutes(httpServer, app);
+  
+  // Initialize cron jobs
+  const { setupCronJobs } = await import("./cron");
+  setupCronJobs();
 
   // Seed default menus for RBAC on startup
   try {

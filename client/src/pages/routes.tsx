@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
-  Store, Plus, Edit, Trash2, MapPin, Building2, Phone, Mail, User,
-  Globe, Check, X, Upload, ChevronDown, ChevronRight
+  Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,22 +43,18 @@ interface Brand {
   createdAt?: string;
 }
 
-interface Client {
+interface RouteType {
   id: string;
-  brandId?: string;
   name: string;
-  companyName?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  logo?: string;
+  description?: string;
   status: string;
   createdAt?: string;
 }
 
 interface Outlet {
   id: string;
-  clientId: string;
+  brandId?: string;
+  routeId?: string;
   name: string;
   code?: string;
   phone?: string;
@@ -82,18 +77,15 @@ const brandSchema = z.object({
   status: z.enum(["active", "inactive"]).default("active"),
 });
 
-const clientSchema = z.object({
-  brandId: z.string().optional(),
-  name: z.string().min(1, "Client name is required"),
-  companyName: z.string().optional(),
-  email: z.string().email("Invalid email").optional().or(z.literal("")),
-  phone: z.string().optional(),
-  address: z.string().optional(),
-  logo: z.string().optional(),
+const routeSchema = z.object({
+  name: z.string().min(1, "Route name is required"),
+  description: z.string().optional(),
   status: z.enum(["active", "inactive"]).default("active"),
 });
 
 const outletSchema = z.object({
+  routeId: z.string().optional(),
+  brandId: z.string().optional(),
   name: z.string().min(1, "Outlet name is required"),
   code: z.string().optional(),
   phone: z.string().optional(),
@@ -107,7 +99,7 @@ const outletSchema = z.object({
 });
 
 type BrandFormData = z.infer<typeof brandSchema>;
-type ClientFormData = z.infer<typeof clientSchema>;
+type RouteFormData = z.infer<typeof routeSchema>;
 type OutletFormData = z.infer<typeof outletSchema>;
 
 // ===================== Multi-select Zone Picker =====================
@@ -151,23 +143,21 @@ function ZoneMultiSelect({
 }
 
 // ===================== Main Page =====================
-export default function ClientsPage() {
+export default function RoutesPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"brands" | "clients" | "outlets">("brands");
+  const [activeTab, setActiveTab] = useState<"routes" | "brands" | "outlets">("routes");
 
   // Brand state
   const [brandDialog, setBrandDialog] = useState<{ open: boolean; editing?: Brand }>({ open: false });
   const [deleteBrandId, setDeleteBrandId] = useState<string | null>(null);
 
-  // Client state
-  const [clientDialog, setClientDialog] = useState<{ open: boolean; editing?: Client }>({ open: false });
-  const [deleteClientId, setDeleteClientId] = useState<string | null>(null);
-  const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>("all");
-  const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [logoPreview, setLogoPreview] = useState<string>("");
+  // Route state
+  const [routeDialog, setRouteDialog] = useState<{ open: boolean; editing?: RouteType }>({ open: false });
+  const [deleteRouteId, setDeleteRouteId] = useState<string | null>(null);
 
   // Outlet state
-  const [selectedClientId, setSelectedClientId] = useState<string>("");
+  const [selectedRouteFilter, setSelectedRouteFilter] = useState<string>("all");
+  const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>("all");
   const [outletDialog, setOutletDialog] = useState<{ open: boolean; editing?: Outlet }>({ open: false });
   const [deleteOutletId, setDeleteOutletId] = useState<string | null>(null);
   const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
@@ -177,19 +167,16 @@ export default function ClientsPage() {
     queryKey: ["/api/brands"],
   });
 
-  const { data: clients = [], isLoading: clientsLoading } = useQuery<Client[]>({
-    queryKey: ["/api/clients"],
+  const { data: routes = [], isLoading: routesLoading } = useQuery<RouteType[]>({
+    queryKey: ["/api/routes"],
   });
 
   const { data: zones = [] } = useQuery<Zone[]>({
     queryKey: ["/api/zones"],
   });
 
-  const outletsQueryKey = selectedClientId
-    ? `/api/outlets?clientId=${selectedClientId}`
-    : "/api/outlets";
   const { data: outletsList = [], isLoading: outletsLoading } = useQuery<Outlet[]>({
-    queryKey: [outletsQueryKey],
+    queryKey: ["/api/outlets"],
     enabled: true,
   });
 
@@ -254,105 +241,76 @@ export default function ClientsPage() {
     }
   };
 
-  // ---- Client Form ----
-  const clientForm = useForm<ClientFormData>({
-    resolver: zodResolver(clientSchema),
-    defaultValues: { brandId: "", name: "", companyName: "", email: "", phone: "", address: "", logo: "", status: "active" },
+  // ---- Route Form ----
+  const routeForm = useForm<RouteFormData>({
+    resolver: zodResolver(routeSchema),
+    defaultValues: { name: "", description: "", status: "active" },
   });
 
-  const openClientDialog = (client?: Client) => {
-    if (client) {
-      clientForm.reset({
-        brandId: client.brandId || "",
-        name: client.name,
-        companyName: client.companyName || "",
-        email: client.email || "",
-        phone: client.phone || "",
-        address: client.address || "",
-        logo: client.logo || "",
-        status: client.status as "active" | "inactive",
+  const openRouteDialog = (route?: RouteType) => {
+    if (route) {
+      routeForm.reset({
+        name: route.name,
+        description: route.description || "",
+        status: route.status as "active" | "inactive",
       });
-      setLogoPreview(client.logo || "");
     } else {
-      clientForm.reset({ brandId: "", name: "", companyName: "", email: "", phone: "", address: "", logo: "", status: "active" });
-      setLogoPreview("");
+      routeForm.reset({ name: "", description: "", status: "active" });
     }
-    setClientDialog({ open: true, editing: client });
+    setRouteDialog({ open: true, editing: route });
   };
 
-  const createClientMutation = useMutation({
-    mutationFn: (data: ClientFormData) => apiRequest("POST", "/api/clients", data),
+  const createRouteMutation = useMutation({
+    mutationFn: (data: RouteFormData) => apiRequest("POST", "/api/routes", data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
-      setClientDialog({ open: false });
-      toast({ title: "Client created successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
+      setRouteDialog({ open: false });
+      toast({ title: "Route created successfully" });
     },
     onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
-  const updateClientMutation = useMutation({
-    mutationFn: (data: ClientFormData) =>
-      apiRequest("PATCH", `/api/clients/${clientDialog.editing?.id}`, data),
+  const updateRouteMutation = useMutation({
+    mutationFn: (data: RouteFormData) =>
+      apiRequest("PATCH", `/api/routes/${routeDialog.editing?.id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
-      setClientDialog({ open: false });
-      toast({ title: "Client updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
+      setRouteDialog({ open: false });
+      toast({ title: "Route updated successfully" });
     },
     onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
-  const deleteClientMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("DELETE", `/api/clients/${id}`),
+  const deleteRouteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/routes/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
-      setDeleteClientId(null);
-      toast({ title: "Client deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/routes"] });
+      setDeleteRouteId(null);
+      toast({ title: "Route deleted" });
     },
     onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadingLogo(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/upload/shop-logo", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      const { url } = await res.json();
-      clientForm.setValue("logo", url);
-      setLogoPreview(url);
-      toast({ title: "Logo uploaded successfully" });
-    } catch {
-      toast({ title: "Logo upload failed", variant: "destructive" });
-    } finally {
-      setUploadingLogo(false);
-    }
-  };
-
-  const onClientSubmit = (data: ClientFormData) => {
-    if (clientDialog.editing) {
-      updateClientMutation.mutate(data);
+  const onRouteSubmit = (data: RouteFormData) => {
+    if (routeDialog.editing) {
+      updateRouteMutation.mutate(data);
     } else {
-      createClientMutation.mutate(data);
+      createRouteMutation.mutate(data);
     }
   };
 
   // ---- Outlet Form ----
   const outletForm = useForm<OutletFormData>({
     resolver: zodResolver(outletSchema),
-    defaultValues: { name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" },
+    defaultValues: { routeId: "", brandId: "", name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" },
   });
 
   const openOutletDialog = async (outlet?: Outlet) => {
     setSelectedZoneIds([]);
     if (outlet) {
       outletForm.reset({
+        routeId: outlet.routeId || "",
+        brandId: outlet.brandId || "",
         name: outlet.name,
         code: outlet.code || "",
         phone: outlet.phone || "",
@@ -373,17 +331,20 @@ export default function ClientsPage() {
         }
       } catch {}
     } else {
-      outletForm.reset({ name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" });
+      outletForm.reset({ 
+        routeId: selectedRouteFilter !== "all" ? selectedRouteFilter : "",
+        brandId: selectedBrandFilter !== "all" ? selectedBrandFilter : "",
+        name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" 
+      });
     }
     setOutletDialog({ open: true, editing: outlet });
   };
 
   const createOutletMutation = useMutation({
     mutationFn: (data: OutletFormData) =>
-      apiRequest("POST", "/api/outlets", { ...data, clientId: selectedClientId, zoneIds: selectedZoneIds }),
+      apiRequest("POST", "/api/outlets", { ...data, zoneIds: selectedZoneIds }),
     onSuccess: () => {
-      const key = selectedClientId ? `/api/outlets?clientId=${selectedClientId}` : "/api/outlets";
-      queryClient.invalidateQueries({ queryKey: [key] });
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
       setOutletDialog({ open: false });
       toast({ title: "Outlet created successfully" });
     },
@@ -394,8 +355,7 @@ export default function ClientsPage() {
     mutationFn: (data: OutletFormData) =>
       apiRequest("PATCH", `/api/outlets/${outletDialog.editing?.id}`, { ...data, zoneIds: selectedZoneIds }),
     onSuccess: () => {
-      const key = selectedClientId ? `/api/outlets?clientId=${selectedClientId}` : "/api/outlets";
-      queryClient.invalidateQueries({ queryKey: [key] });
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
       setOutletDialog({ open: false });
       toast({ title: "Outlet updated successfully" });
     },
@@ -405,8 +365,7 @@ export default function ClientsPage() {
   const deleteOutletMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/outlets/${id}`),
     onSuccess: () => {
-      const key = selectedClientId ? `/api/outlets?clientId=${selectedClientId}` : "/api/outlets";
-      queryClient.invalidateQueries({ queryKey: [key] });
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
       setDeleteOutletId(null);
       toast({ title: "Outlet deleted" });
     },
@@ -414,10 +373,6 @@ export default function ClientsPage() {
   });
 
   const onOutletSubmit = (data: OutletFormData) => {
-    if (!selectedClientId) {
-      toast({ title: "Please select a client first", variant: "destructive" });
-      return;
-    }
     if (outletDialog.editing) {
       updateOutletMutation.mutate(data);
     } else {
@@ -425,10 +380,12 @@ export default function ClientsPage() {
     }
   };
 
-  const selectedClient = clients.find((c) => c.id === selectedClientId);
-  const filteredClients = selectedBrandFilter === "all" ? clients : clients.filter((c) => c.brandId === selectedBrandFilter);
-  const outlets = Array.isArray(outletsList) ? outletsList : [];
-  const filteredOutlets = selectedClientId ? outlets.filter((o) => o.clientId === selectedClientId) : outlets;
+  const filteredOutlets = (Array.isArray(outletsList) ? outletsList : []).filter((o) => {
+    let match = true;
+    if (selectedRouteFilter !== "all" && o.routeId !== selectedRouteFilter) match = false;
+    if (selectedBrandFilter !== "all" && o.brandId !== selectedBrandFilter) match = false;
+    return match;
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -436,30 +393,108 @@ export default function ClientsPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Store className="h-6 w-6 text-primary" />
-            Clients & Outlets
+            <RouteIcon className="h-6 w-6 text-primary" />
+            Routes, Brands & Outlets
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage logistics clients and their delivery outlets, map outlets to operational zones.
+            Manage logistics routes, brands, and their delivery outlets.
           </p>
         </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
         <TabsList className="mb-2">
+          <TabsTrigger value="routes" className="gap-2">
+            <RouteIcon className="h-4 w-4" />
+            Routes
+          </TabsTrigger>
           <TabsTrigger value="brands" className="gap-2">
             <Globe className="h-4 w-4" />
             Brands
-          </TabsTrigger>
-          <TabsTrigger value="clients" className="gap-2">
-            <Building2 className="h-4 w-4" />
-            Clients
           </TabsTrigger>
           <TabsTrigger value="outlets" className="gap-2">
             <MapPin className="h-4 w-4" />
             Outlets
           </TabsTrigger>
         </TabsList>
+
+        {/* ==================== ROUTES TAB ==================== */}
+        <TabsContent value="routes">
+          <Card>
+            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-3 border-b">
+              <div>
+                <CardTitle>Routes</CardTitle>
+                <CardDescription>
+                  Manage delivery routes
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button onClick={() => openRouteDialog()} className="gap-2">
+                  <Plus className="h-4 w-4" /> Add Route
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {routesLoading ? (
+                <div className="p-10 text-center text-muted-foreground">Loading routes...</div>
+              ) : routes.length === 0 ? (
+                <div className="p-16 flex flex-col items-center gap-3 text-muted-foreground">
+                  <RouteIcon className="h-10 w-10 opacity-30" />
+                  <p className="text-sm">No routes yet. Add your first route to get started.</p>
+                  <Button variant="outline" onClick={() => openRouteDialog()} className="gap-2 mt-1">
+                    <Plus className="h-4 w-4" /> Add Route
+                  </Button>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Route Name</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {routes.map((route) => (
+                      <TableRow key={route.id} className="hover:bg-accent/30 transition-colors">
+                        <TableCell className="font-semibold">{route.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{route.description || "—"}</TableCell>
+                        <TableCell>
+                          <Badge
+                            className={route.status === "active"
+                              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
+                          >
+                            {route.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost" size="sm"
+                              onClick={() => { setSelectedRouteFilter(route.id); setActiveTab("outlets"); }}
+                              className="gap-1 text-xs"
+                            >
+                              <MapPin className="h-3.5 w-3.5" /> View Outlets
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => openRouteDialog(route)}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
+                              onClick={() => setDeleteRouteId(route.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ==================== BRANDS TAB ==================== */}
         <TabsContent value="brands">
@@ -522,10 +557,10 @@ export default function ClientsPage() {
                           <div className="flex items-center justify-end gap-1">
                             <Button
                               variant="ghost" size="sm"
-                              onClick={() => { setSelectedBrandFilter(brand.id); setActiveTab("clients"); }}
+                              onClick={() => { setSelectedBrandFilter(brand.id); setActiveTab("outlets"); }}
                               className="gap-1 text-xs"
                             >
-                              <Building2 className="h-3.5 w-3.5" /> Clients
+                              <MapPin className="h-3.5 w-3.5" /> View Outlets
                             </Button>
                             <Button variant="ghost" size="icon" onClick={() => openBrandDialog(brand)}>
                               <Edit className="h-4 w-4" />
@@ -545,148 +580,44 @@ export default function ClientsPage() {
           </Card>
         </TabsContent>
 
-        {/* ==================== CLIENTS TAB ==================== */}
-        <TabsContent value="clients">
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-3 border-b">
-              <div>
-                <CardTitle>Clients</CardTitle>
-                <CardDescription>
-                  {selectedBrandFilter === "all" 
-                    ? "All logistics client companies" 
-                    : `Clients for ${brands.find(b => b.id === selectedBrandFilter)?.name || 'Selected Brand'}`}
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select value={selectedBrandFilter} onValueChange={setSelectedBrandFilter}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="All Brands" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Brands</SelectItem>
-                    {brands.map(b => (
-                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={() => openClientDialog()} className="gap-2">
-                  <Plus className="h-4 w-4" /> Add Client
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {clientsLoading ? (
-                <div className="p-10 text-center text-muted-foreground">Loading clients...</div>
-              ) : clients.length === 0 ? (
-                <div className="p-16 flex flex-col items-center gap-3 text-muted-foreground">
-                  <Store className="h-10 w-10 opacity-30" />
-                  <p className="text-sm">No clients yet. Add your first client to get started.</p>
-                  <Button variant="outline" onClick={() => openClientDialog()} className="gap-2 mt-1">
-                    <Plus className="h-4 w-4" /> Add Client
-                  </Button>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">Logo</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Company</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Phone</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredClients.map((client) => (
-                      <TableRow key={client.id} className="hover:bg-accent/30 transition-colors">
-                        <TableCell>
-                          {client.logo ? (
-                            <img src={client.logo} alt={client.name} className="h-9 w-9 rounded-full object-cover border" />
-                          ) : (
-                            <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-                              <Building2 className="h-4 w-4 text-primary" />
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell className="font-semibold">{client.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{client.companyName || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{client.email || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{client.phone || "—"}</TableCell>
-                        <TableCell>
-                          <Badge
-                            className={client.status === "active"
-                              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
-                          >
-                            {client.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost" size="sm"
-                              onClick={() => { setSelectedClientId(client.id); setActiveTab("outlets"); }}
-                              className="gap-1 text-xs"
-                            >
-                              <MapPin className="h-3.5 w-3.5" /> Outlets
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => openClientDialog(client)}>
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
-                              onClick={() => setDeleteClientId(client.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* ==================== OUTLETS TAB ==================== */}
         <TabsContent value="outlets">
           <div className="space-y-4">
-            {/* Client Selector */}
+            {/* Filters */}
             <Card className="border-dashed">
               <CardContent className="p-4">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                  <div className="flex items-center gap-2 flex-1 w-full">
-                    <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                  <div className="flex items-center gap-2 flex-1 w-full max-w-sm">
+                    <RouteIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <Select value={selectedRouteFilter} onValueChange={setSelectedRouteFilter}>
                       <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Select a client to view or add outlets..." />
+                        <SelectValue placeholder="All Routes" />
                       </SelectTrigger>
                       <SelectContent>
-                        {clients.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            <div className="flex items-center gap-2">
-                              {c.logo ? (
-                                <img src={c.logo} alt={c.name} className="h-5 w-5 rounded-full object-cover" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center">
-                                  <Building2 className="h-3 w-3 text-primary" />
-                                </div>
-                              )}
-                              <span>{c.name}</span>
-                              {c.companyName && <span className="text-muted-foreground text-xs">({c.companyName})</span>}
-                            </div>
-                          </SelectItem>
+                        <SelectItem value="all">All Routes</SelectItem>
+                        {routes.map((r) => (
+                          <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  {selectedClientId && (
-                    <Button onClick={() => openOutletDialog()} className="gap-2 shrink-0">
-                      <Plus className="h-4 w-4" /> Add Outlet
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2 flex-1 w-full max-w-sm">
+                    <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <Select value={selectedBrandFilter} onValueChange={setSelectedBrandFilter}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="All Brands" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Brands</SelectItem>
+                        {brands.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={() => openOutletDialog()} className="gap-2 shrink-0 ml-auto">
+                    <Plus className="h-4 w-4" /> Add Outlet
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -697,26 +628,21 @@ export default function ClientsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-base">
-                      {selectedClient ? `Outlets — ${selectedClient.name}` : "All Outlets"}
+                      Outlets List
                     </CardTitle>
                     <CardDescription>{filteredOutlets.length} outlet{filteredOutlets.length !== 1 ? "s" : ""}</CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                {!selectedClientId ? (
-                  <div className="p-14 flex flex-col items-center gap-3 text-muted-foreground">
-                    <MapPin className="h-10 w-10 opacity-25" />
-                    <p className="text-sm">Select a client above to view and manage their outlets.</p>
-                  </div>
-                ) : outletsLoading ? (
+                {outletsLoading ? (
                   <div className="p-10 text-center text-muted-foreground">Loading outlets...</div>
                 ) : filteredOutlets.length === 0 ? (
                   <div className="p-14 flex flex-col items-center gap-3 text-muted-foreground">
                     <MapPin className="h-10 w-10 opacity-25" />
-                    <p className="text-sm">No outlets for this client yet.</p>
+                    <p className="text-sm">No outlets match the selected filters.</p>
                     <Button variant="outline" onClick={() => openOutletDialog()} className="gap-2 mt-1">
-                      <Plus className="h-4 w-4" /> Add First Outlet
+                      <Plus className="h-4 w-4" /> Add Outlet
                     </Button>
                   </div>
                 ) : (
@@ -724,59 +650,61 @@ export default function ClientsPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Outlet Name</TableHead>
+                        <TableHead>Route / Brand</TableHead>
                         <TableHead>Code</TableHead>
-                        <TableHead>Phone</TableHead>
-                        <TableHead>Contact Person</TableHead>
-                        <TableHead>Address</TableHead>
+                        <TableHead>Phone / Contact</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredOutlets.map((outlet) => (
-                        <TableRow key={outlet.id} className="hover:bg-accent/30 transition-colors">
-                          <TableCell className="font-medium">{outlet.name}</TableCell>
-                          <TableCell>
-                            {outlet.code ? (
-                              <Badge variant="outline" className="font-mono text-xs">{outlet.code}</Badge>
-                            ) : "—"}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">{outlet.phone || "—"}</TableCell>
-                          <TableCell>
-                            {outlet.contactPerson ? (
-                              <div>
-                                <div className="text-sm">{outlet.contactPerson}</div>
-                                {outlet.contactPhone && (
-                                  <div className="text-xs text-muted-foreground">{outlet.contactPhone}</div>
-                                )}
+                      {filteredOutlets.map((outlet) => {
+                        const route = routes.find(r => r.id === outlet.routeId);
+                        const brand = brands.find(b => b.id === outlet.brandId);
+                        
+                        return (
+                          <TableRow key={outlet.id} className="hover:bg-accent/30 transition-colors">
+                            <TableCell>
+                              <div className="font-medium">{outlet.name}</div>
+                              {outlet.address && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{outlet.address}</div>}
+                            </TableCell>
+                            <TableCell>
+                              {route && <div className="text-sm font-medium">{route.name}</div>}
+                              {brand && <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Globe className="h-3 w-3"/> {brand.name}</div>}
+                              {!route && !brand && <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell>
+                              {outlet.code ? (
+                                <Badge variant="outline" className="font-mono text-xs">{outlet.code}</Badge>
+                              ) : "—"}
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-sm">{outlet.phone || outlet.contactPhone || "—"}</div>
+                              {outlet.contactPerson && <div className="text-xs text-muted-foreground">{outlet.contactPerson}</div>}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={outlet.status === "active"
+                                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                                  : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
+                              >
+                                {outlet.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="icon" onClick={() => openOutletDialog(outlet)}>
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
+                                  onClick={() => setDeleteOutletId(outlet.id)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
                               </div>
-                            ) : "—"}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-sm max-w-[180px] truncate">
-                            {outlet.address || "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              className={outlet.status === "active"
-                                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                                : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
-                            >
-                              {outlet.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => openOutletDialog(outlet)}>
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
-                                onClick={() => setDeleteOutletId(outlet.id)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 )}
@@ -785,6 +713,55 @@ export default function ClientsPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* ==================== ROUTE DIALOG ==================== */}
+      <Dialog open={routeDialog.open} onOpenChange={(o) => setRouteDialog({ open: o })}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{routeDialog.editing ? "Edit Route" : "Add New Route"}</DialogTitle>
+            <DialogDescription>
+              Fill in the route details.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...routeForm}>
+            <form onSubmit={routeForm.handleSubmit(onRouteSubmit)} className="space-y-4">
+              <FormField control={routeForm.control} name="name" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Route Name *</FormLabel>
+                  <FormControl><Input placeholder="e.g. Muscat Route A" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={routeForm.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description</FormLabel>
+                  <FormControl><Textarea placeholder="Route description..." rows={2} {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={routeForm.control} name="status" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Status</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setRouteDialog({ open: false })}>Cancel</Button>
+                <Button type="submit" disabled={createRouteMutation.isPending || updateRouteMutation.isPending}>
+                  {createRouteMutation.isPending || updateRouteMutation.isPending ? "Saving..." : routeDialog.editing ? "Update Route" : "Create Route"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       {/* ==================== BRAND DIALOG ==================== */}
       <Dialog open={brandDialog.open} onOpenChange={(o) => setBrandDialog({ open: o })}>
@@ -856,141 +833,57 @@ export default function ClientsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ==================== CLIENT DIALOG ==================== */}
-      <Dialog open={clientDialog.open} onOpenChange={(o) => setClientDialog({ open: o })}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{clientDialog.editing ? "Edit Client" : "Add New Client"}</DialogTitle>
-            <DialogDescription>
-              Fill in the client details. Logo, email and phone are optional.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...clientForm}>
-            <form onSubmit={clientForm.handleSubmit(onClientSubmit)} className="space-y-4">
-              {/* Logo Upload */}
-              <div className="space-y-2">
-                <Label>Logo</Label>
-                <div className="flex items-center gap-4">
-                  {logoPreview ? (
-                    <div className="relative">
-                      <img src={logoPreview} alt="Logo" className="h-16 w-16 rounded-lg object-cover border" />
-                      <button type="button" onClick={() => { setLogoPreview(""); clientForm.setValue("logo", ""); }}
-                        className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="h-16 w-16 rounded-lg border-2 border-dashed flex items-center justify-center text-muted-foreground">
-                      <Building2 className="h-6 w-6" />
-                    </div>
-                  )}
-                  <div>
-                    <label htmlFor="logo-upload" className="cursor-pointer">
-                      <div className="flex items-center gap-2 text-sm border rounded-md px-3 py-2 hover:bg-accent transition-colors">
-                        <Upload className="h-4 w-4" />
-                        {uploadingLogo ? "Uploading..." : "Upload Logo"}
-                      </div>
-                    </label>
-                    <input id="logo-upload" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
-                    <p className="text-xs text-muted-foreground mt-1">PNG, JPG, WEBP up to 5MB</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <FormField control={clientForm.control} name="name" render={({ field }) => (
-                  <FormItem className="col-span-2">
-                    <FormLabel>Client Name *</FormLabel>
-                    <FormControl><Input placeholder="e.g. Muscat Traders LLC" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={clientForm.control} name="brandId" render={({ field }) => (
-                  <FormItem className="col-span-2">
-                    <FormLabel>Linked Brand (Optional)</FormLabel>
-                    <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a brand to link" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">No Brand Selected</SelectItem>
-                        {brands.map(brand => (
-                          <SelectItem key={brand.id} value={brand.id}>{brand.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={clientForm.control} name="companyName" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Company Name</FormLabel>
-                    <FormControl><Input placeholder="Trade name" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={clientForm.control} name="status" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={clientForm.control} name="email" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl><Input type="email" placeholder="contact@example.com" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={clientForm.control} name="phone" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone</FormLabel>
-                    <FormControl><Input placeholder="+968 9000 0000" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={clientForm.control} name="address" render={({ field }) => (
-                  <FormItem className="col-span-2">
-                    <FormLabel>Address</FormLabel>
-                    <FormControl><Textarea placeholder="Full address..." rows={2} {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setClientDialog({ open: false })}>Cancel</Button>
-                <Button type="submit" disabled={createClientMutation.isPending || updateClientMutation.isPending}>
-                  {createClientMutation.isPending || updateClientMutation.isPending ? "Saving..." : clientDialog.editing ? "Update Client" : "Create Client"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
       {/* ==================== OUTLET DIALOG ==================== */}
       <Dialog open={outletDialog.open} onOpenChange={(o) => setOutletDialog({ open: o })}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{outletDialog.editing ? "Edit Outlet" : "Add New Outlet"}</DialogTitle>
             <DialogDescription>
-              {selectedClient && <span className="text-primary font-medium">{selectedClient.name}</span>}
-              {" — Configure outlet details and map to zones."}
+              Configure outlet details and assignments.
             </DialogDescription>
           </DialogHeader>
           <Form {...outletForm}>
             <form onSubmit={outletForm.handleSubmit(onOutletSubmit)} className="space-y-5">
               <div className="grid grid-cols-2 gap-4">
+                <FormField control={outletForm.control} name="routeId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Linked Route</FormLabel>
+                    <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a route" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">No Route Selected</SelectItem>
+                        {routes.map(r => (
+                          <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={outletForm.control} name="brandId" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Linked Brand</FormLabel>
+                    <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a brand" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">No Brand Selected</SelectItem>
+                        {brands.map(b => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                
                 <FormField control={outletForm.control} name="name" render={({ field }) => (
                   <FormItem className="col-span-2">
                     <FormLabel>Outlet Name *</FormLabel>
@@ -1093,20 +986,41 @@ export default function ClientsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Client Confirmation */}
-      <AlertDialog open={!!deleteClientId} onOpenChange={(o) => !o && setDeleteClientId(null)}>
+      {/* Delete Route Confirmation */}
+      <AlertDialog open={!!deleteRouteId} onOpenChange={(o) => !o && setDeleteRouteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Client</AlertDialogTitle>
+            <AlertDialogTitle>Delete Route</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the client. This action cannot be undone.
+              This will permanently delete the route. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive hover:bg-destructive/90"
-              onClick={() => deleteClientId && deleteClientMutation.mutate(deleteClientId)}
+              onClick={() => deleteRouteId && deleteRouteMutation.mutate(deleteRouteId)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Brand Confirmation */}
+      <AlertDialog open={!!deleteBrandId} onOpenChange={(o) => !o && setDeleteBrandId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Brand</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the brand. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => deleteBrandId && deleteBrandMutation.mutate(deleteBrandId)}
             >
               Delete
             </AlertDialogAction>

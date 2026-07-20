@@ -88,14 +88,19 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-// Helper function to extract error message from any error type
 export function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     // If there's an errors array, format all errors as a list
     if (error.errors && error.errors.length > 0) {
       return error.errors.join('\n');
     }
-    return error.message;
+    
+    let msg = error.message;
+    if (error.details) {
+      const detailStr = typeof error.details === 'object' ? JSON.stringify(error.details) : String(error.details);
+      msg += ` - Details: ${detailStr}`;
+    }
+    return msg;
   }
   if (error instanceof Error) {
     // Check if message contains JSON (from older error format)

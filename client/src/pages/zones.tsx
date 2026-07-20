@@ -306,13 +306,16 @@ export default function ZonesPage() {
 
   const currentZoneForTrucks = zonesList?.find(z => z.id === selectedZoneIdForTrucks);
   const zoneTrucks = vehiclesList?.filter(v => v.currentZoneId === selectedZoneIdForTrucks) || [];
-  const availableTrucks = vehiclesList?.filter(v => !v.currentZoneId && v.status === "available") || [];
+  const availableTrucks = vehiclesList?.filter(v => {
+    const isAssignedToValidZone = zonesList?.some(z => z.id === v.currentZoneId);
+    return !isAssignedToValidZone && v.status === "available";
+  }) || [];
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <PageHeader 
-        title="Zonal Configuration" 
-        description="Define operational zones, map multiple supervisors, and manage excel-based auto-allocation of client locations."
+        title="Routes & Zonal Configuration" 
+        description="Define operational routes & zones, map multiple supervisors, and manage excel-based auto-allocation of client locations."
       >
         <Button onClick={() => setIsImportDialogOpen(true)} variant="outline" className="gap-2">
           <Upload className="h-4 w-4" /> Simulate Excel Import
@@ -341,10 +344,10 @@ export default function ZonesPage() {
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
             <CardHeader className="pb-3 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-primary animate-pulse" /> Active Operational Zones
+                <MapPin className="h-5 w-5 text-primary animate-pulse" /> Active Operational Routes & Zones
               </CardTitle>
               <CardDescription>
-                Overview of current logistics hubs, terminals, and sub-regions.
+                Overview of current logistics routes, hubs, terminals, and sub-regions.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
@@ -359,7 +362,7 @@ export default function ZonesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Zone Name</TableHead>
+                      <TableHead>Route / Zone Name</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>

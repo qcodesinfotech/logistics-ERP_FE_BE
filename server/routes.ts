@@ -7028,11 +7028,66 @@ export async function registerRoutes(
     }
   });
 
+  // Routes
+  app.get("/api/routes", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const routes = await storage.getRoutes();
+      res.json(routes);
+    } catch (error) {
+      console.error("Error fetching routes:", error);
+      res.status(500).json({ error: "Failed to fetch routes" });
+    }
+  });
+
+  app.get("/api/routes/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const route = await storage.getRoute(req.params.id);
+      if (!route) return res.status(404).json({ error: "Route not found" });
+      res.json(route);
+    } catch (error) {
+      console.error("Error fetching route:", error);
+      res.status(500).json({ error: "Failed to fetch route" });
+    }
+  });
+
+  app.post("/api/routes", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const route = await storage.createRoute(req.body);
+      res.status(201).json(route);
+    } catch (error) {
+      console.error("Error creating route:", error);
+      res.status(500).json({ error: "Failed to create route", details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.patch("/api/routes/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const route = await storage.updateRoute(req.params.id, req.body);
+      if (!route) return res.status(404).json({ error: "Route not found" });
+      res.json(route);
+    } catch (error) {
+      console.error("Error updating route:", error);
+      res.status(500).json({ error: "Failed to update route" });
+    }
+  });
+
+  app.delete("/api/routes/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      await storage.deleteRoute(req.params.id);
+      res.sendStatus(204);
+    } catch (error) {
+      console.error("Error deleting route:", error);
+      res.status(500).json({ error: "Failed to delete route" });
+    }
+  });
+
   // Outlets
   app.get("/api/outlets", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
     try {
       const clientId = req.query.clientId as string | undefined;
-      const outlets = await storage.getOutlets(clientId);
+      const routeId = req.query.routeId as string | undefined;
+      const brandId = req.query.brandId as string | undefined;
+      const outlets = await storage.getOutlets(clientId, routeId, brandId);
       res.json(outlets);
     } catch (error) {
       console.error("Error fetching outlets:", error);
@@ -7048,6 +7103,16 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching outlet:", error);
       res.status(500).json({ error: "Failed to fetch outlet" });
+    }
+  });
+
+  app.get("/api/outlets/:id/attachments", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const attachments = await storage.getOutletDeliveryAttachments(req.params.id);
+      res.json(attachments);
+    } catch (error) {
+      console.error("Error fetching outlet attachments:", error);
+      res.status(500).json({ error: "Failed to fetch outlet attachments" });
     }
   });
 
@@ -7164,22 +7229,33 @@ export async function registerRoutes(
 
       const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName });
 
-      // Resolve outlet codes to outlet IDs
+      // Resolve outlet codes to outlet IDs and route IDs
       const allOutlets = await storage.getOutlets();
-      const outletCodeMap = new Map(allOutlets.map(o => [o.code?.trim().toLowerCase(), o.id]));
+      const outletCodeMap = new Map(allOutlets.map(o => [o.code?.trim().toLowerCase(), o]));
 
-      const resolvedItems = items.map((row: any) => ({
-        sheetId: sheet.id,
-        outletCode: row.outlet_code || row.outletCode || "",
-        outletId: outletCodeMap.get((row.outlet_code || row.outletCode || "").trim().toLowerCase()) || null,
-        itemCode: row.item_code || row.itemCode || "",
-        description: row.description || null,
-        weight: row.weight || null,
-        totalDelivered: row.total_delivered || row.totalDelivered || null,
-        remaining: row.remaining || null,
-        remark: row.remark || null,
-        grnNumber: row.grn_number || row.grnNumber || null,
-      }));
+      const resolvedItems = items.map((row: any) => {
+        const outlet = outletCodeMap.get((row.to_sub_code || row.outlet_code || row.outletCode || "").trim().toLowerCase());
+        return {
+          sheetId: sheet.id,
+          outletCode: row.to_sub_code || row.outlet_code || row.outletCode || "",
+          outletId: outlet?.id || null,
+          routeId: outlet?.routeId || null,
+          itemCode: row.item_number || row.item_code || row.itemCode || "",
+          description: row.description || row.to_sub_desc || null,
+          toNo: row.to_no || null,
+          lineNumber: row.line_number || null,
+          requestedDeliveryDate: row.requested_delivery_date ? new Date(row.requested_delivery_date.split('-').reverse().join('-')) : null, // Assuming DD-MM-YYYY
+          storageType: row.storage_type || null,
+          uom: row.uom || null,
+          fromOrg: row.from_org || null,
+          requestedQty: row.fus_requested_qty ? parseFloat(row.fus_requested_qty) : null,
+          weight: row.weight || null,
+          totalDelivered: row.total_delivered || row.totalDelivered || null,
+          remaining: row.remaining || null,
+          remark: row.remark || null,
+          grnNumber: row.grn_number || row.grnNumber || null,
+        };
+      });
 
       await storage.createDispatchItems(resolvedItems);
 
@@ -7202,6 +7278,20 @@ export async function registerRoutes(
     } catch (e) {
       console.error("Get dispatch board error:", e);
       res.status(500).json({ error: "Failed to fetch dispatch board" });
+    }
+  });
+
+  // Get dispatch report for a specific sheet (grouped by Route -> Outlet -> Items)
+  app.get("/api/dispatch/sheets/:id/report", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const items = await storage.getDispatchItemsForSheet(req.params.id);
+      const routes = await storage.getRoutes();
+      const routeMap = new Map(routes.map(r => [r.id, r.name]));
+
+      res.json({ items, routeMap: Object.fromEntries(routeMap) });
+    } catch (e) {
+      console.error("Get dispatch report error:", e);
+      res.status(500).json({ error: "Failed to fetch dispatch report" });
     }
   });
 
@@ -7235,6 +7325,17 @@ export async function registerRoutes(
     } catch (e) {
       console.error("Delete override error:", e);
       res.status(500).json({ error: "Failed to delete zone override" });
+    }
+  });
+
+  app.put("/api/dispatch/items/:id/override", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { overrideRouteId } = req.body;
+      const result = await storage.updateDispatchItemOverride(req.params.id, overrideRouteId);
+      res.json(result);
+    } catch (e) {
+      console.error("Item override error:", e);
+      res.status(500).json({ error: "Failed to update item override" });
     }
   });
 
@@ -8113,8 +8214,27 @@ export async function registerRoutes(
       if (!contractId || !periodStart || !periodEnd) {
         return res.status(400).json({ error: "contractId, periodStart, and periodEnd are required" });
       }
-      const invoice = await storage.generateContractInvoice(contractId, periodStart, periodEnd);
-      res.status(201).json(invoice);
+
+      const contract = await storage.getContract(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: "Contract not found" });
+      }
+
+      let generatedInvoices = [];
+
+      if (contract.invoiceGenerationType === "outlet" && contract.linkedOutlets && Array.isArray(contract.linkedOutlets) && contract.linkedOutlets.length > 0) {
+        for (const outletId of contract.linkedOutlets as string[]) {
+          await storage.calculateContractUsage(contract.id, periodStart, periodEnd, outletId);
+          const inv = await storage.generateContractInvoice(contract.id, periodStart, periodEnd, outletId);
+          generatedInvoices.push(inv);
+        }
+      } else {
+        await storage.calculateContractUsage(contract.id, periodStart, periodEnd);
+        const inv = await storage.generateContractInvoice(contractId, periodStart, periodEnd);
+        generatedInvoices.push(inv);
+      }
+      
+      res.status(201).json(generatedInvoices.length === 1 ? generatedInvoices[0] : generatedInvoices);
     } catch (error) {
       console.error("Generate invoice error:", error);
       res.status(500).json({ error: "Failed to generate invoice" });

@@ -272,7 +272,15 @@ export default function UsersPage() {
                 )} />
                 <FormField control={form.control} name="employeeId" render={({ field }) => (
                   <FormItem><FormLabel>Link to Employee</FormLabel>
-                    <Select onValueChange={v => field.onChange(v === "__none__" ? "" : v)} value={field.value || "__none__"}>
+                    <Select onValueChange={v => {
+                      field.onChange(v === "__none__" ? "" : v);
+                      if (v !== "__none__") {
+                        const selectedEmp = employees.find(e => e.id === v);
+                        if (selectedEmp && (selectedEmp as any).password) {
+                          form.setValue("password", (selectedEmp as any).password);
+                        }
+                      }
+                    }} value={field.value || "__none__"}>
                       <FormControl><SelectTrigger><SelectValue placeholder="Select employee (optional)" /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="__none__">None</SelectItem>

@@ -55,6 +55,7 @@ import type { Employee, Shop, Branch, BankAccount } from "@shared/schema";
 const employeeSchema = z.object({
   employeeCode: z.string().min(1, "Employee code is required"),
   name: z.string().min(1, "Name is required"),
+  password: z.string().optional().default("LogixD@123"),
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().optional(),
   address: z.string().optional(),
@@ -131,6 +132,7 @@ export default function Employees() {
     defaultValues: {
       employeeCode: "",
       name: "",
+      password: "LogixD@123",
       email: "",
       phone: "",
       address: "",
@@ -382,6 +384,7 @@ export default function Employees() {
     form.reset({
       employeeCode: employee.employeeCode,
       name: employee.name,
+      password: (employee as any).password || "LogixD@123",
       email: employee.email || "",
       phone: employee.phone || "",
       address: employee.address || "",
@@ -783,6 +786,13 @@ export default function Employees() {
                   <FormItem>
                     <FormLabel>Full Name *</FormLabel>
                     <FormControl><Input {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="password" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Password</FormLabel>
+                    <FormControl><Input {...field} type="password" placeholder="LogixD@123" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />

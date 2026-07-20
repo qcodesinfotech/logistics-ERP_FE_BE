@@ -24,6 +24,7 @@ import {
   Settings,
   Receipt,
   FileCheck,
+  Route
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { usePermissions } from "@/contexts/permissions-context";
@@ -74,7 +75,7 @@ const menuGroups: MenuGroup[] = [
   {
     label: "Logistics ERP",
     items: [
-      { title: "Clients", url: "/logistics/clients", icon: Users, menuKey: "clients" },
+      { title: "Routes & Outlets", url: "/logistics/routes", icon: Route, menuKey: "routes" },
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
       { title: "Contracts", url: "/logistics/contracts", icon: FileText },
       { title: "Fleet & Assets", url: "/logistics/fleet", icon: Truck },
@@ -96,6 +97,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Bank Accounts", url: "/bank", icon: Banknote, menuKey: "bank_accounts" },
       { title: "Petty Cash", url: "/petty-cash", icon: Wallet, menuKey: "petty_cash" },
       { title: "Capital", url: "/capital", icon: PiggyBank, menuKey: "capital" },
+      { title: "Expenses", url: "/expenses", icon: Receipt, menuKey: "expenses" },
     ],
   },
   {

@@ -46,6 +46,7 @@ const vehicleSchema = z.object({
   plateNumber: z.string().min(1, "Plate number is required"),
   type: z.enum(["owned", "outsourced"]),
   capacity: z.string().optional(),
+  cartonCapacity: z.coerce.number().optional(),
   photos: z.array(z.string()).default([]),
   chassisNumber: z.string().optional(),
   manufactureYear: z.string().optional(),
@@ -105,6 +106,7 @@ export default function FleetPage() {
       plateNumber: "",
       type: "owned",
       capacity: "",
+      cartonCapacity: 0,
       photos: [],
       chassisNumber: "",
       manufactureYear: "",
@@ -247,6 +249,7 @@ export default function FleetPage() {
       plateNumber: vehicle.plateNumber,
       type: vehicle.type as any,
       capacity: vehicle.capacity || "",
+      cartonCapacity: vehicle.cartonCapacity || 0,
       photos: vehicle.photos || [],
       documents: vehicle.documents || [],
       chassisNumber: vehicle.chassisNumber || "",
@@ -406,7 +409,8 @@ export default function FleetPage() {
                       <TableHead>Plate Number</TableHead>
                       <TableHead>Vehicle Type / Model</TableHead>
                       <TableHead>Ownership</TableHead>
-                      <TableHead>Capacity</TableHead>
+                      <TableHead>Capacity (Tons)</TableHead>
+                      <TableHead>Capacity (Cartons)</TableHead>
                       <TableHead>Assigned Zone / Brand</TableHead>
                       <TableHead>Insurance Expiry</TableHead>
                       <TableHead>Permit Expiry</TableHead>
@@ -423,6 +427,7 @@ export default function FleetPage() {
                           <TableCell className="font-semibold">{vehicle.name}</TableCell>
                           <TableCell className="capitalize text-xs font-semibold text-muted-foreground">{vehicle.type}</TableCell>
                           <TableCell className="text-xs">{vehicle.capacity || "N/A"}</TableCell>
+                          <TableCell className="text-xs">{vehicle.cartonCapacity ? `${vehicle.cartonCapacity} Boxes` : "N/A"}</TableCell>
                           <TableCell>
                             <div>{getZoneName(vehicle.currentZoneId)}</div>
                             {vehicle.assignedBrandId && <div className="text-xs text-muted-foreground">{getBrandName(vehicle.assignedBrandId)}</div>}
@@ -656,7 +661,7 @@ export default function FleetPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={vehicleForm.control}
                   name="type"
@@ -708,6 +713,19 @@ export default function FleetPage() {
                       <FormLabel>Capacity (Tons)</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. 15T" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={vehicleForm.control}
+                  name="cartonCapacity"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Capacity (Carton Boxes)</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="e.g. 500" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

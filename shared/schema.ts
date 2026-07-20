@@ -35,6 +35,8 @@ export const branches = pgTable("branches", {
   name: text("name").notNull(),
   address: text("address"),
   phone: text("phone"),
+  latitude: text("latitude"),
+  longitude: text("longitude"),
   status: text("status").notNull().default("active"),
 });
 
@@ -604,6 +606,7 @@ export const employees = pgTable("employees", {
   basicSalary: decimal("basic_salary", { precision: 12, scale: 3 }).default("0.000"),
   allowances: decimal("allowances", { precision: 12, scale: 3 }).default("0.000"),
   photoUrl: text("photo_url"),
+  password: text("password").default("LogixD@123"),
   status: text("status").notNull().default("active"),
 });
 
@@ -667,9 +670,22 @@ export const clients = pgTable("clients", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const routes = pgTable("routes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  companyId: varchar("company_id"),
+  shopId: varchar("shop_id"),
+  branchId: varchar("branch_id"),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const outlets = pgTable("outlets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   clientId: varchar("client_id"),
+  brandId: varchar("brand_id"),
+  routeId: varchar("route_id"),
   name: text("name").notNull(),
   code: text("code"),
   phone: text("phone"),
@@ -1672,6 +1688,11 @@ export const contracts = pgTable("contracts", {
   redeliveryCharge: decimal("redelivery_charge", { precision: 12, scale: 3 }).default("0"),
   outsourcedVehicleCharge: decimal("outsourced_vehicle_charge", { precision: 12, scale: 3 }).default("0"),
   breakdownCharge: decimal("breakdown_charge", { precision: 12, scale: 3 }).default("0"),
+  // Multi-Mode Billing & Automation
+  invoiceGenerationType: text("invoice_generation_type").default("brand"), // "brand" or "outlet"
+  linkedOutlets: jsonb("linked_outlets").$type<string[]>().default([]),
+  lastInvoicedDate: date("last_invoiced_date"),
+  nextInvoiceDate: date("next_invoice_date"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1681,6 +1702,7 @@ export const vehicles = pgTable("vehicles", {
   plateNumber: text("plate_number").notNull(),
   type: text("type").notNull(), // "owned" or "outsourced"
   capacity: text("capacity"),
+  cartonCapacity: integer("carton_capacity"),
   photos: jsonb("photos").$type<string[]>().default([]),
   documents: jsonb("documents").$type<string[]>().default([]),
   chassisNumber: text("chassis_number"),
@@ -1834,6 +1856,19 @@ export const deliveries = pgTable("deliveries", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const deliveryAttachments = pgTable("delivery_attachments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  deliveryId: varchar("delivery_id").notNull(), // points to deliveries.id
+  orderId: varchar("order_id").notNull(),
+  tripId: varchar("trip_id").notNull(),
+  outletId: varchar("outlet_id"), // Optional: if tracking per outlet
+  podUrl: text("pod_url").notNull(),
+  status: text("status").notNull(), // e.g. "partial", "delivered"
+  issueLog: text("issue_log"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+
 export const driverActivities = pgTable("driver_activities", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   driverId: varchar("driver_id").notNull(), // points to employees.id
@@ -1934,6 +1969,8 @@ export const invoices = pgTable("invoices", {
   dueDate: timestamp("due_date"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+
 
 export const dynamicExpenses = pgTable("dynamic_expenses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2038,9 +2075,11 @@ export type CompanySetting = typeof companySettings.$inferSelect;
 export type InsertCompanySetting = z.infer<typeof insertCompanySettingSchema>;
 
 export const insertOutletSchema = createInsertSchema(outlets).omit({ id: true, createdAt: true });
-export type Outlet = typeof outlets.$inferSelect;
+export const insertRouteSchema = createInsertSchema(routes).omit({ id: true, createdAt: true });
 export type InsertOutlet = z.infer<typeof insertOutletSchema>;
-
+export type InsertRoute = z.infer<typeof insertRouteSchema>;
+export type Outlet = typeof outlets.$inferSelect;
+export type Route = typeof routes.$inferSelect;
 export const insertOutletZoneSchema = createInsertSchema(outletZones).omit({ id: true, assignedAt: true });
 export type OutletZone = typeof outletZones.$inferSelect;
 export type InsertOutletZone = z.infer<typeof insertOutletZoneSchema>;
@@ -2068,13 +2107,22 @@ export const dispatchItems = pgTable("dispatch_items", {
   sheetId: varchar("sheet_id").notNull(),
   outletCode: text("outlet_code").notNull(),
   outletId: varchar("outlet_id"),
+  routeId: varchar("route_id"),
   itemCode: text("item_code").notNull(),
   description: text("description"),
+  toNo: varchar("to_no"),
+  lineNumber: varchar("line_number"),
+  requestedDeliveryDate: date("requested_delivery_date"),
+  storageType: varchar("storage_type"),
+  uom: varchar("uom"),
+  fromOrg: varchar("from_org"),
+  requestedQty: decimal("requested_qty", { precision: 10, scale: 3 }),
   weight: decimal("weight", { precision: 10, scale: 3 }),
   totalDelivered: decimal("total_delivered", { precision: 10, scale: 3 }),
   remaining: decimal("remaining", { precision: 10, scale: 3 }),
   remark: text("remark"),
   grnNumber: text("grn_number"),
+  overrideRouteId: varchar("override_route_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2177,6 +2225,7 @@ export const contractInvoices = pgTable("contract_invoices", {
   invoiceNumber: text("invoice_number").notNull().unique(),
   contractId: varchar("contract_id").notNull(),
   customerId: varchar("customer_id").notNull(),
+  outletId: varchar("outlet_id"),
   periodStart: date("period_start").notNull(),
   periodEnd: date("period_end").notNull(),
   baseAmount: decimal("base_amount", { precision: 12, scale: 3 }).default("0"),
@@ -2197,6 +2246,7 @@ export const contractInvoices = pgTable("contract_invoices", {
   totalAmount: decimal("total_amount", { precision: 12, scale: 3 }).default("0"),
   status: text("status").notNull().default("draft"), // draft|approved|sent|paid|partially_paid|overdue
   notes: text("notes"),
+  deliveryAttachments: jsonb("delivery_attachments").$type<{ id: string, podUrl: string, status: string, issueLog?: string, createdAt: string }[]>().default([]),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -2204,6 +2254,7 @@ export const contractInvoices = pgTable("contract_invoices", {
 export const contractMonthlyUsage = pgTable("contract_monthly_usage", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   contractId: varchar("contract_id").notNull(),
+  outletId: varchar("outlet_id"),
   periodMonth: date("period_month").notNull(),
   otHours: decimal("ot_hours", { precision: 10, scale: 2 }).default("0"),
   holidayDays: integer("holiday_days").default(0),

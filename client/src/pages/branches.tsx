@@ -53,6 +53,8 @@ const branchSchema = z.object({
   shopId: z.string().optional(),
   address: z.string().optional(),
   phone: z.string().optional(),
+  latitude: z.string().optional(),
+  longitude: z.string().optional(),
   status: z.string().default("active"),
 });
 
@@ -71,6 +73,8 @@ export default function Branches() {
       shopId: "",
       address: "",
       phone: "",
+      latitude: "",
+      longitude: "",
       status: "active",
     },
   });
@@ -129,6 +133,8 @@ export default function Branches() {
       shopId: branch.shopId || "",
       address: branch.address || "",
       phone: branch.phone || "",
+      latitude: (branch as any).latitude || "",
+      longitude: (branch as any).longitude || "",
       status: branch.status,
     });
     setIsDialogOpen(true);
@@ -272,6 +278,34 @@ export default function Branches() {
                   </FormItem>
                 )}
               />
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="latitude"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Latitude</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="e.g. 26.2285" data-testid="input-latitude" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="longitude"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Longitude</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="e.g. 50.5860" data-testid="input-longitude" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={handleCloseDialog}>
                   Cancel

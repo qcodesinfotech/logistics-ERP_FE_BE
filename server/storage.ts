@@ -36,8 +36,8 @@ import {
   type CrmLead, type CrmDeal, type CrmActivity, type CrmLeadNote, type CrmCalendarEvent, type CrmReminder, type CrmCustomerContact, type CrmNotification, type CrmTask,
   type InsertCrmLead, type InsertCrmDeal, type InsertCrmActivity, type InsertCrmLeadNote, type InsertCrmCalendarEvent, type InsertCrmReminder, type InsertCrmCustomerContact, type InsertCrmNotification, type InsertCrmTask,
   userScopes, type UserScope,
-  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, orderExpenses, invoicePayments, trips, tripOrders, deliveries, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
-  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type OrderExpense, type InsertOrderExpense, type InvoicePayment, type InsertInvoicePayment, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone,
+  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, orderExpenses, invoicePayments, trips, tripOrders, deliveries, deliveryAttachments, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
+  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type OrderExpense, type InsertOrderExpense, type InvoicePayment, type InsertInvoicePayment, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone, routes, type Route, type InsertRoute,
   driverZones, dispatchSheets, dispatchItems, dispatchOutletZoneOverrides, dispatchDeliveries,
   dispatchTruckAssignments, dispatchOutletTruckAssignments, dispatchPendingQuantities, truckTransfers,
   contractInvoices, contractMonthlyUsage,
@@ -252,6 +252,25 @@ export interface IStorage {
   createProject(data: InsertProject): Promise<Project>;
   updateProject(id: string, data: Partial<InsertProject>): Promise<Project | undefined>;
   deleteProject(id: string): Promise<void>;
+
+  // Routes
+  getRoutes(): Promise<Route[]>;
+  getRoute(id: string): Promise<Route | undefined>;
+  createRoute(data: InsertRoute): Promise<Route>;
+  updateRoute(id: string, data: Partial<InsertRoute>): Promise<Route | undefined>;
+  deleteRoute(id: string): Promise<void>;
+
+  // Outlets
+  getOutlets(clientId?: string, routeId?: string, brandId?: string): Promise<Outlet[]>;
+  getOutlet(id: string): Promise<Outlet | undefined>;
+  createOutlet(data: InsertOutlet): Promise<Outlet>;
+  updateOutlet(id: string, data: Partial<InsertOutlet>): Promise<Outlet | undefined>;
+  deleteOutlet(id: string): Promise<void>;
+  getOutletZones(outletId: string): Promise<Zone[]>;
+  assignOutletZones(outletId: string, zoneIds: string[]): Promise<void>;
+  getZoneOutlets(zoneId: string): Promise<Outlet[]>;
+  appendOutletsToZone(zoneId: string, outletIds: string[]): Promise<void>;
+  removeOutletFromZone(zoneId: string, outletId: string): Promise<void>;
 
   // Tasks
   getTasks(scope?: { shopId?: string | null; branchId?: string | null } | null, options?: { currentEmployeeId?: string | null; isAdmin?: boolean }): Promise<Task[]>;
@@ -564,6 +583,7 @@ export interface IStorage {
   createDelivery(data: InsertDelivery): Promise<Delivery>;
   updateDelivery(id: string, data: Partial<InsertDelivery>): Promise<Delivery | undefined>;
   recordDeliveryPOD(tripId: string, orderId: string, podUrl: string, status: string, issueLog?: string): Promise<Delivery>;
+  getOutletDeliveryAttachments(outletId: string): Promise<any[]>;
 
   // Logistics Driver Management
   getDrivers(): Promise<Driver[]>;
@@ -1437,7 +1457,7 @@ export class DatabaseStorage implements IStorage {
       // For deposits: Debit Bank Account (1000), Credit Owner's Capital (3000) - initial/manual deposits
       // For withdrawals: Debit Owner's Drawings (3100), Credit Bank Account (1000) - manual withdrawals
       // Note: Automated deposits/withdrawals from sales, purchases, etc. create their own journal entries
-      if (amount > 0) {
+      if (amount > 0 && !data.relatedType) {
         const journalLines = [];
         if (data.type === "deposit") {
           journalLines.push(
@@ -2214,10 +2234,39 @@ export class DatabaseStorage implements IStorage {
     await db.delete(clients).where(eq(clients.id, id));
   }
 
+  // Routes
+  async getRoutes(): Promise<Route[]> {
+    return db.select().from(routes).orderBy(routes.name);
+  }
+
+  async getRoute(id: string): Promise<Route | undefined> {
+    const [route] = await db.select().from(routes).where(eq(routes.id, id));
+    return route || undefined;
+  }
+
+  async createRoute(data: InsertRoute): Promise<Route> {
+    const [route] = await db.insert(routes).values(data).returning();
+    return route;
+  }
+
+  async updateRoute(id: string, data: Partial<InsertRoute>): Promise<Route | undefined> {
+    const [route] = await db.update(routes).set(data).where(eq(routes.id, id)).returning();
+    return route || undefined;
+  }
+
+  async deleteRoute(id: string): Promise<void> {
+    await db.delete(routes).where(eq(routes.id, id));
+  }
+
   // Outlets
-  async getOutlets(clientId?: string): Promise<Outlet[]> {
-    if (clientId) {
-      return db.select().from(outlets).where(eq(outlets.clientId, clientId)).orderBy(outlets.name);
+  async getOutlets(clientId?: string, routeId?: string, brandId?: string): Promise<Outlet[]> {
+    const conditions = [];
+    if (clientId) conditions.push(eq(outlets.clientId, clientId));
+    if (routeId) conditions.push(eq(outlets.routeId, routeId));
+    if (brandId) conditions.push(eq(outlets.brandId, brandId));
+    
+    if (conditions.length > 0) {
+      return db.select().from(outlets).where(and(...conditions)).orderBy(outlets.name);
     }
     return db.select().from(outlets).orderBy(outlets.name);
   }
@@ -2356,6 +2405,10 @@ export class DatabaseStorage implements IStorage {
     return inserted;
   }
 
+  async getDispatchItemsForSheet(sheetId: string): Promise<any[]> {
+    return await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+  }
+
   async getDispatchBoard(sheetId: string): Promise<any> {
     // Get all items for sheet
     const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
@@ -2369,21 +2422,19 @@ export class DatabaseStorage implements IStorage {
     const allOutlets = outletIds.length > 0 ? await db.select().from(outlets).where(inArray(outlets.id, outletIds)) : [];
     const outletMap = new Map(allOutlets.map(o => [o.id, o]));
 
-    // Get zone assignments for all outlets
-    const allOutletZones = outletIds.length > 0 ? await db.select().from(outletZones).where(inArray(outletZones.outletId, outletIds)) : [];
-
-    // Build outletId → effective zoneId (override first, then normal zone)
+    // Get zone assignments for all outlets (using routeId directly)
     const outletToZone = new Map<string, string>();
-    for (const oz of allOutletZones) {
-      outletToZone.set(oz.outletId, oz.zoneId);
+    for (const outlet of allOutlets) {
+      if (outlet.routeId) outletToZone.set(outlet.id, outlet.routeId);
     }
     for (const [outletId, zoneId] of Array.from(overrideMap.entries())) {
       outletToZone.set(outletId, zoneId);
     }
 
-    // Get all zone IDs we need
-    const zoneIds = Array.from(new Set(Array.from(outletToZone.values()))) as string[];
-    const allZones = zoneIds.length > 0 ? await db.select().from(zones).where(inArray(zones.id, zoneIds)) : [];
+    // Get all zone IDs we need (including from item.routeId)
+    const allItemRouteIds = items.map(i => i.routeId).filter(Boolean) as string[];
+    const zoneIds = Array.from(new Set([...Array.from(outletToZone.values()), ...allItemRouteIds])) as string[];
+    const allZones = zoneIds.length > 0 ? await db.select().from(routes).where(inArray(routes.id, zoneIds)) : [];
     const zoneMap = new Map(allZones.map(z => [z.id, z]));
 
     // Get driver assignments for each zone
@@ -2426,8 +2477,18 @@ export class DatabaseStorage implements IStorage {
     board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], trucks: [], outlets: {} };
 
     for (const item of items) {
-      const effectiveZoneId = item.outletId ? (outletToZone.get(item.outletId) || "unassigned") : "unassigned";
-      const isOverridden = item.outletId ? overrideMap.has(item.outletId) : false;
+      let effectiveZoneId = "unassigned";
+      
+      if (item.overrideRouteId) {
+        effectiveZoneId = item.overrideRouteId;
+      } else if (item.outletId && overrideMap.has(item.outletId)) {
+        effectiveZoneId = overrideMap.get(item.outletId)!;
+      } else if (item.outletId && outletToZone.has(item.outletId)) {
+        effectiveZoneId = outletToZone.get(item.outletId)!;
+      } else if (item.routeId) {
+        effectiveZoneId = item.routeId;
+      }
+      const isOverridden = (item.outletId ? overrideMap.has(item.outletId) : false) || !!item.overrideRouteId;
 
       if (!board[effectiveZoneId]) {
         const zone = zoneMap.get(effectiveZoneId);
@@ -2453,7 +2514,7 @@ export class DatabaseStorage implements IStorage {
           outletCode: item.outletCode,
           outletName: outlet?.name || item.outletCode,
           isOverridden,
-          overrideZoneId: isOverridden ? item.outletId ? overrideMap.get(item.outletId) : null : null,
+          overrideZoneId: isOverridden ? (item.overrideRouteId || (item.outletId ? overrideMap.get(item.outletId) : null) || null) : null,
           truckAssignmentId: outletToTruck.get(item.outletId) || outletToTruck.get(item.outletCode) || null,
           items: [],
         };
@@ -2500,6 +2561,14 @@ export class DatabaseStorage implements IStorage {
 
   async deleteDispatchOverride(id: string): Promise<void> {
     await db.delete(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.id, id));
+  }
+
+  async updateDispatchItemOverride(itemId: string, overrideRouteId: string | null): Promise<any> {
+    const [updated] = await db.update(dispatchItems)
+      .set({ overrideRouteId })
+      .where(eq(dispatchItems.id, itemId))
+      .returning();
+    return updated;
   }
 
   // Projects
@@ -5604,35 +5673,35 @@ export class DatabaseStorage implements IStorage {
     return [];
   }
 
-  // Logistics Zones
+  // Logistics Zones (Aliased to Routes)
   async getZones(scope?: Partial<ScopeParams>): Promise<Zone[]> {
     const conditions = [];
-    if (scope?.companyId) conditions.push(eq(zones.companyId, scope.companyId));
-    if (scope?.shopId) conditions.push(eq(zones.shopId, scope.shopId));
-    if (scope?.branchId) conditions.push(eq(zones.branchId, scope.branchId));
+    if (scope?.companyId) conditions.push(eq(routes.companyId, scope.companyId));
+    if (scope?.shopId) conditions.push(eq(routes.shopId, scope.shopId));
+    if (scope?.branchId) conditions.push(eq(routes.branchId, scope.branchId));
     if (conditions.length > 0) {
-      return db.select().from(zones).where(and(...conditions));
+      return db.select().from(routes).where(and(...conditions)) as unknown as Promise<Zone[]>;
     }
-    return db.select().from(zones);
+    return db.select().from(routes) as unknown as Promise<Zone[]>;
   }
 
   async getZone(id: string): Promise<Zone | undefined> {
-    const [row] = await db.select().from(zones).where(eq(zones.id, id));
-    return row || undefined;
+    const [row] = await db.select().from(routes).where(eq(routes.id, id));
+    return row as unknown as Zone | undefined;
   }
 
   async createZone(data: InsertZone): Promise<Zone> {
-    const [row] = await db.insert(zones).values(data).returning();
-    return row;
+    const [row] = await db.insert(routes).values(data).returning();
+    return row as unknown as Zone;
   }
 
   async updateZone(id: string, data: Partial<InsertZone>): Promise<Zone | undefined> {
-    const [row] = await db.update(zones).set(data).where(eq(zones.id, id)).returning();
-    return row || undefined;
+    const [row] = await db.update(routes).set(data).where(eq(routes.id, id)).returning();
+    return row as unknown as Zone | undefined;
   }
 
   async deleteZone(id: string): Promise<void> {
-    await db.delete(zones).where(eq(zones.id, id));
+    await db.delete(routes).where(eq(routes.id, id));
   }
 
   async getSupervisorZones(supervisorId: string): Promise<SupervisorZone[]> {
@@ -5852,14 +5921,14 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     const client = await this.getClient(payment.customerId);
+    const branchId = client?.branchId || order.branchId || "1";
+    const shopId = client?.shopId || order.shopId;
 
-    // Create a transaction in Chart of Accounts ledger (bank or petty cash)
-    // Using createBankTransaction ensures currentBalance is updated on the bank account
     if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
       if (payment.bankAccountId) {
         await this.createBankTransaction({
           bankAccountId: payment.bankAccountId,
-          branchId: "1", // will be overridden by createBankTransaction from the account's own branchId
+          branchId: branchId,
           type: "deposit",
           amount: String(payment.amount),
           reference: payment.reference || null,
@@ -5867,18 +5936,34 @@ export class DatabaseStorage implements IStorage {
           relatedType: "logistics_invoice",
           relatedId: id,
         });
+
+        // Create Journal Entry for Invoice Payment via Bank
+        // Debit: Bank (1000)
+        // Credit: Accounts Receivable (1100)
+        await db.transaction(async (tx) => {
+          await this.createJournalEntryInTx(tx, {
+            sourceType: "logistics_invoice",
+            sourceId: id,
+            shopId: shopId,
+            branchId: branchId,
+            reference: payment.reference || `INV-PAY-${order.orderNumber}`,
+            description: `Payment received for Logistics Order ${order.orderNumber}`,
+            lines: [
+              { accountCode: "1000", debit: Number(payment.amount), description: `Bank Deposit - Order ${order.orderNumber}` },
+              { accountCode: "1100", credit: Number(payment.amount), description: `Accounts Receivable Payment - Order ${order.orderNumber}` }
+            ],
+          });
+        });
       }
     } else if (payment.paymentMethod === 'cash') {
       if (payment.pettyCashId) {
-        // Directly insert a receipt transaction and update petty cash balance
-        // (Cash received from client is an incoming receipt, not an internal petty cash deposit)
         await db.transaction(async (tx) => {
           const [pc] = await tx.select().from(pettyCash).where(eq(pettyCash.id, payment.pettyCashId!));
           if (!pc) throw new Error("Petty cash account not found");
 
           await tx.insert(pettyCashTransactions).values({
             pettyCashId: payment.pettyCashId!,
-            branchId: pc.branchId || client?.branchId || "1",
+            branchId: pc.branchId || branchId,
             type: "receipt",
             amount: String(payment.amount),
             reference: payment.reference || null,
@@ -5891,6 +5976,22 @@ export class DatabaseStorage implements IStorage {
           await tx.update(pettyCash)
             .set({ currentBalance: newBalance.toFixed(3) })
             .where(eq(pettyCash.id, payment.pettyCashId!));
+
+          // Create Journal Entry for Invoice Payment via Cash
+          // Debit: Petty Cash Fund (1010)
+          // Credit: Accounts Receivable (1100)
+          await this.createJournalEntryInTx(tx, {
+            sourceType: "logistics_invoice",
+            sourceId: id,
+            shopId: pc.shopId || shopId,
+            branchId: pc.branchId || branchId,
+            reference: payment.reference || `CASH-PAY-${order.orderNumber}`,
+            description: `Cash Payment received for Logistics Order ${order.orderNumber}`,
+            lines: [
+              { accountCode: "1010", debit: Number(payment.amount), description: `Cash Receipt - Order ${order.orderNumber}` },
+              { accountCode: "1100", credit: Number(payment.amount), description: `Accounts Receivable Payment - Order ${order.orderNumber}` }
+            ],
+          });
         });
       }
     }
@@ -5986,6 +6087,30 @@ export class DatabaseStorage implements IStorage {
       delivery = created;
     }
 
+    // Resolve outletId from order if possible
+    let outletId = null;
+    const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+    if (order && order.deliveryLocationId) {
+      const [outlet] = await db.select().from(outlets).where(and(
+        eq(outlets.clientId, order.customerId),
+        eq(outlets.locationId, order.deliveryLocationId)
+      ));
+      if (outlet) {
+        outletId = outlet.id;
+      }
+    }
+
+    // Insert into deliveryAttachments
+    await db.insert(deliveryAttachments).values({
+      deliveryId: delivery.id,
+      orderId,
+      tripId,
+      outletId,
+      podUrl,
+      status,
+      issueLog
+    });
+
     const allOrderDeliveries = await db.select().from(deliveries).where(eq(deliveries.orderId, orderId));
     let hasIncomplete = false;
     let hasDelivered = false;
@@ -6007,6 +6132,27 @@ export class DatabaseStorage implements IStorage {
     await db.update(orders).set({ status: orderStatus }).where(eq(orders.id, orderId));
     return delivery;
   }
+
+  async getOutletDeliveryAttachments(outletId: string): Promise<any[]> {
+    return await db.select({
+      id: deliveryAttachments.id,
+      orderId: deliveryAttachments.orderId,
+      tripId: deliveryAttachments.tripId,
+      podUrl: deliveryAttachments.podUrl,
+      status: deliveryAttachments.status,
+      issueLog: deliveryAttachments.issueLog,
+      createdAt: deliveryAttachments.createdAt,
+      orderNumber: orders.orderNumber,
+      cargoDetails: orders.cargoDetails,
+      tripNumber: trips.tripNumber,
+    })
+    .from(deliveryAttachments)
+    .innerJoin(orders, eq(deliveryAttachments.orderId, orders.id))
+    .innerJoin(trips, eq(deliveryAttachments.tripId, trips.id))
+    .where(eq(deliveryAttachments.outletId, outletId))
+    .orderBy(desc(deliveryAttachments.createdAt));
+  }
+
 
   // Logistics Driver Management
   async getDrivers(): Promise<Driver[]> {
@@ -6282,13 +6428,45 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async generateContractInvoice(contractId: string, periodStart: string, periodEnd: string): Promise<ContractInvoice> {
+  async calculateContractUsage(contractId: string, periodStart: string, periodEnd: string, outletId?: string): Promise<void> {
+    // Determine the monthly usage dynamically from actual deliveries/trips in this period
+    // Since this can be complex, we will stub this aggregation and allow manual overrides.
+    // In a full implementation, you would query deliveries/trips between periodStart and periodEnd for this contract/outlet.
+    const existing = await this.getContractMonthlyUsage(contractId, periodStart);
+    let target = existing.length > 0 ? existing[0] : null;
+    if (outletId) {
+      target = existing.find(e => e.outletId === outletId) || null;
+    }
+
+    if (!target) {
+      await db.insert(contractMonthlyUsage).values({
+        contractId,
+        outletId: outletId || null,
+        periodMonth: periodStart,
+        otHours: "0",
+        holidayDays: 0,
+        extraTruckTrips: 0,
+        emergencyTrips: 0,
+        redeliveryTrips: 0,
+        outsourcedTrips: 0,
+      } as any);
+    }
+  }
+
+  async generateContractInvoice(contractId: string, periodStart: string, periodEnd: string, outletId?: string): Promise<ContractInvoice> {
     const contract = await this.getContract(contractId);
     if (!contract) throw new Error("Contract not found");
 
     // Fetch or default monthly usage
-    const usageRows = await db.select().from(contractMonthlyUsage)
-      .where(and(eq(contractMonthlyUsage.contractId, contractId), eq(contractMonthlyUsage.periodMonth, periodStart)));
+    const usageConditions = [
+      eq(contractMonthlyUsage.contractId, contractId),
+      eq(contractMonthlyUsage.periodMonth, periodStart)
+    ];
+    if (outletId) {
+      usageConditions.push(eq(contractMonthlyUsage.outletId, outletId));
+    }
+
+    const usageRows = await db.select().from(contractMonthlyUsage).where(and(...usageConditions));
     const usage = usageRows[0];
 
     const otHours = parseFloat(usage?.otHours || "0");
@@ -6321,6 +6499,7 @@ export class DatabaseStorage implements IStorage {
       invoiceNumber,
       contractId,
       customerId: contract.customerId,
+      outletId: outletId || null,
       periodStart,
       periodEnd,
       baseAmount: baseAmount.toFixed(3),
@@ -6341,6 +6520,45 @@ export class DatabaseStorage implements IStorage {
       totalAmount: totalAmount.toFixed(3),
       status: "draft",
     } as any).returning();
+
+    // Now fetch deliveryAttachments for this period
+    // Find all orders for this customer (and outlet if specified) within the period?
+    // Wait, we can just query deliveryAttachments where createdAt is within period
+    // and outletId matches (if outletId), or if we need to filter by customer, we join orders.
+    const attachmentsQuery = db.select({
+      id: deliveryAttachments.id,
+      podUrl: deliveryAttachments.podUrl,
+      status: deliveryAttachments.status,
+      issueLog: deliveryAttachments.issueLog,
+      createdAt: deliveryAttachments.createdAt,
+      orderId: deliveryAttachments.orderId,
+      tripId: deliveryAttachments.tripId,
+    }).from(deliveryAttachments)
+      .innerJoin(orders, eq(deliveryAttachments.orderId, orders.id))
+      .where(and(
+        eq(orders.customerId, contract.customerId),
+        outletId ? eq(deliveryAttachments.outletId, outletId) : undefined,
+        sql`${deliveryAttachments.createdAt} >= ${new Date(periodStart).toISOString()}`,
+        sql`${deliveryAttachments.createdAt} <= ${new Date(periodEnd + 'T23:59:59').toISOString()}`
+      ));
+
+    const attachmentsRows = await attachmentsQuery;
+    
+    // Update invoice with attachments
+    if (attachmentsRows.length > 0) {
+      const attachments = attachmentsRows.map(a => ({
+        id: a.id,
+        podUrl: a.podUrl,
+        status: a.status,
+        issueLog: a.issueLog,
+        createdAt: a.createdAt?.toISOString() || new Date().toISOString(),
+      }));
+      await db.update(contractInvoices)
+        .set({ deliveryAttachments: attachments as any })
+        .where(eq(contractInvoices.id, row.id));
+      row.deliveryAttachments = attachments;
+    }
+
     return row;
   }
 

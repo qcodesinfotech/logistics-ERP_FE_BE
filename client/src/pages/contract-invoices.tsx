@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Receipt, Plus, FileText, Check, Send, Clock, AlertCircle, Banknote, ChevronDown, ChevronUp, Printer, Edit2 } from "lucide-react";
+import { Receipt, Plus, FileText, Check, Send, Clock, AlertCircle, Banknote, ChevronDown, ChevronUp, Printer, Edit2, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,7 @@ export default function ContractInvoicesPage() {
   const { data: invoices = [], isLoading } = useQuery<any[]>({ queryKey: ["/api/contract-invoices"] });
   const { data: contracts = [] } = useQuery<Contract[]>({ queryKey: ["/api/contracts"] });
   const { data: clients = [] } = useQuery<Client[]>({ queryKey: ["/api/clients"] });
+  const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
   const totalPaid = invoices.filter(i => i.status === "paid").reduce((s, i) => s + parseFloat(i.totalAmount || "0"), 0);
   const totalOutstanding = invoices.filter(i => ["sent", "approved", "partially_paid", "overdue"].includes(i.status)).reduce((s, i) => s + parseFloat(i.totalAmount || "0"), 0);
@@ -94,6 +95,7 @@ export default function ContractInvoicesPage() {
 
   const getClientName = (id: string) => clients.find(c => c.id === id)?.name || "Unknown";
   const getContractName = (id: string) => contracts.find(c => c.id === id)?.name || id;
+  const getOutletName = (id: string) => outlets.find(o => o.id === id)?.name || id;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -134,7 +136,7 @@ export default function ContractInvoicesPage() {
                   <TableRow>
                     <TableHead>Invoice #</TableHead>
                     <TableHead>Customer</TableHead>
-                    <TableHead>Contract</TableHead>
+                    <TableHead>Contract / Outlet</TableHead>
                     <TableHead>Period</TableHead>
                     <TableHead className="text-right">Base</TableHead>
                     <TableHead className="text-right">OT</TableHead>
@@ -152,7 +154,10 @@ export default function ContractInvoicesPage() {
                       <TableRow key={inv.id} className="hover:bg-accent/40 transition-colors cursor-pointer" onClick={() => setViewDialog(inv)}>
                         <TableCell className="font-mono font-semibold text-primary">{inv.invoiceNumber}</TableCell>
                         <TableCell>{getClientName(inv.customerId)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{getContractName(inv.contractId)}</TableCell>
+                        <TableCell>
+                          <div className="text-xs text-muted-foreground">{getContractName(inv.contractId)}</div>
+                          {inv.outletId && <Badge variant="outline" className="mt-1 text-[10px]">{getOutletName(inv.outletId)}</Badge>}
+                        </TableCell>
                         <TableCell className="text-xs font-mono">{inv.periodStart} → {inv.periodEnd}</TableCell>
                         <TableCell className="text-right"><CurrencyDisplay amount={inv.baseAmount} /></TableCell>
                         <TableCell className="text-right text-amber-600"><CurrencyDisplay amount={inv.otAmount} /></TableCell>
@@ -305,6 +310,7 @@ export default function ContractInvoicesPage() {
                 <p className="text-xs font-semibold text-gray-500 uppercase">Bill To</p>
                 <p className="font-bold text-gray-800">{getClientName(viewDialog.customerId)}</p>
                 <p className="text-gray-600 text-sm">Contract: {getContractName(viewDialog.contractId)}</p>
+                {viewDialog.outletId && <p className="text-gray-600 text-sm font-medium">Outlet: {getOutletName(viewDialog.outletId)}</p>}
               </div>
 
               {/* Line Items */}
@@ -391,6 +397,37 @@ export default function ContractInvoicesPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Delivery Attachments Section */}
+              {viewDialog.deliveryAttachments && viewDialog.deliveryAttachments.length > 0 && (
+                <div className="mt-8 border-t pt-4">
+                  <h3 className="font-bold text-lg text-gray-800 mb-3">Delivery Attachments & Notes</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {viewDialog.deliveryAttachments.map((att: any, idx: number) => (
+                      <div key={idx} className="border rounded-md p-3 bg-gray-50 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs font-semibold text-gray-600">{new Date(att.createdAt).toLocaleDateString()}</span>
+                            <Badge variant="outline" className="text-[10px]">{att.status}</Badge>
+                          </div>
+                          {att.issueLog && (
+                            <p className="text-xs text-gray-700 mt-2 bg-white p-2 border rounded max-h-24 overflow-y-auto">
+                              <strong>Note:</strong> {att.issueLog}
+                            </p>
+                          )}
+                        </div>
+                        {att.podUrl && (
+                          <div className="mt-3 text-right">
+                            <a href={att.podUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                              <FileUp className="h-3 w-3" /> View Photo
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Status Actions */}

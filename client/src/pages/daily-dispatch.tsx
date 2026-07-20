@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
+import * as XLSX from "xlsx";
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@/components/ui/tabs";
@@ -26,7 +27,7 @@ import {
 import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package,
   ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, Clock,
-  X, Plus, Trash2, RefreshCw, ArrowRight, Eye,
+  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download,
 } from "lucide-react";
 
 // ===== Types =====
@@ -63,11 +64,11 @@ function parseCSV(text: string): Record<string, string>[] {
     if (h.includes("outlet") && h.includes("code")) return "outlet_code";
     if (h.includes("item") && h.includes("code")) return "item_code";
     if (h.includes("desc")) return "description";
-    if (h === "weight" || h.includes("qty") || h.includes("quantity")) return "weight";
-    if (h.includes("total") && h.includes("del")) return "total_delivered";
+    if (h.includes("qty") && !h.includes("fus")) return "weight"; // Fallback for old format
     if (h === "remaining") return "remaining";
     if (h.includes("remark")) return "remark";
     if (h.includes("grn")) return "grn_number";
+    if (h.includes("requested") && h.includes("delivery") && h.includes("date")) return "requested_delivery_date";
     return h;
   };
   const headers = rawHeaders.map(normalize);
@@ -121,6 +122,7 @@ function DeliveryDialog({
           <div className="bg-muted/40 rounded-lg p-3 text-sm space-y-1">
             <p><span className="text-muted-foreground">Outlet:</span> <span className="font-medium">{item.outletCode}</span></p>
             {item.description && <p><span className="text-muted-foreground">Item:</span> {item.description}</p>}
+            {item.requestedQty && <p><span className="text-muted-foreground">Requested Qty:</span> <span className="font-semibold text-primary">{item.requestedQty} {item.uom || ''}</span></p>}
             {item.grnNumber && <p><span className="text-muted-foreground">GRN:</span> {item.grnNumber}</p>}
             {item.weight && <p><span className="text-muted-foreground">Weight:</span> {item.weight} kg</p>}
           </div>
@@ -173,9 +175,9 @@ function DeliveryDialog({
 }
 
 // ===== Zone Override Dialog =====
-function ZoneOverrideDialog({
-  outletCode, outletId, sheetId, zones, onClose, onSave,
-}: { outletCode: string; outletId: string; sheetId: string; zones: Zone[]; onClose: () => void; onSave: (zoneId: string, reason: string) => void }) {
+function MoveOverrideDialog({
+  title, targetName, zones, onClose, onSave,
+}: { title: string; targetName: string; zones: Zone[]; onClose: () => void; onSave: (zoneId: string, reason: string) => void }) {
   const [zoneId, setZoneId] = useState("");
   const [reason, setReason] = useState("");
   return (
@@ -184,11 +186,11 @@ function ZoneOverrideDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowRight className="h-5 w-5 text-amber-500" />
-            Move Outlet — {outletCode}
+            {title} — {targetName}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">Temporarily reassign this outlet to a different zone for this dispatch sheet.</p>
+          <p className="text-sm text-muted-foreground">Temporarily reassign this to a different zone for this dispatch sheet.</p>
           <div className="space-y-2">
             <Label>Target Zone</Label>
             <Select value={zoneId} onValueChange={setZoneId}>
@@ -205,7 +207,7 @@ function ZoneOverrideDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={!zoneId} onClick={() => onSave(zoneId, reason)} className="bg-amber-500 hover:bg-amber-600 text-white">Move Outlet</Button>
+          <Button disabled={!zoneId} onClick={() => onSave(zoneId, reason)} className="bg-amber-500 hover:bg-amber-600 text-white">Confirm Move</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -220,6 +222,7 @@ function OutletCard({
   assignedTruck?: { vehicle: any; driver: any } | null;
   onDeliveryUpdate: (item: DispatchItem) => void;
   onOverride: (outlet: OutletGroup) => void;
+  onOverrideItem: (item: DispatchItem) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
@@ -282,10 +285,18 @@ function OutletCard({
                     <p className="text-xs text-muted-foreground italic mt-0.5">"{item.delivery.remark}"</p>
                   )}
                 </div>
-                <Button variant="outline" size="sm" className="h-7 px-2 text-xs flex-shrink-0"
-                  onClick={() => onDeliveryUpdate(item)}>
-                  <Eye className="h-3 w-3 mr-1" />Update
-                </Button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {isSupervisor && (
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 flex-shrink-0"
+                      onClick={() => onOverrideItem(item)}>
+                      Move
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
+                    onClick={() => onDeliveryUpdate(item)}>
+                    <Eye className="h-3 w-3 mr-1" />Update
+                  </Button>
+                </div>
               </div>
             );
           })}
@@ -297,11 +308,12 @@ function OutletCard({
 
 // ===== Zone Column =====
 function ZoneColumn({
-  zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride,
+  zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
   onOverride: (outlet: OutletGroup) => void;
+  onOverrideItem: (item: DispatchItem) => void;
 }) {
   const totalItems = zone.outlets.reduce((s, o) => s + o.items.length, 0);
   const deliveredItems = zone.outlets.reduce((s, o) => s + o.items.filter(i => i.delivery?.status === "delivered").length, 0);
@@ -325,14 +337,16 @@ function ZoneColumn({
             {deliveredItems}/{totalItems}
           </Badge>
         </div>
-        {zone.trucks && zone.trucks.length > 0 ? (
+        {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
+          !isUnassigned && <p className="text-xs text-muted-foreground mt-2 italic flex items-center gap-1"><AlertTriangle className="h-3 w-3" />No trucks or drivers assigned</p>
+        ) : (
           <div className="flex flex-col gap-2 mt-2">
-            {zone.trucks.map(t => {
+            {zone.trucks && zone.trucks.map(t => {
               const capacity = parseFloat(t.vehicle?.capacity || "0");
               const used = parseFloat(t.usedCapacity || "0");
               const isOver = used > capacity && capacity > 0;
               return (
-                <div key={t.id} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
+                <div key={`truck-${t.id}`} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
                   <div className="flex items-center justify-between font-medium">
                     <div className="flex items-center gap-1.5">
                       <Truck className="h-3.5 w-3.5 text-primary" />
@@ -345,7 +359,7 @@ function ZoneColumn({
                     )}
                   </div>
                   {t.driver && (
-                    <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1">
+                    <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1 mt-1">
                       <User className="h-3 w-3" />
                       <span className="truncate">{t.driver.name}</span>
                     </div>
@@ -353,18 +367,15 @@ function ZoneColumn({
                 </div>
               );
             })}
-          </div>
-        ) : zone.drivers.length > 0 ? (
-          <div className="flex items-center gap-1.5 flex-wrap mt-2">
-            {zone.drivers.map(d => (
-              <div key={d.id} className="flex items-center gap-1 bg-background rounded-full px-2 py-0.5 border text-xs">
-                <User className="h-3 w-3 text-primary" />
-                <span className="font-medium">{d.name}</span>
+            {zone.drivers && zone.drivers.map(d => (
+              <div key={`driver-${d.id}`} className="bg-background rounded-md p-2 text-xs border shadow-sm">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <User className="h-3.5 w-3.5 text-primary" />
+                  <span className="truncate font-medium">{d.name} <span className="font-normal">(Zone Driver)</span></span>
+                </div>
               </div>
             ))}
           </div>
-        ) : !isUnassigned && (
-          <p className="text-xs text-muted-foreground italic mt-2">No trucks or drivers assigned</p>
         )}
       </div>
       {/* Outlets */}
@@ -381,6 +392,7 @@ function ZoneColumn({
                 assignedTruck={assignedTruck}
                 onDeliveryUpdate={onDeliveryUpdate}
                 onOverride={onOverride}
+                onOverrideItem={onOverrideItem}
               />
             );
           })
@@ -406,6 +418,7 @@ export default function DailyDispatchPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [deliveryDialog, setDeliveryDialog] = useState<DispatchItem | null>(null);
   const [overrideDialog, setOverrideDialog] = useState<OutletGroup | null>(null);
+  const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
   const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
 
   // Queries
@@ -417,6 +430,11 @@ export default function DailyDispatchPage() {
   const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
     enabled: !!boardSheetId,
+  });
+
+  const { data: reportData, isLoading: reportLoading } = useQuery<{ items: any[]; routeMap: Record<string, string> }>({
+    queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`],
+    enabled: !!boardSheetId && activeTab === "report",
   });
 
   // Upload mutation
@@ -471,6 +489,16 @@ export default function DailyDispatchPage() {
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
+  const itemOverrideMutation = useMutation({
+    mutationFn: (data: { itemId: string, overrideRouteId: string }) => apiRequest("PUT", `/api/dispatch/items/${data.itemId}/override`, { overrideRouteId: data.overrideRouteId }),
+    onSuccess: () => {
+      toast({ title: "Item moved successfully!" });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setItemOverrideDialog(null);
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
   const removeOverrideMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/overrides/${id}`),
     onSuccess: () => {
@@ -495,19 +523,101 @@ export default function DailyDispatchPage() {
   });
 
   // File handling
-  const handleFile = (file: File) => {
-    if (!file.name.endsWith(".csv")) {
-      toast({ title: "Please upload a CSV file", variant: "destructive" });
+  const handleFile = async (file: File) => {
+    const isCsv = file.name.endsWith(".csv");
+    const isExcel = file.name.endsWith(".xls") || file.name.endsWith(".xlsx");
+
+    if (!isCsv && !isExcel) {
+      toast({ title: "Please upload a CSV or Excel file", variant: "destructive" });
       return;
     }
     setCsvFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = e => {
-      const text = e.target?.result as string;
-      const parsed = parseCSV(text);
+
+    try {
+      let parsed: Record<string, string>[] = [];
+      if (isCsv) {
+        const text = await file.text();
+        parsed = parseCSV(text);
+      } else {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (rawJson.length > 0) {
+          const rawHeaders = Object.keys(rawJson[0]);
+          const normalize = (h: string) => {
+            const lower = h.toLowerCase().replace(/\s+/g, "_");
+            if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
+            if (lower.includes("item") && lower.includes("code")) return "item_code";
+            if (lower.includes("desc")) return "description";
+            if (lower.includes("qty") && !lower.includes("fus")) return "weight";
+            if (lower === "remaining") return "remaining";
+            if (lower.includes("remark")) return "remark";
+            if (lower.includes("grn")) return "grn_number";
+            if (lower.includes("requested") && lower.includes("delivery") && lower.includes("date")) return "requested_delivery_date";
+            return lower;
+          };
+          const headerMap = new Map();
+          rawHeaders.forEach(h => headerMap.set(h, normalize(h)));
+
+          parsed = rawJson.map(row => {
+            const newRow: Record<string, string> = {};
+            Object.entries(row).forEach(([key, val]) => {
+              newRow[headerMap.get(key)] = String(val);
+            });
+            return newRow;
+          });
+        }
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const hasPastDate = parsed.some(row => {
+        if (!row.requested_delivery_date) return false;
+        
+        let dateStr = row.requested_delivery_date;
+        let dateObj: Date | null = null;
+        
+        if (!isNaN(Number(dateStr)) && Number(dateStr) > 10000) {
+          dateObj = new Date(Math.round((Number(dateStr) - 25569) * 86400 * 1000));
+        } else {
+          const parts = dateStr.split(/[-/]/);
+          if (parts.length === 3) {
+            if (parts[2].length === 4) {
+              dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+              if (isNaN(dateObj.getTime())) dateObj = new Date(dateStr);
+            } else if (parts[0].length === 4) {
+              dateObj = new Date(dateStr);
+            }
+          }
+          if (!dateObj) dateObj = new Date(dateStr);
+        }
+
+        if (dateObj && !isNaN(dateObj.getTime())) {
+          dateObj.setHours(0, 0, 0, 0);
+          return dateObj < today;
+        }
+        return false;
+      });
+
+      if (hasPastDate) {
+        toast({ 
+          title: "Invalid Delivery Date", 
+          description: "One or more items have a requested delivery date prior to today.", 
+          variant: "destructive" 
+        });
+        setCsvPreview(null);
+        setCsvFileName("");
+        return;
+      }
+
       setCsvPreview(parsed);
-    };
-    reader.readAsText(file);
+    } catch (e) {
+      toast({ title: "Failed to parse file", variant: "destructive" });
+    }
   };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -530,10 +640,46 @@ export default function DailyDispatchPage() {
 
   const isSupervisor = true; // TODO: link to user role
 
+  const handleExportCSV = () => {
+    if (!reportData) return;
+    let csv = "ITEM_NUMBER,DESCRIPTION,UOM,FROM_ORG,STORAGE_TYPE,QTY\n";
+    
+    const itemGroups: Record<string, any> = {};
+    reportData.items.forEach(item => {
+      const key = item.itemCode;
+      if (!itemGroups[key]) {
+        itemGroups[key] = {
+          itemCode: item.itemCode,
+          description: item.description,
+          uom: item.uom,
+          fromOrg: item.fromOrg,
+          storageType: item.storageType,
+          totalQty: 0
+        };
+      }
+      itemGroups[key].totalQty += Number(item.requestedQty || 0);
+    });
+
+    const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+    
+    sortedItems.forEach(item => {
+      csv += `"${item.itemCode || ''}","${item.description || ''}","${item.uom || ''}","${item.fromOrg || ''}","${item.storageType || ''}","${item.totalQty}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Dispatch_Items_Report_${selectedDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 57px)" }}>
+    <div className="flex flex-col h-[calc(100vh-57px)] print:h-auto print:block">
       {/* Header */}
-      <div className="px-6 py-5 border-b bg-gradient-to-r from-primary/5 via-background to-background">
+      <div className="px-6 py-5 border-b bg-gradient-to-r from-primary/5 via-background to-background print:hidden">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
             <Truck className="h-5 w-5 text-primary" />
@@ -545,8 +691,8 @@ export default function DailyDispatchPage() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
-        <div className="px-6 pt-4 border-b bg-background">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 print:block">
+        <div className="px-6 pt-4 border-b bg-background print:hidden">
         <TabsList className="gap-1 flex-wrap">
             <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
             <TabsTrigger value="trucks" className="gap-2"><Truck className="h-4 w-4" />Truck Planning</TabsTrigger>
@@ -554,6 +700,7 @@ export default function DailyDispatchPage() {
             <TabsTrigger value="upload" className="gap-2"><Upload className="h-4 w-4" />Upload Sheet</TabsTrigger>
             <TabsTrigger value="drivers" className="gap-2"><User className="h-4 w-4" />Driver Zones</TabsTrigger>
             <TabsTrigger value="transfers" className="gap-2"><ArrowRight className="h-4 w-4" />Transfers</TabsTrigger>
+            <TabsTrigger value="report" className="gap-2"><FileText className="h-4 w-4" />Summary Report</TabsTrigger>
           </TabsList>
         </div>
 
@@ -619,6 +766,7 @@ export default function DailyDispatchPage() {
                       zones={zones} isSupervisor={isSupervisor}
                       onDeliveryUpdate={item => setDeliveryDialog(item)}
                       onOverride={outlet => setOverrideDialog(outlet)}
+                      onOverrideItem={item => setItemOverrideDialog(item)}
                     />
                   ))}
                 {boardData.zones.every(z => z.outlets.length === 0) && (
@@ -630,6 +778,117 @@ export default function DailyDispatchPage() {
             </div>
           )}
         </TabsContent>
+
+        {/* ===== REPORT TAB ===== */}
+        <TabsContent value="report" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
+          <div className="px-6 py-3 border-b flex items-center gap-4 flex-wrap bg-background print:hidden">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                className="w-40 h-8 text-sm" />
+            </div>
+            {sheetForDate ? (
+              <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
+                onClick={() => setBoardSheetId(sheetForDate.id)}>
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                {boardSheetId === sheetForDate.id ? "Viewing Report" : "Load Report"}
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="h-4 w-4" />
+                No sheet for this date.
+              </div>
+            )}
+            
+            {boardSheetId && reportData && (
+              <div className="ml-auto flex items-center gap-2 print:hidden">
+                <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
+                  <Printer className="h-4 w-4" /> Print
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleExportCSV} className="gap-2">
+                  <Download className="h-4 w-4" /> Export CSV
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {!boardSheetId ? (
+             <div className="flex-1 flex items-center justify-center min-h-0">
+               <div className="text-center space-y-3">
+                 <p className="text-lg font-semibold">Select a Date to Load the Report</p>
+               </div>
+             </div>
+          ) : reportLoading ? (
+            <div className="flex-1 flex items-center justify-center min-h-0">
+               <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+            </div>
+          ) : !reportData ? (
+             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load report.</div>
+          ) : (
+             <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
+                 {(() => {
+                   const itemGroups: Record<string, any> = {};
+                   let grandTotal = 0;
+
+                   reportData.items.forEach(item => {
+                     const key = item.itemCode;
+                     if (!itemGroups[key]) {
+                       itemGroups[key] = {
+                         itemCode: item.itemCode,
+                         description: item.description,
+                         uom: item.uom,
+                         fromOrg: item.fromOrg,
+                         storageType: item.storageType,
+                         totalQty: 0
+                       };
+                     }
+                     const qty = Number(item.requestedQty || 0);
+                     itemGroups[key].totalQty += qty;
+                     grandTotal += qty;
+                   });
+
+                   const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+
+                   return (
+                     <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
+                       <table className="w-full text-left border-collapse">
+                         <thead className="bg-slate-100/80 border-b">
+                           <tr>
+                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">ITEM_NUMBER</th>
+                             <th className="py-2 px-3 font-semibold text-slate-700 border-r">DESCRIPTION</th>
+                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20">UOM</th>
+                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-24">FROM_ORG</th>
+                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">STORAGE_TYPE</th>
+                             <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">QTY</th>
+                           </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-100">
+                           {sortedItems.map((item, idx) => (
+                             <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
+                               <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
+                               <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
+                               <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
+                               <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
+                               <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
+                               <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
+                             </tr>
+                           ))}
+                         </tbody>
+                         <tfoot className="bg-slate-100/80 border-t">
+                           <tr>
+                             <td colSpan={5} className="py-2 px-3 font-bold text-right border-r text-slate-900">Grand Total</td>
+                             <td className="py-2 px-3 font-bold text-right text-slate-900">{grandTotal}</td>
+                           </tr>
+                         </tfoot>
+                       </table>
+                     </div>
+                   );
+                 })()}
+               </div>
+             </div>
+          )}
+        </TabsContent>
+
 
         {/* ===== TRUCK PLANNING TAB ===== */}
         <TabsContent value="trucks" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
@@ -717,12 +976,12 @@ export default function DailyDispatchPage() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
-                  <p className="font-medium text-sm">Drop CSV here or click to browse</p>
-                  <p className="text-xs text-muted-foreground mt-1">Only .csv files accepted</p>
+                  <p className="font-medium text-sm">Drop CSV/Excel here or click to browse</p>
+                  <p className="text-xs text-muted-foreground mt-1">Accepts .csv, .xls, .xlsx</p>
                   {csvFileName && <p className="text-xs text-primary mt-2 font-medium">{csvFileName}</p>}
                 </div>
-                <input ref={fileInputRef} type="file" accept=".csv" className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+                <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
 
                 {/* Preview */}
                 {csvPreview && csvPreview.length > 0 && (
@@ -878,14 +1137,25 @@ export default function DailyDispatchPage() {
 
       {/* Override Dialog */}
       {overrideDialog && overrideDialog.outletId && (
-        <ZoneOverrideDialog
-          outletCode={overrideDialog.outletCode}
-          outletId={overrideDialog.outletId!}
-          sheetId={boardSheetId!}
+        <MoveOverrideDialog
+          title="Move Outlet"
+          targetName={overrideDialog.outletCode}
           zones={zones}
           onClose={() => setOverrideDialog(null)}
           onSave={(zoneId, reason) => overrideMutation.mutate({
             sheetId: boardSheetId, outletId: overrideDialog.outletId, overrideZoneId: zoneId, reason,
+          })}
+        />
+      )}
+
+      {itemOverrideDialog && (
+        <MoveOverrideDialog
+          title="Move Item"
+          targetName={itemOverrideDialog.itemCode}
+          zones={zones}
+          onClose={() => setItemOverrideDialog(null)}
+          onSave={(zoneId) => itemOverrideMutation.mutate({
+            itemId: itemOverrideDialog.id, overrideRouteId: zoneId
           })}
         />
       )}

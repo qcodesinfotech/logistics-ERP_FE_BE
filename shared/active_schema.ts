@@ -71,7 +71,8 @@ import {
   contractMonthlyUsage,
   contractInvoices,
   orderExpenses,
-  invoicePayments
+  invoicePayments,
+  routes
 } from "./schema";
 
 export {
@@ -147,5 +148,6 @@ export {
   contractMonthlyUsage,
   contractInvoices,
   orderExpenses,
-  invoicePayments
+  invoicePayments,
+  routes
 };

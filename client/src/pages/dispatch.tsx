@@ -38,6 +38,8 @@ interface MinimalEmployee {
 export default function DispatchPage() {
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isPODDialogOpen, setIsPODDialogOpen] = useState(false);
+  const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
+  const [selectedOutletIdForHistory, setSelectedOutletIdForHistory] = useState("");
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   
   // Selection states for new trip creation
@@ -76,8 +78,17 @@ export default function DispatchPage() {
     queryKey: ["/api/clients"],
   });
 
+  const { data: outletsList } = useQuery<any[]>({
+    queryKey: ["/api/outlets"],
+  });
+
   const { data: locationsList } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
+  });
+
+  const { data: outletHistory, isLoading: isLoadingHistory } = useQuery<any[]>({
+    queryKey: [`/api/outlets/${selectedOutletIdForHistory}/attachments`],
+    enabled: !!selectedOutletIdForHistory && isHistoryDialogOpen,
   });
 
   // Filter orders that are not assigned to active trips
@@ -205,6 +216,9 @@ export default function DispatchPage() {
         title="Dispatch Console" 
         description="Monitor physical assets, assign available trucks/drivers, and log Proof-of-Delivery status."
       >
+        <Button variant="outline" onClick={() => setIsHistoryDialogOpen(true)} className="gap-2 mr-2">
+          <Eye className="h-4 w-4" /> Outlet History
+        </Button>
         <Button 
           disabled={selectedOrderIds.length === 0} 
           onClick={() => {
@@ -570,6 +584,77 @@ export default function DispatchPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Outlet History Dialog */}
+      <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Outlet Delivery History</DialogTitle>
+            <DialogDescription>
+              View chronological delivery records, photos, and partial delivery notes for an outlet.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2 flex-1 overflow-y-auto pr-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Select Outlet</label>
+              <Select onValueChange={setSelectedOutletIdForHistory} value={selectedOutletIdForHistory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose an outlet..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {outletsList?.map((o: any) => (
+                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {selectedOutletIdForHistory && (
+              <div className="mt-4 border rounded-md">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Order / Trip</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Notes</TableHead>
+                      <TableHead>Attachment</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoadingHistory ? (
+                      <TableRow><TableCell colSpan={5} className="text-center py-4">Loading...</TableCell></TableRow>
+                    ) : !outletHistory || outletHistory.length === 0 ? (
+                      <TableRow><TableCell colSpan={5} className="text-center py-4">No delivery attachments found.</TableCell></TableRow>
+                    ) : (
+                      outletHistory.map((h, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="text-xs whitespace-nowrap">{new Date(h.createdAt).toLocaleDateString()}</TableCell>
+                          <TableCell className="text-xs">
+                            <div className="font-semibold">{h.orderNumber}</div>
+                            <div className="text-muted-foreground">{h.tripNumber}</div>
+                          </TableCell>
+                          <TableCell><StatusBadge status={h.status} /></TableCell>
+                          <TableCell className="text-xs max-w-[200px] truncate" title={h.issueLog || ""}>{h.issueLog || "-"}</TableCell>
+                          <TableCell>
+                            {h.podUrl && (
+                              <a href={h.podUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-xs flex items-center gap-1">
+                                <FileUp className="h-3 w-3" /> View
+                              </a>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="pt-4 border-t mt-auto">
+            <Button type="button" onClick={() => setIsHistoryDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
