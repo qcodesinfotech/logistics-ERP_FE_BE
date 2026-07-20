@@ -2131,6 +2131,7 @@ export const dispatchOutletZoneOverrides = pgTable("dispatch_outlet_zone_overrid
   sheetId: varchar("sheet_id").notNull(),
   outletId: varchar("outlet_id").notNull(),
   overrideZoneId: varchar("override_zone_id").notNull(),
+  overrideTruckId: varchar("override_truck_id"),
   reason: text("reason"),
   createdBy: varchar("created_by"),
   createdAt: timestamp("created_at").defaultNow(),

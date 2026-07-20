@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -26,8 +26,8 @@ import {
 } from "@/components/ui/table";
 import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package,
-  ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, Clock,
-  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download,
+  ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
+  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2,
 } from "lucide-react";
 
 // ===== Types =====
@@ -176,10 +176,15 @@ function DeliveryDialog({
 
 // ===== Zone Override Dialog =====
 function MoveOverrideDialog({
-  title, targetName, zones, onClose, onSave,
-}: { title: string; targetName: string; zones: Zone[]; onClose: () => void; onSave: (zoneId: string, reason: string) => void }) {
+  title, targetName, zones, boardZones, onClose, onSave,
+}: { title: string; targetName: string; zones: Zone[]; boardZones?: ZoneGroup[]; onClose: () => void; onSave: (zoneId: string, truckId: string | null, reason: string) => void }) {
   const [zoneId, setZoneId] = useState("");
+  const [truckId, setTruckId] = useState("");
   const [reason, setReason] = useState("");
+
+  const selectedZoneData = boardZones?.find(z => z.zoneId === zoneId);
+  const availableTrucks = selectedZoneData?.trucks || [];
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
@@ -193,13 +198,27 @@ function MoveOverrideDialog({
           <p className="text-sm text-muted-foreground">Temporarily reassign this to a different zone for this dispatch sheet.</p>
           <div className="space-y-2">
             <Label>Target Zone</Label>
-            <Select value={zoneId} onValueChange={setZoneId}>
+            <Select value={zoneId} onValueChange={(v) => { setZoneId(v); setTruckId(""); }}>
               <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
               <SelectContent>
                 {zones.map(z => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
+          {zoneId && availableTrucks.length > 0 && (
+            <div className="space-y-2">
+              <Label>Target Truck (optional)</Label>
+              <Select value={truckId || "any"} onValueChange={(v) => setTruckId(v === "any" ? "" : v)}>
+                <SelectTrigger><SelectValue placeholder="Any Truck" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any Truck</SelectItem>
+                  {availableTrucks.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.vehicle?.plateNumber || t.vehicle?.name || "Truck"}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Reason (optional)</Label>
             <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Truck at max capacity" />
@@ -207,7 +226,7 @@ function MoveOverrideDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={!zoneId} onClick={() => onSave(zoneId, reason)} className="bg-amber-500 hover:bg-amber-600 text-white">Confirm Move</Button>
+          <Button disabled={!zoneId} onClick={() => onSave(zoneId, truckId || null, reason)} className="bg-amber-500 hover:bg-amber-600 text-white">Confirm Move</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -238,17 +257,19 @@ function OutletCard({
             <MapPin className={`h-4 w-4 ${allDone ? "text-emerald-600" : "text-primary"}`} />
           </div>
           <div className="min-w-0">
-            <p className="font-semibold text-sm truncate">{outlet.outletName}</p>
+            <p className="font-semibold text-sm truncate flex items-center gap-2">
+              {outlet.outletName}
+              {assignedTruck && (
+                <span className="text-[10px] font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded-md flex items-center gap-1 border border-primary/20 shadow-sm">
+                  <Truck className="h-3 w-3" />
+                  {assignedTruck.vehicle?.plateNumber || assignedTruck.vehicle?.name || "Truck"}
+                </span>
+              )}
+            </p>
             <p className="text-xs text-muted-foreground">{outlet.outletCode}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {assignedTruck && (
-            <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 text-[10px] h-6 px-1.5 gap-1 shadow-sm" title={`Assigned to truck: ${assignedTruck.vehicle?.name}`}>
-              <Truck className="h-3 w-3" />
-              <span className="max-w-[60px] truncate">{assignedTruck.vehicle?.name || "Truck"}</span>
-            </Badge>
-          )}
           {outlet.isOverridden && (
             <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-xs">Override</Badge>
           )}
@@ -423,7 +444,7 @@ export default function DailyDispatchPage() {
 
   // Queries
   const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
-  const { data: zones = [] } = useQuery<Zone[]>({ queryKey: ["/api/zones"] });
+  const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
   const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
 
@@ -434,7 +455,7 @@ export default function DailyDispatchPage() {
 
   const { data: reportData, isLoading: reportLoading } = useQuery<{ items: any[]; routeMap: Record<string, string> }>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`],
-    enabled: !!boardSheetId && activeTab === "report",
+    enabled: !!boardSheetId && activeTab === "item-summary",
   });
 
   // Upload mutation
@@ -700,7 +721,8 @@ export default function DailyDispatchPage() {
             <TabsTrigger value="upload" className="gap-2"><Upload className="h-4 w-4" />Upload Sheet</TabsTrigger>
             <TabsTrigger value="drivers" className="gap-2"><User className="h-4 w-4" />Driver Zones</TabsTrigger>
             <TabsTrigger value="transfers" className="gap-2"><ArrowRight className="h-4 w-4" />Transfers</TabsTrigger>
-            <TabsTrigger value="report" className="gap-2"><FileText className="h-4 w-4" />Summary Report</TabsTrigger>
+            <TabsTrigger value="summary" className="gap-2"><FileText className="h-4 w-4" />Summary</TabsTrigger>
+            <TabsTrigger value="item-summary" className="gap-2"><FileText className="h-4 w-4" />Item Summary</TabsTrigger>
           </TabsList>
         </div>
 
@@ -779,8 +801,56 @@ export default function DailyDispatchPage() {
           )}
         </TabsContent>
 
-        {/* ===== REPORT TAB ===== */}
-        <TabsContent value="report" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
+
+        {/* ===== SUMMARY TAB ===== */}
+        <TabsContent value="summary" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
+          <div className="px-6 py-3 border-b flex items-center gap-4 flex-wrap bg-background print:hidden">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                className="w-40 h-8 text-sm" />
+            </div>
+            {sheetForDate ? (
+              <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
+                onClick={() => setBoardSheetId(sheetForDate.id)}>
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                {boardSheetId === sheetForDate.id ? "Viewing Summary" : "Load Summary"}
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="h-4 w-4" />
+                No sheet for this date.
+              </div>
+            )}
+            
+            {boardSheetId && boardData && (
+              <div className="ml-auto flex items-center gap-2 print:hidden">
+                <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
+                  <Printer className="h-4 w-4" /> Print
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {!boardSheetId ? (
+             <div className="flex-1 flex items-center justify-center min-h-0">
+               <div className="text-center space-y-3">
+                 <p className="text-lg font-semibold">Select a Date to Load the Summary</p>
+               </div>
+             </div>
+          ) : boardLoading ? (
+            <div className="flex-1 flex items-center justify-center min-h-0">
+               <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+            </div>
+          ) : !boardData ? (
+             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load summary.</div>
+          ) : (
+             <PivotSummaryTab boardData={boardData} />
+          )}
+        </TabsContent>
+
+        {/* ===== ITEM SUMMARY TAB ===== */}
+        <TabsContent value="item-summary" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
           <div className="px-6 py-3 border-b flex items-center gap-4 flex-wrap bg-background print:hidden">
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -885,7 +955,6 @@ export default function DailyDispatchPage() {
                    );
                  })()}
                </div>
-             </div>
           )}
         </TabsContent>
 
@@ -1141,9 +1210,10 @@ export default function DailyDispatchPage() {
           title="Move Outlet"
           targetName={overrideDialog.outletCode}
           zones={zones}
+          boardZones={boardData?.zones || []}
           onClose={() => setOverrideDialog(null)}
-          onSave={(zoneId, reason) => overrideMutation.mutate({
-            sheetId: boardSheetId, outletId: overrideDialog.outletId, overrideZoneId: zoneId, reason,
+          onSave={(zoneId, truckId, reason) => overrideMutation.mutate({
+            sheetId: boardSheetId, outletId: overrideDialog.outletId, overrideZoneId: zoneId, overrideTruckId: truckId, reason,
           })}
         />
       )}
@@ -1153,12 +1223,97 @@ export default function DailyDispatchPage() {
           title="Move Item"
           targetName={itemOverrideDialog.itemCode}
           zones={zones}
+          boardZones={boardData?.zones || []}
           onClose={() => setItemOverrideDialog(null)}
-          onSave={(zoneId) => itemOverrideMutation.mutate({
-            itemId: itemOverrideDialog.id, overrideRouteId: zoneId
+          onSave={(zoneId, truckId) => itemOverrideMutation.mutate({
+            itemId: itemOverrideDialog.id, overrideRouteId: zoneId // Item level override Truck might need its own API field if needed, but not requested here
           })}
         />
       )}
+    </div>
+  );
+}
+
+// ===== PIVOT SUMMARY TAB =====
+function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
+  const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
+  const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
+
+  const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
+  const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
+
+  return (
+    <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
+      <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-slate-100/80 border-b">
+            <tr>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r">ROUTE</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r">TO_SUB_DESC</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r">ITEM_NUMBER</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r">DESCRIPTION</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20">UOM</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {boardData.zones.map(zone => {
+              if (zone.outlets.length === 0) return null;
+              const routeTotal = zone.outlets.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number((i as any).requestedQty || i.weight || 0), 0), 0);
+              const isRouteExpanded = expandedRoutes[zone.zoneId] !== false; // Default true
+
+              return (
+                <React.Fragment key={zone.zoneId}>
+                  <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneId)}>
+                    <td className="py-1.5 px-3 border-r flex items-center gap-1.5">
+                      {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                      {zone.zoneName}
+                    </td>
+                    <td className="py-1.5 px-3 border-r"></td>
+                    <td className="py-1.5 px-3 border-r"></td>
+                    <td className="py-1.5 px-3 border-r"></td>
+                    <td className="py-1.5 px-3 border-r"></td>
+                    <td className="py-1.5 px-3 text-right">{routeTotal}</td>
+                  </tr>
+                  
+                  {isRouteExpanded && zone.outlets.map(outlet => {
+                    const outletTotal = outlet.items.reduce((s, i) => s + Number((i as any).requestedQty || i.weight || 0), 0);
+                    const outletId = `${zone.zoneId}-${outlet.outletCode}`;
+                    const isOutletExpanded = !!expandedOutlets[outletId]; // Default false
+
+                    return (
+                      <React.Fragment key={outletId}>
+                        <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
+                          <td className="py-1.5 px-3 border-r"></td>
+                          <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6">
+                            {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                            {outlet.outletName}
+                          </td>
+                          <td className="py-1.5 px-3 border-r"></td>
+                          <td className="py-1.5 px-3 border-r"></td>
+                          <td className="py-1.5 px-3 border-r"></td>
+                          <td className="py-1.5 px-3 text-right font-semibold">{outletTotal}</td>
+                        </tr>
+
+                        {isOutletExpanded && outlet.items.map(item => (
+                          <tr key={item.id} className="hover:bg-slate-50 text-slate-600 bg-white">
+                            <td className="py-1.5 px-3 border-r"></td>
+                            <td className="py-1.5 px-3 border-r"></td>
+                            <td className="py-1.5 px-3 border-r pl-6 font-medium text-xs">{item.itemCode}</td>
+                            <td className="py-1.5 px-3 border-r text-xs">{item.description}</td>
+                            <td className="py-1.5 px-3 border-r text-center text-xs">{(item as any).uom || '-'}</td>
+                            <td className="py-1.5 px-3 text-right font-medium">{Number((item as any).requestedQty || item.weight || 0)}</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1168,6 +1323,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "" });
+  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string } | null>(null);
 
   const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
 
@@ -1201,6 +1357,17 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Truck removed" });
     },
+  });
+
+  const updateTruckAssignmentMutation = useMutation({
+    mutationFn: (data: { id: string; truckId: string; driverId: string | null }) =>
+      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      toast({ title: "Assignment updated successfully!" });
+      setEditAssignment(null);
+    },
+    onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
 
   const assignOutletMutation = useMutation({
@@ -1267,6 +1434,9 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   // Trucks already assigned to the selected zone (to filter out from add form)
   const trucksInSelectedZone = truckAssignments.filter((ta: any) => ta.zoneId === truckForm.zoneId).map((ta: any) => ta.truckId);
 
+  // Drivers already assigned in this sheet
+  const assignedDriversInSheet = new Set(truckAssignments.map((ta: any) => ta.driverId).filter(Boolean));
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {!boardSheetId ? (
@@ -1325,9 +1495,14 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   <Select value={truckForm.driverId} onValueChange={v => setTruckForm(f => ({ ...f, driverId: v }))}>
                     <SelectTrigger><SelectValue placeholder="Select driver..." /></SelectTrigger>
                     <SelectContent>
-                      {drivers.filter((d: any) => d.status === "active").map((d: any) => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                      ))}
+                      {drivers.filter((d: any) => d.status === "active").map((d: any) => {
+                        const isAssigned = assignedDriversInSheet.has(d.id);
+                        return (
+                          <SelectItem key={d.id} value={d.id} disabled={isAssigned}>
+                            {d.name} {isAssigned ? "(Assigned)" : ""}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1395,10 +1570,16 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                   <Truck className="h-3 w-3 text-primary" />
                                   <span className="truncate max-w-[80px]" title={veh?.plateNumber}>{veh?.plateNumber || "Truck"}</span>
                                 </div>
-                                <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
-                                  onClick={() => removeTruckMutation.mutate(ta.id)}>
-                                  <X className="h-3 w-3" />
-                                </Button>
+                                <div className="flex items-center">
+                                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
+                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "" })}>
+                                    <Edit2 className="h-3 w-3" />
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
+                                    onClick={() => removeTruckMutation.mutate(ta.id)}>
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
                               </div>
                               {cap > 0 && (
                                 <>
@@ -1482,7 +1663,6 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     </div>
                                   ) : (
                                     <Select
-                                      value=""
                                       onValueChange={(truckAssignId) => {
                                         if (!truckAssignId) return;
                                         const truck = zoneTrucks.find((t: any) => t.id === truckAssignId);
@@ -1543,6 +1723,71 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
           )}
         </>
       )}
+
+      {/* ─── Edit Truck Assignment Dialog ─── */}
+      <Dialog open={editAssignment?.open} onOpenChange={(open) => !open && setEditAssignment(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Truck & Driver Assignment</DialogTitle>
+            <DialogDescription>
+              Temporarily override the truck or driver for this dispatch. This change only affects the current sheet.
+            </DialogDescription>
+          </DialogHeader>
+          {editAssignment && (
+            <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label>Vehicle / Truck</Label>
+                <Select
+                  value={editAssignment.truckId}
+                  onValueChange={(val) => setEditAssignment((prev) => prev ? { ...prev, truckId: val } : null)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select vehicle" /></SelectTrigger>
+                  <SelectContent>
+                    {vehiclesList.map((v: any) => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.plateNumber} — {v.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Driver</Label>
+                <Select
+                  value={editAssignment.driverId || "unassigned"}
+                  onValueChange={(val) => setEditAssignment((prev) => prev ? { ...prev, driverId: val === "unassigned" ? "" : val } : null)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select driver" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
+                    {drivers.map((d: any) => {
+                      const isAssignedToOther = assignedDriversInSheet.has(d.id) && editAssignment.driverId !== d.id;
+                      return (
+                        <SelectItem key={d.id} value={d.id} disabled={isAssignedToOther}>
+                          {d.name} {isAssignedToOther ? "(Assigned)" : ""}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditAssignment(null)}>Cancel</Button>
+                <Button 
+                  onClick={() => updateTruckAssignmentMutation.mutate({ 
+                    id: editAssignment.id, 
+                    truckId: editAssignment.truckId, 
+                    driverId: editAssignment.driverId || null 
+                  })}
+                  disabled={updateTruckAssignmentMutation.isPending}
+                >
+                  {updateTruckAssignmentMutation.isPending ? "Saving..." : "Save Changes"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

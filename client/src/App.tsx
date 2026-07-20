@@ -51,6 +51,7 @@ import InvoicesPage from "@/pages/invoices";
 import DispatchPage from "@/pages/dispatch";
 import DailyDispatchPage from "@/pages/daily-dispatch";
 import DriverHubPage from "@/pages/driver-hub";
+import DriverAllocationPage from "@/pages/driver-allocation";
 import FinanceExpandedPage from "@/pages/finance-expanded";
 import SettingsPage from "@/pages/settings";
 import ContractInvoicesPage from "@/pages/contract-invoices";
@@ -85,6 +86,7 @@ function PrivateRouter() {
       <Route path="/logistics/dispatch" component={DispatchPage} />
       <Route path="/logistics/daily-dispatch" component={DailyDispatchPage} />
       <Route path="/logistics/driver-hub" component={DriverHubPage} />
+      <Route path="/logistics/driver-allocation" component={DriverAllocationPage} />
       <Route path="/logistics/finance" component={FinanceExpandedPage} />
       <Route path="/logistics/contract-invoices" component={ContractInvoicesPage} />
       <Route path="/settings" component={SettingsPage} />

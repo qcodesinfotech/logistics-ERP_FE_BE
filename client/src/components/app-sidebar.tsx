@@ -84,6 +84,7 @@ const menuGroups: MenuGroup[] = [
       // { title: "Dispatch Board", url: "/logistics/dispatch", icon: BarChart3 },
       { title: "Daily Dispatch", url: "/logistics/daily-dispatch", icon: Truck },
       // { title: "Delivery Receipts", url: "/logistics/deliveries", icon: FileCheck },
+      { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },
       { title: "Trucking Invoices", url: "/logistics/invoices", icon: Receipt },
       { title: "Contract Invoices", url: "/logistics/contract-invoices", icon: Receipt },
       // { title: "Driver Geo-Hub", url: "/logistics/driver-hub", icon: UserCircle },

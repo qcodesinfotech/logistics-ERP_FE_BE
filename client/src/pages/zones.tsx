@@ -261,7 +261,7 @@ export default function ZonesPage() {
             address: row.address,
             suggestedZoneId: result.zone?.id || "",
             suggestedZoneName: result.zone?.name || "Unallocated / Fallback",
-            allocatedZoneId: result.zone?.id || "",
+            allocatedZoneId: result.zone?.id || "unallocated",
           });
         } catch (e) {
           processed.push({
@@ -269,7 +269,7 @@ export default function ZonesPage() {
             address: row.address,
             suggestedZoneId: "",
             suggestedZoneName: "Unallocated / Fallback",
-            allocatedZoneId: "",
+            allocatedZoneId: "unallocated",
           });
         }
       }
@@ -372,16 +372,46 @@ export default function ZonesPage() {
                     {zonesList.map((zone) => (
                       <TableRow key={zone.id} className="hover:bg-accent/40 transition-colors">
                         <TableCell className="font-semibold text-foreground">
-                          <button 
-                            onClick={() => {
-                              setSelectedZoneIdForOutlets(zone.id);
-                              setOutletSearchQuery("");
-                              setIsAppendOutletsDialogOpen(true);
-                            }}
-                            className="hover:underline text-left text-primary cursor-pointer font-bold"
-                          >
-                            {zone.name}
-                          </button>
+                          <div className="flex flex-col gap-2">
+                            <button 
+                              onClick={() => {
+                                setSelectedZoneIdForOutlets(zone.id);
+                                setOutletSearchQuery("");
+                                setIsAppendOutletsDialogOpen(true);
+                              }}
+                              className="hover:underline text-left text-primary cursor-pointer font-bold text-base"
+                            >
+                              {zone.name}
+                            </button>
+                            {(() => {
+                              const zoneOutletsList = outletsList?.filter(o => o.routeId === zone.id) || [];
+                              const displayedOutlets = zoneOutletsList.slice(0, 5).map(o => o.name).join(", ");
+                              const outletsText = zoneOutletsList.length > 5 ? `${displayedOutlets} and ${zoneOutletsList.length - 5} more` : displayedOutlets || "None assigned";
+                              
+                              const zoneTrucksList = vehiclesList?.filter(v => v.currentZoneId === zone.id) || [];
+                              const displayedTrucks = zoneTrucksList.slice(0, 5).map(v => v.name).join(", ");
+                              const trucksText = zoneTrucksList.length > 5 ? `${displayedTrucks} and ${zoneTrucksList.length - 5} more` : displayedTrucks || "None assigned";
+
+                              return (
+                                <div className="flex flex-col gap-1.5 text-xs font-normal text-muted-foreground mt-1">
+                                  <div className="flex items-start gap-1.5">
+                                    <Truck className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                                    <span className="leading-tight max-w-[250px] truncate" title={zoneTrucksList.map(v => v.name).join(", ")}>
+                                      <span className="font-medium text-foreground/80">Trucks: </span>
+                                      {trucksText}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-start gap-1.5">
+                                    <MapPin className="h-3.5 w-3.5 text-blue-600 mt-0.5 shrink-0" />
+                                    <span className="leading-tight max-w-[250px] truncate" title={zoneOutletsList.map(o => o.name).join(", ")}>
+                                      <span className="font-medium text-foreground/80">Outlets: </span>
+                                      {outletsText}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground max-w-xs truncate">{zone.description || "N/A"}</TableCell>
                         <TableCell>
@@ -656,7 +686,7 @@ export default function ZonesPage() {
                           </TableCell>
                           <TableCell>
                             <Select 
-                              value={row.allocatedZoneId}
+                              value={row.allocatedZoneId || "unallocated"}
                               onValueChange={(val) => {
                                 const updated = [...simulatedData];
                                 updated[index].allocatedZoneId = val;
@@ -670,7 +700,7 @@ export default function ZonesPage() {
                                 {zonesList?.map(z => (
                                   <SelectItem key={z.id} value={z.id} className="text-xs">{z.name}</SelectItem>
                                 ))}
-                                <SelectItem value="" className="text-xs">Unallocated</SelectItem>
+                                <SelectItem value="unallocated" className="text-xs">Unallocated</SelectItem>
                               </SelectContent>
                             </Select>
                           </TableCell>

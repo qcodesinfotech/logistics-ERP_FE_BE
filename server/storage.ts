@@ -2309,10 +2309,15 @@ export class DatabaseStorage implements IStorage {
 
   async getZoneOutlets(zoneId: string): Promise<Outlet[]> {
     const assignments = await db.select().from(outletZones).where(eq(outletZones.zoneId, zoneId));
-    if (assignments.length === 0) return [];
+    const assignedOutletIds = assignments.map(a => a.outletId);
     
-    const outletIds = assignments.map(a => a.outletId);
-    return db.select().from(outlets).where(inArray(outlets.id, outletIds));
+    const primaryOutlets = await db.select().from(outlets).where(eq(outlets.routeId, zoneId));
+    const primaryOutletIds = primaryOutlets.map(o => o.id);
+    
+    const allOutletIds = Array.from(new Set([...assignedOutletIds, ...primaryOutletIds]));
+    
+    if (allOutletIds.length === 0) return [];
+    return db.select().from(outlets).where(inArray(outlets.id, allOutletIds));
   }
 
   async appendOutletsToZone(zoneId: string, outletIds: string[]): Promise<void> {
@@ -2326,6 +2331,9 @@ export class DatabaseStorage implements IStorage {
     if (newOutletIds.length > 0) {
       const values = newOutletIds.map(outletId => ({ outletId, zoneId }));
       await db.insert(outletZones).values(values);
+      
+      // Sync the primary routeId so it appears correctly on the Dispatch Board
+      await db.update(outlets).set({ routeId: zoneId }).where(inArray(outlets.id, newOutletIds));
     }
   }
 
@@ -2336,6 +2344,12 @@ export class DatabaseStorage implements IStorage {
         eq(outletZones.outletId, outletId)
       )
     );
+    
+    // Also clear the primary routeId if it matches this zone
+    const [outlet] = await db.select().from(outlets).where(eq(outlets.id, outletId));
+    if (outlet && outlet.routeId === zoneId) {
+      await db.update(outlets).set({ routeId: null }).where(eq(outlets.id, outletId));
+    }
   }
 
   // ===== DAILY DISPATCH MODULE =====
@@ -2410,12 +2424,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDispatchBoard(sheetId: string): Promise<any> {
+    // Auto-sync any trucks assigned in Zonal Config to this sheet
+    await this.autoAssignZoneTrucksToSheet(sheetId);
+
     // Get all items for sheet
     const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
 
     // Get overrides for sheet
     const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));
-    const overrideMap = new Map(overrides.map(o => [o.outletId, o.overrideZoneId]));
+    const overrideMap = new Map(overrides.map(o => [o.outletId, o]));
 
     // Get all outlets involved
     const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
@@ -2482,7 +2499,7 @@ export class DatabaseStorage implements IStorage {
       if (item.overrideRouteId) {
         effectiveZoneId = item.overrideRouteId;
       } else if (item.outletId && overrideMap.has(item.outletId)) {
-        effectiveZoneId = overrideMap.get(item.outletId)!;
+        effectiveZoneId = overrideMap.get(item.outletId)!.overrideZoneId;
       } else if (item.outletId && outletToZone.has(item.outletId)) {
         effectiveZoneId = outletToZone.get(item.outletId)!;
       } else if (item.routeId) {
@@ -2509,13 +2526,21 @@ export class DatabaseStorage implements IStorage {
       const outletKey = item.outletId || item.outletCode;
       if (!board[effectiveZoneId].outlets[outletKey]) {
         const outlet = item.outletId ? outletMap.get(item.outletId) : null;
+        let tAssignId = outletToTruck.get(item.outletId) || outletToTruck.get(item.outletCode) || null;
+        if (item.outletId && overrideMap.has(item.outletId)) {
+           const ov = overrideMap.get(item.outletId);
+           if (ov?.overrideTruckId) {
+             tAssignId = ov.overrideTruckId;
+           }
+        }
+
         board[effectiveZoneId].outlets[outletKey] = {
           outletId: item.outletId,
           outletCode: item.outletCode,
           outletName: outlet?.name || item.outletCode,
           isOverridden,
-          overrideZoneId: isOverridden ? (item.overrideRouteId || (item.outletId ? overrideMap.get(item.outletId) : null) || null) : null,
-          truckAssignmentId: outletToTruck.get(item.outletId) || outletToTruck.get(item.outletCode) || null,
+          overrideZoneId: isOverridden ? (item.overrideRouteId || (item.outletId ? overrideMap.get(item.outletId)?.overrideZoneId : null) || null) : null,
+          truckAssignmentId: tAssignId,
           items: [],
         };
       }
@@ -2551,7 +2576,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async createDispatchOverride(data: { sheetId: string; outletId: string; overrideZoneId: string; reason?: string; createdBy?: string }): Promise<any> {
+  async createDispatchOverride(data: { sheetId: string; outletId: string; overrideZoneId: string; overrideTruckId?: string; reason?: string; createdBy?: string }): Promise<any> {
     // Remove existing override for same outlet+sheet
     await db.delete(dispatchOutletZoneOverrides)
       .where(and(eq(dispatchOutletZoneOverrides.sheetId, data.sheetId), eq(dispatchOutletZoneOverrides.outletId, data.outletId)));
@@ -6290,35 +6315,46 @@ export class DatabaseStorage implements IStorage {
   async autoAssignZoneTrucksToSheet(sheetId: string): Promise<void> {
     // 1. Get all dispatch items for this sheet
     const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    
+    // 2. Determine all zone IDs involved in this sheet
     const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
-    if (outletIds.length === 0) return;
-
-    // 2. Look up zones for these outlets
-    const assignedZones = await db.select().from(outletZones).where(inArray(outletZones.outletId, outletIds));
-    const zoneIds = Array.from(new Set(assignedZones.map(z => z.zoneId)));
-    if (zoneIds.length === 0) return;
+    const allOutlets = outletIds.length > 0 ? await db.select().from(outlets).where(inArray(outlets.id, outletIds)) : [];
+    
+    const zoneIds = new Set<string>();
+    for (const item of items) {
+      if (item.overrideRouteId) zoneIds.add(item.overrideRouteId);
+    }
+    for (const outlet of allOutlets) {
+      if (outlet.routeId) zoneIds.add(outlet.routeId);
+    }
+    const zoneIdsArray = Array.from(zoneIds);
+    if (zoneIdsArray.length === 0) return;
 
     // 3. Find all available vehicles currently assigned to these zones
     const zoneVehicles = await db.select().from(vehicles)
       .where(
         and(
-          inArray(vehicles.currentZoneId, zoneIds),
+          inArray(vehicles.currentZoneId, zoneIdsArray),
           eq(vehicles.status, "available")
         )
       );
     if (zoneVehicles.length === 0) return;
 
-    // 4. Create dispatchTruckAssignments for these vehicles
-    // First clear any existing ones for safety
-    await db.delete(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
+    // 4. Get existing truck assignments for this sheet
+    const existingAssigns = await db.select().from(dispatchTruckAssignments)
+      .where(eq(dispatchTruckAssignments.sheetId, sheetId));
+    const existingTruckIds = new Set(existingAssigns.map(a => a.truckId));
 
-    const assignmentsToInsert = zoneVehicles.map(v => ({
-      sheetId,
-      truckId: v.id,
-      driverId: v.assignedDriverId || null,
-      zoneId: v.currentZoneId!,
-      usedCapacity: "0"
-    }));
+    // 5. Insert missing vehicles
+    const assignmentsToInsert = zoneVehicles
+      .filter(v => !existingTruckIds.has(v.id))
+      .map(v => ({
+        sheetId,
+        truckId: v.id,
+        driverId: v.assignedDriverId || null,
+        zoneId: v.currentZoneId!,
+        usedCapacity: "0"
+      }));
 
     if (assignmentsToInsert.length > 0) {
       await db.insert(dispatchTruckAssignments).values(assignmentsToInsert);
@@ -6493,7 +6529,8 @@ export class DatabaseStorage implements IStorage {
 
     const totalAmount = baseAmount + otAmount + holidayAmount + extraTruckAmount + emergencyAmount + redeliveryAmount + outsourcedAmount;
 
-    const invoiceNumber = `CINV-${Date.now()}`;
+    // Use a random suffix to prevent unique constraint violations on fast loops
+    const invoiceNumber = `CINV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const [row] = await db.insert(contractInvoices).values({
       invoiceNumber,
@@ -6525,6 +6562,19 @@ export class DatabaseStorage implements IStorage {
     // Find all orders for this customer (and outlet if specified) within the period?
     // Wait, we can just query deliveryAttachments where createdAt is within period
     // and outletId matches (if outletId), or if we need to filter by customer, we join orders.
+    // Parse dates safely to avoid RangeError
+    let startDate: Date;
+    let endDate: Date;
+    try {
+      startDate = new Date(periodStart);
+      endDate = new Date(periodEnd + 'T23:59:59');
+      if (isNaN(startDate.getTime())) startDate = new Date(); // fallback
+      if (isNaN(endDate.getTime())) endDate = new Date(); // fallback
+    } catch (e) {
+      startDate = new Date();
+      endDate = new Date();
+    }
+
     const attachmentsQuery = db.select({
       id: deliveryAttachments.id,
       podUrl: deliveryAttachments.podUrl,
@@ -6538,8 +6588,8 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(orders.customerId, contract.customerId),
         outletId ? eq(deliveryAttachments.outletId, outletId) : undefined,
-        sql`${deliveryAttachments.createdAt} >= ${new Date(periodStart).toISOString()}`,
-        sql`${deliveryAttachments.createdAt} <= ${new Date(periodEnd + 'T23:59:59').toISOString()}`
+        sql`${deliveryAttachments.createdAt} >= ${startDate.toISOString()}`,
+        sql`${deliveryAttachments.createdAt} <= ${endDate.toISOString()}`
       ));
 
     const attachmentsRows = await attachmentsQuery;
@@ -6550,7 +6600,7 @@ export class DatabaseStorage implements IStorage {
         id: a.id,
         podUrl: a.podUrl,
         status: a.status,
-        issueLog: a.issueLog,
+        issueLog: a.issueLog || undefined,
         createdAt: a.createdAt?.toISOString() || new Date().toISOString(),
       }));
       await db.update(contractInvoices)

@@ -7309,8 +7309,8 @@ export async function registerRoutes(
   // Supervisor override: move outlet to different zone for this sheet
   app.post("/api/dispatch/overrides", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { sheetId, outletId, overrideZoneId, reason } = req.body;
-      const result = await storage.createDispatchOverride({ sheetId, outletId, overrideZoneId, reason, createdBy: req.user?.id });
+      const { sheetId, outletId, overrideZoneId, overrideTruckId, reason } = req.body;
+      const result = await storage.createDispatchOverride({ sheetId, outletId, overrideZoneId, overrideTruckId, reason, createdBy: req.user?.id });
       res.status(201).json(result);
     } catch (e) {
       console.error("Create override error:", e);
@@ -7969,6 +7969,7 @@ export async function registerRoutes(
   // ==================== DISPATCH TRUCK PLANNING ROUTES ====================
   app.get("/api/dispatch/sheets/:sheetId/trucks", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      await storage.autoAssignZoneTrucksToSheet(req.params.sheetId);
       const trucks = await storage.getDispatchTruckAssignments(req.params.sheetId);
       const outletAssignments = await storage.getDispatchOutletTruckAssignmentsBySheet(req.params.sheetId);
       res.json({ trucks, outletAssignments });
@@ -7995,6 +7996,17 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Delete truck assignment error:", error);
       res.status(500).json({ error: "Failed to remove truck" });
+    }
+  });
+
+  app.patch("/api/dispatch/truck-assignments/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const truck = await storage.updateDispatchTruckAssignment(req.params.id, req.body);
+      if (!truck) return res.status(404).json({ error: "Assignment not found" });
+      res.json(truck);
+    } catch (error) {
+      console.error("Update truck assignment error:", error);
+      res.status(500).json({ error: "Failed to update truck assignment" });
     }
   });
 
@@ -8237,7 +8249,7 @@ export async function registerRoutes(
       res.status(201).json(generatedInvoices.length === 1 ? generatedInvoices[0] : generatedInvoices);
     } catch (error) {
       console.error("Generate invoice error:", error);
-      res.status(500).json({ error: "Failed to generate invoice" });
+      res.status(500).json({ error: "Failed to generate invoice: " + (error instanceof Error ? error.message : String(error)) });
     }
   });
 
