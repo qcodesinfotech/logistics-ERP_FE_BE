@@ -48,7 +48,7 @@ import {
   type ContractInvoice, type InsertContractInvoice,
   type ContractMonthlyUsage, type InsertContractMonthlyUsage,
 } from "@shared/schema";
-import { db, pool } from "./db";
+import { db, pool, ensureDriverTablesSchema } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, desc, and, sql, asc, or, ne, gt, ilike, count, isNull, inArray, type SQL } from "drizzle-orm";
 import * as schema from "@shared/schema";
@@ -2425,6 +2425,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDispatchBoard(sheetId: string): Promise<any> {
+    await ensureDriverTablesSchema();
     // Auto-sync any trucks assigned in Zonal Config to this sheet
     await this.autoAssignZoneTrucksToSheet(sheetId);
 

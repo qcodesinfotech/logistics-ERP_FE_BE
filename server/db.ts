@@ -74,6 +74,52 @@ export async function ensureDriverTablesSchema() {
         "ip_address" text,
         "created_at" timestamp DEFAULT now()
       );
+
+      ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "current_zone_id" varchar;
+      ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "assigned_brand_id" varchar;
+      ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "assigned_driver_id" varchar;
+
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "to_no" varchar;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "line_number" varchar;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "requested_delivery_date" date;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "storage_type" varchar;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "uom" varchar;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "from_org" varchar;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "requested_qty" numeric(10, 3);
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "weight" numeric(10, 3);
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "total_delivered" numeric(10, 3);
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "remaining" numeric(10, 3);
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "remark" text;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "grn_number" text;
+      ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "override_route_id" varchar;
+
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "damaged_qty" numeric(10, 3);
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "damage_reason" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "temperature" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_time" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "outlet_id" varchar;
+
+      ALTER TABLE "dispatch_outlet_zone_overrides" ADD COLUMN IF NOT EXISTS "override_truck_id" varchar;
+
+      CREATE TABLE IF NOT EXISTS "dispatch_truck_assignments" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "sheet_id" varchar NOT NULL,
+        "truck_id" varchar NOT NULL,
+        "driver_id" varchar,
+        "zone_id" varchar NOT NULL,
+        "used_capacity" numeric(10, 3) DEFAULT '0',
+        "created_at" timestamp DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS "dispatch_outlet_truck_assignments" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "truck_assignment_id" varchar NOT NULL,
+        "outlet_code" text NOT NULL,
+        "outlet_id" varchar,
+        "allocated_weight" numeric(10, 3) DEFAULT '0',
+        "sequence" integer DEFAULT 0,
+        "created_at" timestamp DEFAULT now()
+      );
     `);
     schemaCheckDone = true;
     console.log("[db] Driver tables schema verified and updated successfully");
