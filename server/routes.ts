@@ -7974,28 +7974,31 @@ export async function registerRoutes(
   app.post("/api/drivers/attendance", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { driverId, latitude, longitude, deviceToken } = req.body;
-      if (!driverId) {
+      const effectiveDriverId = driverId || req.user?.employeeId || req.user?.id;
+      if (!effectiveDriverId) {
         return res.status(400).json({ error: "driverId is required" });
       }
+
       const latNum = parseFloat(latitude);
       const lonNum = parseFloat(longitude);
       
       const allLocations = await storage.getLocations();
       let isWithinRange = false;
-      let nearestLoc = null;
+      let nearestLoc: any = null;
       let minDistance = Infinity;
 
-      for (const loc of allLocations) {
-        if (loc.latitude && loc.longitude) {
-          const dist = getDistanceInMeters(
-            latNum, 
-            lonNum, 
-            parseFloat(loc.latitude.toString()), 
-            parseFloat(loc.longitude.toString())
-          );
-          if (dist < minDistance) {
-            minDistance = dist;
-            nearestLoc = loc;
+      if (Array.isArray(allLocations) && !isNaN(latNum) && !isNaN(lonNum)) {
+        for (const loc of allLocations) {
+          if (loc.latitude && loc.longitude) {
+            const locLat = parseFloat(loc.latitude.toString());
+            const locLon = parseFloat(loc.longitude.toString());
+            if (!isNaN(locLat) && !isNaN(locLon)) {
+              const dist = getDistanceInMeters(latNum, lonNum, locLat, locLon);
+              if (dist < minDistance) {
+                minDistance = dist;
+                nearestLoc = loc;
+              }
+            }
           }
         }
       }
@@ -8007,23 +8010,23 @@ export async function registerRoutes(
       const isAuthorizedDevice = !!deviceToken;
 
       const attendance = await storage.createDriverAttendance({
-        driverId,
+        driverId: effectiveDriverId,
         checkInTime: new Date(),
-        latitude: latitude ? latitude.toString() : null,
-        longitude: longitude ? longitude.toString() : null,
+        latitude: !isNaN(latNum) ? latNum.toString() : null,
+        longitude: !isNaN(lonNum) ? lonNum.toString() : null,
         isAuthorizedDevice,
-        status: isWithinRange ? "present" : "absent",
-      });
+        status: "present",
+      } as any);
 
       res.status(201).json({
         attendance,
         geofenceValid: isWithinRange,
-        distanceToNearest: nearestLoc ? `${minDistance.toFixed(1)}m from ${nearestLoc.name}` : "unknown",
+        distanceToNearest: nearestLoc && minDistance !== Infinity ? `${minDistance.toFixed(1)}m from ${nearestLoc.name}` : "outside geofence",
         isAuthorizedDevice
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Driver attendance checkin error:", error);
-      res.status(500).json({ error: "Failed to record attendance" });
+      res.status(500).json({ error: error.message || "Failed to record attendance" });
     }
   });
 
