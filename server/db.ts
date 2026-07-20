@@ -93,11 +93,36 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "grn_number" text;
       ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "override_route_id" varchar;
 
+      CREATE TABLE IF NOT EXISTS "dispatch_deliveries" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "dispatch_item_id" varchar NOT NULL,
+        "driver_id" varchar,
+        "outlet_id" varchar,
+        "delivered_qty" numeric(10, 3),
+        "remaining_qty" numeric(10, 3),
+        "damaged_qty" numeric(10, 3),
+        "damage_reason" text,
+        "remark" text,
+        "pod_url" text,
+        "temperature" text,
+        "status" text DEFAULT 'pending',
+        "delivered_at" timestamp,
+        "delivery_time" text,
+        "created_at" timestamp DEFAULT now()
+      );
+
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "driver_id" varchar;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "outlet_id" varchar;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivered_qty" numeric(10, 3);
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "remaining_qty" numeric(10, 3);
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "damaged_qty" numeric(10, 3);
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "damage_reason" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "remark" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "pod_url" text;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "temperature" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'pending';
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivered_at" timestamp;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_time" text;
-      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "outlet_id" varchar;
 
       ALTER TABLE "dispatch_outlet_zone_overrides" ADD COLUMN IF NOT EXISTS "override_truck_id" varchar;
 
