@@ -2464,16 +2464,27 @@ export class DatabaseStorage implements IStorage {
       zoneToDriverIds.get(dz.zoneId)!.push(dz.driverId);
     }
 
-    // Get all driver names
-    const allDriverIds = Array.from(new Set(allDriverZones.map(dz => dz.driverId)));
-    const allDrivers = allDriverIds.length > 0 ? await db.select().from(users).where(inArray(users.id, allDriverIds)) : [];
-    const driverMap = new Map(allDrivers.map(d => [d.id, d]));
-
     // Get truck assignments for this sheet
     const truckAssigns = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
     const allTruckIds = Array.from(new Set(truckAssigns.map(t => t.truckId)));
     const allTrucks = allTruckIds.length > 0 ? await db.select().from(vehicles).where(inArray(vehicles.id, allTruckIds)) : [];
     const truckMap = new Map(allTrucks.map(t => [t.id, t]));
+
+    // Get all driver names (from both users and employees table)
+    const allDriverIds = Array.from(new Set([
+      ...allDriverZones.map(dz => dz.driverId),
+      ...truckAssigns.map(t => t.driverId).filter(Boolean) as string[]
+    ]));
+    const allUsers = allDriverIds.length > 0 ? await db.select().from(users).where(inArray(users.id, allDriverIds)) : [];
+    const allEmployees = allDriverIds.length > 0 ? await db.select().from(employees).where(inArray(employees.id, allDriverIds)) : [];
+    
+    const driverMap = new Map<string, any>();
+    for (const emp of allEmployees) {
+      driverMap.set(emp.id, { id: emp.id, name: emp.name, username: emp.employeeCode, role: "driver" });
+    }
+    for (const u of allUsers) {
+      driverMap.set(u.id, u);
+    }
 
     // Get outlet-to-truck assignments
     const truckAssignIds = truckAssigns.map(t => t.id);
@@ -6182,8 +6193,67 @@ export class DatabaseStorage implements IStorage {
 
 
   // Logistics Driver Management
-  async getDrivers(): Promise<Driver[]> {
-    return db.select().from(drivers).orderBy(drivers.createdAt);
+  async getDrivers(): Promise<any[]> {
+    const driverMap = new Map<string, any>();
+
+    // 1. Fetch from employees table (HR & Payroll)
+    try {
+      const empList = await db.select().from(employees).where(eq(employees.status, "active"));
+      for (const emp of empList) {
+        driverMap.set(emp.id, {
+          id: emp.id,
+          name: emp.employeeCode ? `${emp.name} (${emp.employeeCode})` : emp.name,
+          employeeCode: emp.employeeCode,
+          packageType: "standard",
+          baseSalary: emp.basicSalary || "0.000",
+          status: emp.status || "active",
+          createdAt: emp.joiningDate ? new Date(emp.joiningDate) : new Date(),
+        });
+      }
+    } catch (e) {
+      console.error("Error fetching employees in getDrivers:", e);
+    }
+
+    // 2. Fetch from users table (Users with role = driver)
+    try {
+      const userList = await db.select().from(users).where(and(eq(users.role, "driver"), eq(users.status, "active")));
+      for (const u of userList) {
+        if (!driverMap.has(u.id)) {
+          driverMap.set(u.id, {
+            id: u.id,
+            name: u.name || u.username,
+            employeeCode: u.username,
+            packageType: "standard",
+            baseSalary: "0.000",
+            status: u.status || "active",
+            createdAt: u.lastLogin || new Date(),
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching users in getDrivers:", e);
+    }
+
+    // 3. Fetch from legacy drivers table
+    try {
+      const legacyDrivers = await db.select().from(drivers);
+      for (const d of legacyDrivers) {
+        if (!driverMap.has(d.id)) {
+          driverMap.set(d.id, {
+            id: d.id,
+            name: d.name,
+            packageType: d.packageType || "standard",
+            baseSalary: d.baseSalary || "0.000",
+            status: d.status || "active",
+            createdAt: d.createdAt || new Date(),
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching legacy drivers in getDrivers:", e);
+    }
+
+    return Array.from(driverMap.values());
   }
 
   async createDriver(data: InsertDriver): Promise<Driver> {
@@ -6324,51 +6394,57 @@ export class DatabaseStorage implements IStorage {
   }
 
   async autoAssignZoneTrucksToSheet(sheetId: string): Promise<void> {
-    // 1. Get all dispatch items for this sheet
-    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
-    
-    // 2. Determine all zone IDs involved in this sheet
-    const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
-    const allOutlets = outletIds.length > 0 ? await db.select().from(outlets).where(inArray(outlets.id, outletIds)) : [];
-    
-    const zoneIds = new Set<string>();
-    for (const item of items) {
-      if (item.overrideRouteId) zoneIds.add(item.overrideRouteId);
-    }
-    for (const outlet of allOutlets) {
-      if (outlet.routeId) zoneIds.add(outlet.routeId);
-    }
-    const zoneIdsArray = Array.from(zoneIds);
-    if (zoneIdsArray.length === 0) return;
+    try {
+      // 1. Get all dispatch items for this sheet
+      const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+      if (items.length === 0) return;
+      
+      // 2. Determine all zone IDs involved in this sheet
+      const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
+      const allOutlets = outletIds.length > 0 ? await db.select().from(outlets).where(inArray(outlets.id, outletIds)) : [];
+      
+      const zoneIds = new Set<string>();
+      for (const item of items) {
+        if (item.overrideRouteId) zoneIds.add(item.overrideRouteId);
+        if (item.routeId) zoneIds.add(item.routeId);
+      }
+      for (const outlet of allOutlets) {
+        if (outlet.routeId) zoneIds.add(outlet.routeId);
+      }
+      const zoneIdsArray = Array.from(zoneIds).filter(Boolean);
+      if (zoneIdsArray.length === 0) return;
 
-    // 3. Find all available vehicles currently assigned to these zones
-    const zoneVehicles = await db.select().from(vehicles)
-      .where(
-        and(
-          inArray(vehicles.currentZoneId, zoneIdsArray),
-          eq(vehicles.status, "available")
-        )
-      );
-    if (zoneVehicles.length === 0) return;
+      // 3. Find all available vehicles currently assigned to these zones
+      const zoneVehicles = await db.select().from(vehicles)
+        .where(
+          and(
+            inArray(vehicles.currentZoneId, zoneIdsArray),
+            eq(vehicles.status, "available")
+          )
+        );
+      if (zoneVehicles.length === 0) return;
 
-    // 4. Get existing truck assignments for this sheet
-    const existingAssigns = await db.select().from(dispatchTruckAssignments)
-      .where(eq(dispatchTruckAssignments.sheetId, sheetId));
-    const existingTruckIds = new Set(existingAssigns.map(a => a.truckId));
+      // 4. Get existing truck assignments for this sheet
+      const existingAssigns = await db.select().from(dispatchTruckAssignments)
+        .where(eq(dispatchTruckAssignments.sheetId, sheetId));
+      const existingTruckIds = new Set(existingAssigns.map(a => a.truckId));
 
-    // 5. Insert missing vehicles
-    const assignmentsToInsert = zoneVehicles
-      .filter(v => !existingTruckIds.has(v.id))
-      .map(v => ({
-        sheetId,
-        truckId: v.id,
-        driverId: v.assignedDriverId || null,
-        zoneId: v.currentZoneId!,
-        usedCapacity: "0"
-      }));
+      // 5. Insert missing vehicles
+      const assignmentsToInsert = zoneVehicles
+        .filter(v => !existingTruckIds.has(v.id) && !!v.currentZoneId)
+        .map(v => ({
+          sheetId,
+          truckId: v.id,
+          driverId: v.assignedDriverId || null,
+          zoneId: v.currentZoneId!,
+          usedCapacity: "0"
+        }));
 
-    if (assignmentsToInsert.length > 0) {
-      await db.insert(dispatchTruckAssignments).values(assignmentsToInsert);
+      if (assignmentsToInsert.length > 0) {
+        await db.insert(dispatchTruckAssignments).values(assignmentsToInsert);
+      }
+    } catch (err) {
+      console.error("autoAssignZoneTrucksToSheet error:", err);
     }
   }
 

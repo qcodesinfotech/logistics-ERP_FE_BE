@@ -7352,9 +7352,9 @@ export async function registerRoutes(
     try {
       const board = await storage.getDispatchBoard(req.params.id);
       res.json(board);
-    } catch (e) {
-      console.error("Get dispatch board error:", e);
-      res.status(500).json({ error: "Failed to fetch dispatch board" });
+    } catch (e: any) {
+      console.error("Get dispatch board error:", e?.stack || e);
+      res.status(500).json({ error: "Failed to fetch dispatch board", details: e?.message || String(e) });
     }
   });
 
