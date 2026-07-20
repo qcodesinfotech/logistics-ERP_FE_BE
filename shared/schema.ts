@@ -1521,7 +1521,6 @@ export type InsertCapital = z.infer<typeof insertCapitalSchema>;
 export type InsertEmployee = z.infer<typeof insertEmployeeSchema>;
 export type InsertSalaryPayment = z.infer<typeof insertSalaryPaymentSchema>;
 export type InsertSalaryAdvance = z.infer<typeof insertSalaryAdvanceSchema>;
-export type InsertClient = z.infer<typeof insertClientSchema>;
 export type InsertProject = z.infer<typeof insertProjectSchema>;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type InsertProjectExpense = z.infer<typeof insertProjectExpenseSchema>;
@@ -1583,7 +1582,6 @@ export type PettyCash = typeof pettyCash.$inferSelect;
 export type Capital = typeof capital.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
 export type SalaryPayment = typeof salaryPayments.$inferSelect;
-export type Client = typeof clients.$inferSelect;
 export type Project = typeof projects.$inferSelect;
 export const insertTaskTimerSessionSchema = createInsertSchema(taskTimerSessions);
 export const insertTimesheetSchema = createInsertSchema(timesheets);
@@ -1886,6 +1884,13 @@ export const driverAttendance = pgTable("driver_attendance", {
   checkOutTime: timestamp("check_out_time"),
   latitude: decimal("latitude", { precision: 10, scale: 6 }),
   longitude: decimal("longitude", { precision: 10, scale: 6 }),
+  endLatitude: decimal("end_latitude", { precision: 10, scale: 6 }),
+  endLongitude: decimal("end_longitude", { precision: 10, scale: 6 }),
+  truckId: varchar("truck_id"),
+  openingKm: integer("opening_km"),
+  openingKmTimestamp: timestamp("opening_km_timestamp"),
+  closingKm: integer("closing_km"),
+  closingKmTimestamp: timestamp("closing_km_timestamp"),
   checkInLocation: text("check_in_location"),
   isAuthorizedDevice: boolean("is_authorized_device").default(false),
   autoVerified: boolean("auto_verified").default(false),
@@ -1899,9 +1904,14 @@ export const driverAttendance = pgTable("driver_attendance", {
 export const vehicleMaintenance = pgTable("vehicle_maintenance", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vehicleId: varchar("vehicle_id").notNull(), // points to vehicles.id
+  driverId: varchar("driver_id"),
+  currentKm: integer("current_km"),
+  maintenanceType: text("maintenance_type"), // Service, Oil Change, Tyre, Brake, Engine, Electrical, Repair, Other
   serviceDate: date("service_date"),
+  time: text("time"),
   serviceSchedule: text("service_schedule"), // title or details
   repairLogs: text("repair_logs"),
+  notes: text("notes"),
   photos: jsonb("photos").$type<string[]>().default([]),
   cost: decimal("cost", { precision: 12, scale: 3 }).default("0.000"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -1910,11 +1920,16 @@ export const vehicleMaintenance = pgTable("vehicle_maintenance", {
 export const fuelLogs = pgTable("fuel_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vehicleId: varchar("vehicle_id").notNull(), // points to vehicles.id
+  driverId: varchar("driver_id"),
   tripId: varchar("trip_id"), // points to trips.id
+  currentKm: integer("current_km"),
   fuelExpense: decimal("fuel_expense", { precision: 12, scale: 3 }).default("0.000"),
   liters: decimal("liters", { precision: 10, scale: 3 }),
+  fuelStation: text("fuel_station"),
+  notes: text("notes"),
   photos: jsonb("photos").$type<string[]>().default([]),
   date: date("date"),
+  time: text("time"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2141,13 +2156,17 @@ export const dispatchDeliveries = pgTable("dispatch_deliveries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   dispatchItemId: varchar("dispatch_item_id").notNull(),
   driverId: varchar("driver_id"),
+  outletId: varchar("outlet_id"),
   deliveredQty: decimal("delivered_qty", { precision: 10, scale: 3 }),
   remainingQty: decimal("remaining_qty", { precision: 10, scale: 3 }),
   damagedQty: decimal("damaged_qty", { precision: 10, scale: 3 }),
   damageReason: text("damage_reason"),
   remark: text("remark"),
+  podUrl: text("pod_url"),
+  temperature: text("temperature"),
   status: text("status").notNull().default("pending"),
   deliveredAt: timestamp("delivered_at"),
+  deliveryTime: text("delivery_time"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

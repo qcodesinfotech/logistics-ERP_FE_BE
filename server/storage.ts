@@ -594,11 +594,12 @@ export interface IStorage {
   createDriverActivity(data: InsertDriverActivity): Promise<DriverActivity>;
   getDriverAttendance(driverId?: string, date?: string): Promise<DriverAttendance[]>;
   createDriverAttendance(data: InsertDriverAttendance): Promise<DriverAttendance>;
+  updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
 
   // Logistics Fleet Advanced
-  getVehicleMaintenance(vehicleId?: string): Promise<VehicleMaintenance[]>;
+  getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]>;
   createVehicleMaintenance(data: InsertVehicleMaintenance): Promise<VehicleMaintenance>;
-  getFuelLogs(vehicleId?: string, tripId?: string): Promise<FuelLog[]>;
+  getFuelLogs(vehicleId?: string, tripId?: string, driverId?: string): Promise<FuelLog[]>;
   createFuelLog(data: InsertFuelLog): Promise<FuelLog>;
 
   // Logistics User Activity Logs
@@ -1327,8 +1328,8 @@ export class DatabaseStorage implements IStorage {
       if (!journalBranchId && data.bankAccountId) {
         const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
         if (bankAccount) {
-          journalShopId = journalShopId || bankAccount.shopId;
-          journalBranchId = journalBranchId || bankAccount.branchId;
+          journalShopId = journalShopId || bankAccount.shopId || journalBranchId || "";
+          journalBranchId = journalBranchId || bankAccount.branchId || "";
         }
       }
       if (!journalBranchId) throw new Error("branchId is required for sale payment journal entry");
@@ -1831,8 +1832,8 @@ export class DatabaseStorage implements IStorage {
         if (data.bankAccountId && (!capitalBranchId)) {
           const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
           if (bankAccount) {
-            capitalShopId = capitalShopId || bankAccount.shopId;
-            capitalBranchId = capitalBranchId || bankAccount.branchId;
+            capitalShopId = capitalShopId || bankAccount.shopId || capitalBranchId || "";
+            capitalBranchId = capitalBranchId || bankAccount.branchId || "";
           }
         }
 
@@ -2444,8 +2445,8 @@ export class DatabaseStorage implements IStorage {
     for (const outlet of allOutlets) {
       if (outlet.routeId) outletToZone.set(outlet.id, outlet.routeId);
     }
-    for (const [outletId, zoneId] of Array.from(overrideMap.entries())) {
-      outletToZone.set(outletId, zoneId);
+    for (const [outletId, ov] of Array.from(overrideMap.entries())) {
+      if (ov?.overrideZoneId) outletToZone.set(outletId, ov.overrideZoneId);
     }
 
     // Get all zone IDs we need (including from item.routeId)
@@ -2526,7 +2527,7 @@ export class DatabaseStorage implements IStorage {
       const outletKey = item.outletId || item.outletCode;
       if (!board[effectiveZoneId].outlets[outletKey]) {
         const outlet = item.outletId ? outletMap.get(item.outletId) : null;
-        let tAssignId = outletToTruck.get(item.outletId) || outletToTruck.get(item.outletCode) || null;
+        let tAssignId = (item.outletId ? outletToTruck.get(item.outletId) : null) || outletToTruck.get(item.outletCode) || null;
         if (item.outletId && overrideMap.has(item.outletId)) {
            const ov = overrideMap.get(item.outletId);
            if (ov?.overrideTruckId) {
@@ -2560,7 +2561,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string }): Promise<any> {
+  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string }): Promise<any> {
     const existing = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
     if (existing.length > 0) {
       const [updated] = await db.update(dispatchDeliveries)
@@ -5837,12 +5838,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRfq(data: InsertRfq): Promise<Rfq> {
-    const [row] = await db.insert(rfqs).values(data).returning();
+    const [row] = await db.insert(rfqs).values(data as any).returning();
     return row;
   }
 
   async updateRfq(id: string, data: Partial<InsertRfq>): Promise<Rfq | undefined> {
-    const [row] = await db.update(rfqs).set(data).where(eq(rfqs.id, id)).returning();
+    const [row] = await db.update(rfqs).set(data as any).where(eq(rfqs.id, id)).returning();
     return row || undefined;
   }
 
@@ -5946,8 +5947,8 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     const client = await this.getClient(payment.customerId);
-    const branchId = client?.branchId || order.branchId || "1";
-    const shopId = client?.shopId || order.shopId;
+    const branchId = client?.branchId || (order as any)?.branchId || "1";
+    const shopId = client?.shopId || (order as any)?.shopId;
 
     if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
       if (payment.bankAccountId) {
@@ -6118,7 +6119,7 @@ export class DatabaseStorage implements IStorage {
     if (order && order.deliveryLocationId) {
       const [outlet] = await db.select().from(outlets).where(and(
         eq(outlets.clientId, order.customerId),
-        eq(outlets.locationId, order.deliveryLocationId)
+        eq((outlets as any).locationId || outlets.id, order.deliveryLocationId)
       ));
       if (outlet) {
         outletId = outlet.id;
@@ -6229,23 +6230,32 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  async updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance> {
+    const [row] = await db.update(driverAttendance).set(data).where(eq(driverAttendance.id, id)).returning();
+    return row;
+  }
+
   // Logistics Fleet Advanced
-  async getVehicleMaintenance(vehicleId?: string): Promise<VehicleMaintenance[]> {
-    if (vehicleId) {
-      return db.select().from(vehicleMaintenance).where(eq(vehicleMaintenance.vehicleId, vehicleId));
+  async getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]> {
+    const conditions = [];
+    if (vehicleId) conditions.push(eq(vehicleMaintenance.vehicleId, vehicleId));
+    if (driverId) conditions.push(eq(vehicleMaintenance.driverId, driverId));
+    if (conditions.length > 0) {
+      return db.select().from(vehicleMaintenance).where(and(...conditions));
     }
     return db.select().from(vehicleMaintenance);
   }
 
   async createVehicleMaintenance(data: InsertVehicleMaintenance): Promise<VehicleMaintenance> {
-    const [row] = await db.insert(vehicleMaintenance).values(data).returning();
+    const [row] = await db.insert(vehicleMaintenance).values(data as any).returning();
     return row;
   }
 
-  async getFuelLogs(vehicleId?: string, tripId?: string): Promise<FuelLog[]> {
+  async getFuelLogs(vehicleId?: string, tripId?: string, driverId?: string): Promise<FuelLog[]> {
     const conditions = [];
     if (vehicleId) conditions.push(eq(fuelLogs.vehicleId, vehicleId));
     if (tripId) conditions.push(eq(fuelLogs.tripId, tripId));
+    if (driverId) conditions.push(eq(fuelLogs.driverId, driverId));
     if (conditions.length > 0) {
       return db.select().from(fuelLogs).where(and(...conditions));
     }
@@ -6253,7 +6263,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createFuelLog(data: InsertFuelLog): Promise<FuelLog> {
-    const [row] = await db.insert(fuelLogs).values(data).returning();
+    const [row] = await db.insert(fuelLogs).values(data as any).returning();
     return row;
   }
 

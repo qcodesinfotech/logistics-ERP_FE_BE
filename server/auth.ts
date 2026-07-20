@@ -302,9 +302,9 @@ export const enforceScopeMiddleware = (req: AuthRequest, res: Response, next: Ne
     if (req.query.shopId && req.query.shopId !== userShopId) {
       console.log(`RBAC: Blocked shopId query override. Enforcing user scope.`);
     }
-    req.query.companyId = userCompanyId;
-    req.query.shopId = userShopId;
-    req.query.branchId = userBranchId;
+    req.query.companyId = userCompanyId || undefined;
+    req.query.shopId = userShopId || undefined;
+    req.query.branchId = userBranchId || undefined;
   }
 
   next();

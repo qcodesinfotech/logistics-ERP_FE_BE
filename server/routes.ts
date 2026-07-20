@@ -1,6 +1,9 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { db } from "./db";
+import { eq, and, inArray } from "drizzle-orm";
+import * as schema from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
 import path from "path";
@@ -588,6 +591,32 @@ export async function registerRoutes(
       res.json({ url: fileUrl, filename: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype });
     } catch (error) {
       console.error("Upload error:", error);
+      res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  // Generic Driver Upload Endpoint (POD, Fuel receipt, Maintenance photo)
+  const driverUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => {
+        const dir = path.join(process.cwd(), "uploads", "driver");
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      },
+      filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+      }
+    })
+  });
+
+  app.post("/api/upload/driver-attachment", authMiddleware, driverUpload.single("file"), (req: AuthRequest, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const fileUrl = `/uploads/driver/${req.file.filename}`;
+      res.json({ url: fileUrl, filename: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype });
+    } catch (error) {
+      console.error("Driver upload error:", error);
       res.status(500).json({ error: "Failed to upload file" });
     }
   });
@@ -7454,7 +7483,8 @@ export async function registerRoutes(
   app.get("/api/vehicles/maintenance", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const vehicleId = req.query.vehicleId as string | undefined;
-      const maintenance = await storage.getVehicleMaintenance(vehicleId);
+      const driverId = req.query.driverId as string | undefined;
+      const maintenance = await storage.getVehicleMaintenance(vehicleId, driverId);
       res.json(maintenance);
     } catch (error) {
       console.error("Get maintenance error:", error);
@@ -7462,9 +7492,13 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/vehicles/maintenance", authMiddleware, validateBody(insertVehicleMaintenanceSchema), async (req: AuthRequest, res) => {
+  app.post("/api/vehicles/maintenance", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const log = await storage.createVehicleMaintenance(req.body);
+      const payload = {
+        ...req.body,
+        driverId: req.body.driverId || req.user?.id,
+      };
+      const log = await storage.createVehicleMaintenance(payload);
       res.status(201).json(log);
     } catch (error) {
       console.error("Create maintenance log error:", error);
@@ -7476,7 +7510,8 @@ export async function registerRoutes(
     try {
       const vehicleId = req.query.vehicleId as string | undefined;
       const tripId = req.query.tripId as string | undefined;
-      const logs = await storage.getFuelLogs(vehicleId, tripId);
+      const driverId = req.query.driverId as string | undefined;
+      const logs = await storage.getFuelLogs(vehicleId, tripId, driverId);
       res.json(logs);
     } catch (error) {
       console.error("Get fuel logs error:", error);
@@ -7484,9 +7519,13 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/vehicles/fuel", authMiddleware, validateBody(insertFuelLogSchema), async (req: AuthRequest, res) => {
+  app.post("/api/vehicles/fuel", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const log = await storage.createFuelLog(req.body);
+      const payload = {
+        ...req.body,
+        driverId: req.body.driverId || req.user?.id,
+      };
+      const log = await storage.createFuelLog(payload);
       res.status(201).json(log);
     } catch (error) {
       console.error("Create fuel log error:", error);
@@ -7937,6 +7976,86 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Driver attendance checkin error:", error);
       res.status(500).json({ error: "Failed to record attendance" });
+    }
+  });
+
+  app.post("/api/drivers/opening-km", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { attendanceId, truckId, openingKm, latitude, longitude } = req.body;
+      if (!attendanceId || openingKm === undefined || openingKm === null) {
+        return res.status(400).json({ error: "attendanceId and openingKm are required" });
+      }
+
+      const kmVal = parseInt(openingKm, 10);
+      if (isNaN(kmVal) || kmVal < 0) {
+        return res.status(400).json({ error: "openingKm must be a valid non-negative number" });
+      }
+
+      const updated = await storage.updateDriverAttendance(attendanceId, {
+        truckId: truckId || null,
+        openingKm: kmVal,
+        openingKmTimestamp: new Date(),
+      });
+
+      // Record driver activity log
+      await storage.createDriverActivity({
+        driverId: req.user?.id || updated.driverId,
+        kmBefore: kmVal,
+        notes: `Duty started. Truck Opening KM: ${kmVal}`,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Record opening KM error:", error);
+      res.status(500).json({ error: "Failed to record Opening KM" });
+    }
+  });
+
+  app.post("/api/drivers/closing-km", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { attendanceId, closingKm, latitude, longitude } = req.body;
+      if (!attendanceId || closingKm === undefined || closingKm === null) {
+        return res.status(400).json({ error: "attendanceId and closingKm are required" });
+      }
+
+      const closeKmVal = parseInt(closingKm, 10);
+      if (isNaN(closeKmVal) || closeKmVal < 0) {
+        return res.status(400).json({ error: "closingKm must be a valid non-negative number" });
+      }
+
+      // Fetch attendance record to validate closing KM >= opening KM
+      const [record] = await storage.getDriverAttendance(req.user?.id);
+      const openingKmVal = record?.openingKm ?? 0;
+
+      if (closeKmVal < openingKmVal) {
+        return res.status(400).json({
+          error: `Closing KM (${closeKmVal}) cannot be less than Opening KM (${openingKmVal})`
+        });
+      }
+
+      const updated = await storage.updateDriverAttendance(attendanceId, {
+        closingKm: closeKmVal,
+        closingKmTimestamp: new Date(),
+        checkOutTime: new Date(),
+        endLatitude: latitude ? latitude.toString() : null,
+        endLongitude: longitude ? longitude.toString() : null,
+      });
+
+      // Record driver activity log
+      await storage.createDriverActivity({
+        driverId: req.user?.id || updated.driverId,
+        kmBefore: openingKmVal,
+        kmAfter: closeKmVal,
+        notes: `Duty ended. Closing KM: ${closeKmVal}. Total KM: ${closeKmVal - openingKmVal}`,
+      });
+
+      res.json({
+        attendance: updated,
+        totalKmTravelled: closeKmVal - openingKmVal,
+      });
+    } catch (error) {
+      console.error("Record closing KM error:", error);
+      res.status(500).json({ error: "Failed to record Closing KM" });
     }
   });
 
