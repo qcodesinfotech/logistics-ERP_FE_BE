@@ -6,7 +6,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
-import { pool } from "./db";
+import { pool, ensureDriverTablesSchema } from "./db";
 import path from "path";
 
 const app = express();
@@ -79,6 +79,7 @@ app.use((req, res, next) => {
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 (async () => {
+  await ensureDriverTablesSchema();
   await registerRoutes(httpServer, app);
   
   // Initialize cron jobs

@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { db } from "./db";
+import { db, ensureDriverTablesSchema } from "./db";
 import { eq, and, or, inArray } from "drizzle-orm";
 import * as schema from "@shared/schema";
 import { z } from "zod";
@@ -7973,6 +7973,7 @@ export async function registerRoutes(
 
   app.post("/api/drivers/attendance", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      await ensureDriverTablesSchema();
       const { driverId, latitude, longitude, deviceToken } = req.body;
       const effectiveDriverId = driverId || req.user?.employeeId || req.user?.id;
       if (!effectiveDriverId) {

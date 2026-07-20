@@ -1,23 +1,9 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
-import * as schema from "@shared/schema";
+import { db } from "./server/db";
 
-const { Pool } = pg;
-
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
-}
-
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
-
-let schemaCheckDone = false;
-
-export async function ensureDriverTablesSchema() {
-  if (schemaCheckDone) return;
+async function main() {
   try {
+    console.log("Running database migrations for driver tables...");
+
     await db.execute(`
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "end_latitude" numeric(10, 6);
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "end_longitude" numeric(10, 6);
@@ -75,10 +61,13 @@ export async function ensureDriverTablesSchema() {
         "created_at" timestamp DEFAULT now()
       );
     `);
-    schemaCheckDone = true;
-    console.log("[db] Driver tables schema verified and updated successfully");
+
+    console.log("Migration executed successfully!");
   } catch (error) {
-    console.error("[db] Error verifying driver tables schema:", error);
+    console.error("Migration error:", error);
+  } finally {
+    process.exit(0);
   }
 }
 
+main();
