@@ -35,9 +35,10 @@ interface DispatchSheet { id: string; date: string; fileName: string | null; sta
 interface DispatchItem {
   id: string; sheetId: string; outletCode: string; outletId: string | null;
   outletName?: string; itemCode: string; description: string | null;
-  weight: string | null; totalDelivered: string | null; remaining: string | null;
+  weight: string | null; requestedQty?: string | null; uom?: string | null; 
+  totalDelivered: string | null; remaining: string | null;
   remark: string | null; grnNumber: string | null;
-  delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; } | null;
+  delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; damagedQty?: string | null; damageReason?: string | null; } | null;
 }
 interface OutletGroup {
   outletId: string | null; outletCode: string; outletName: string;
@@ -103,7 +104,7 @@ function DeliveryDialog({
   item, sheetId, onClose, onSave,
 }: { item: DispatchItem; sheetId: string; onClose: () => void; onSave: (data: any) => void }) {
   const [status, setStatus] = useState(item.delivery?.status || "pending");
-  const [deliveredQty, setDeliveredQty] = useState(item.delivery?.deliveredQty || item.totalDelivered || item.weight || "");
+  const [deliveredQty, setDeliveredQty] = useState(item.delivery?.deliveredQty || item.totalDelivered || item.requestedQty || item.weight || "");
   const [remainingQty, setRemainingQty] = useState(item.delivery?.remainingQty || item.remaining || "0");
   const [damagedQty, setDamagedQty] = useState(item.delivery?.damagedQty || "0");
   const [damageReason, setDamageReason] = useState(item.delivery?.damageReason || "");
@@ -300,7 +301,11 @@ function OutletCard({
                     {item.totalDelivered && <span>Total: {item.totalDelivered}</span>}
                     {item.delivery?.deliveredQty && <span className="text-emerald-600">Del: {item.delivery.deliveredQty}</span>}
                     {item.delivery?.remainingQty && <span className="text-amber-600">Rem: {item.delivery.remainingQty}</span>}
-                    {item.weight && <span>{item.weight} kg</span>}
+                    {item.requestedQty ? (
+                      <span>Qty: {item.requestedQty} {item.uom || ''}</span>
+                    ) : item.weight ? (
+                      <span>{item.weight} kg</span>
+                    ) : null}
                   </div>
                   {item.delivery?.remark && (
                     <p className="text-xs text-muted-foreground italic mt-0.5">"{item.delivery.remark}"</p>
