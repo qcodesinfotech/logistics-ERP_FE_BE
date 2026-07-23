@@ -4462,6 +4462,28 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/reports/driver-attendance", authMiddleware, permissionMiddleware("reports"), async (req: AuthRequest, res) => {
+    try {
+      const { driverId, startDate, endDate } = req.query as any;
+      const report = await storage.getDriverAttendanceReport(driverId, startDate, endDate);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error in /api/reports/driver-attendance:", error);
+      res.status(400).json({ error: error.message || "Failed to get driver attendance report" });
+    }
+  });
+
+  app.get("/api/reports/driver-deliveries", authMiddleware, permissionMiddleware("reports"), async (req: AuthRequest, res) => {
+    try {
+      const { driverId, startDate, endDate } = req.query as any;
+      const report = await storage.getDriverDeliveriesReport(driverId, startDate, endDate);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error in /api/reports/driver-deliveries:", error);
+      res.status(400).json({ error: error.message || "Failed to get driver deliveries report" });
+    }
+  });
+
   app.get("/api/reports/profit-loss", authMiddleware, permissionMiddleware("reports"), async (req: AuthRequest, res) => {
     const scope = getScopeFromRequest(req);
     const { companyId, startDate, endDate } = req.query as any;
@@ -7956,6 +7978,22 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Create driver activity error:", error);
       res.status(500).json({ error: "Failed to create driver activity" });
+    }
+  });
+
+  app.get("/api/drivers/my-deliveries", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const driverId = req.query.driverId as string | undefined || req.user?.employeeId || req.user?.id;
+      if (!driverId) {
+        return res.status(400).json({ error: "driverId is required" });
+      }
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      const report = await storage.getDriverDeliveriesReport(driverId, startDate, endDate);
+      res.json(report);
+    } catch (error: any) {
+      console.error("Error in /api/drivers/my-deliveries:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch driver deliveries" });
     }
   });
 

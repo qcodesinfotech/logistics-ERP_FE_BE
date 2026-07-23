@@ -51,6 +51,7 @@ export default function Reports() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>("all");
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>("all");
+  const [selectedDriverId, setSelectedDriverId] = useState<string>("all");
 
   const getDateFilter = () => {
     const now = new Date();
@@ -164,6 +165,25 @@ export default function Reports() {
     enabled: activeReport === "service-tickets" || activeReport === "vat",
   });
 
+  const { data: driverAttendanceReport = [] } = useQuery<any[]>({
+    queryKey: [
+      `/api/reports/driver-attendance?driverId=${selectedDriverId === "all" ? "" : selectedDriverId}&startDate=${currentDates.start.toISOString().split('T')[0]}&endDate=${currentDates.end.toISOString().split('T')[0]}`
+    ],
+    enabled: activeReport === "driver-attendance",
+  });
+
+  const { data: driverDeliveriesReport = [] } = useQuery<any[]>({
+    queryKey: [
+      `/api/reports/driver-deliveries?driverId=${selectedDriverId === "all" ? "" : selectedDriverId}&startDate=${currentDates.start.toISOString().split('T')[0]}&endDate=${currentDates.end.toISOString().split('T')[0]}`
+    ],
+    enabled: activeReport === "driver-delivery",
+  });
+
+  const { data: drivers = [] } = useQuery<any[]>({
+    queryKey: ["/api/drivers"],
+    enabled: activeReport === "driver-attendance" || activeReport === "driver-delivery",
+  });
+
   const filterByDateAndScope = <T extends { shopId?: string | null; branchId?: string | null }>(
     items: T[],
     dateField: keyof T
@@ -206,6 +226,8 @@ export default function Reports() {
     { id: "salary", label: "Salary Report", icon: Wallet },
     { id: "petty-cash", label: "Petty Cash Report", icon: Wallet },
     { id: "employee-work", label: "Employee Work Report", icon: Users },
+    { id: "driver-attendance", label: "Driver Attendance Report", icon: Users },
+    { id: "driver-delivery", label: "Driver Delivery Report", icon: Truck },
     { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck },
   ];
 
@@ -1420,10 +1442,283 @@ export default function Reports() {
       case "project": return renderProjectReport();
       case "petty-cash": return renderPettyCashReport();
       case "employee-work": return renderEmployeeWorkReport();
+      case "driver-attendance": return renderDriverAttendanceReport();
+      case "driver-delivery": return renderDriverDeliveryReport();
       case "logistics-kpi": return renderLogisticsKPIs();
       case "service-tickets": return renderServiceReport();
       default: return renderTrialBalance();
     }
+  };
+
+  const renderDriverAttendanceReport = () => {
+    const csvData = driverAttendanceReport.map(item => ({
+      Date: item.checkInTime ? format(new Date(item.checkInTime), "yyyy-MM-dd") : "-",
+      Driver: item.driverName,
+      "Check In": item.checkInTime ? format(new Date(item.checkInTime), "hh:mm a") : "-",
+      "Check Out": item.checkOutTime ? format(new Date(item.checkOutTime), "hh:mm a") : "-",
+      "Opening KM": item.openingKm ?? "-",
+      "Closing KM": item.closingKm ?? "-",
+      "Shift Type": item.shiftType || "-",
+      "Shift Hours": item.shiftHours ?? "-",
+      "Overtime Hours": item.overtimeHours ?? "-",
+      Status: item.status || "present"
+    }));
+
+    return (
+      <div className="space-y-4">
+        <div className="flex gap-4 items-end justify-between flex-wrap no-print">
+          <div className="space-y-1">
+            <Label>Driver</Label>
+            <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All Drivers" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Drivers</SelectItem>
+                {drivers.map((drv: any) => (
+                  <SelectItem key={drv.id} value={drv.id}>{drv.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={() => exportToCSV("driver-attendance-report", csvData)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-green-600">
+                {driverAttendanceReport.filter(a => a.status === 'present').length}
+              </div>
+              <div className="text-sm text-muted-foreground">Total Present Days</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-amber-500">
+                {driverAttendanceReport.filter(a => a.overtimeHours && parseFloat(a.overtimeHours) > 0).length}
+              </div>
+              <div className="text-sm text-muted-foreground">Overtime Sessions</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-blue-600">
+                {driverAttendanceReport.reduce((acc, curr) => acc + parseFloat(curr.shiftHours || "0"), 0).toFixed(1)} hrs
+              </div>
+              <div className="text-sm text-muted-foreground">Total Duty Hours</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-orange-600">
+                {driverAttendanceReport.reduce((acc, curr) => acc + parseFloat(curr.overtimeHours || "0"), 0).toFixed(1)} hrs
+              </div>
+              <div className="text-sm text-muted-foreground">Total Overtime Hours</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="pt-4 p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Driver Name</TableHead>
+                  <TableHead>Check-in</TableHead>
+                  <TableHead>Check-out</TableHead>
+                  <TableHead className="text-right">Opening KM</TableHead>
+                  <TableHead className="text-right">Closing KM</TableHead>
+                  <TableHead className="text-right">Hours</TableHead>
+                  <TableHead className="text-right">Overtime</TableHead>
+                  <TableHead>Shift</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {driverAttendanceReport.map((row: any) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">
+                      {row.checkInTime ? format(new Date(row.checkInTime), "yyyy-MM-dd") : "-"}
+                    </TableCell>
+                    <TableCell>{row.driverName}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {row.checkInTime ? format(new Date(row.checkInTime), "hh:mm a") : "-"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {row.checkOutTime ? format(new Date(row.checkOutTime), "hh:mm a") : "-"}
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{row.openingKm ?? "-"}</TableCell>
+                    <TableCell className="text-right font-mono">{row.closingKm ?? "-"}</TableCell>
+                    <TableCell className="text-right font-mono">{row.shiftHours || "0.00"}</TableCell>
+                    <TableCell className="text-right font-mono">{row.overtimeHours || "0.00"}</TableCell>
+                    <TableCell className="capitalize text-xs text-muted-foreground">{row.shiftType}</TableCell>
+                    <TableCell>
+                      <Badge variant={row.status === "present" ? "default" : "secondary"}>
+                        {String(row.status).toUpperCase()}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {driverAttendanceReport.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                      No attendance records found.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  const renderDriverDeliveryReport = () => {
+    const csvData = driverDeliveriesReport.map(item => ({
+      Timestamp: item.deliveredAt ? format(new Date(item.deliveredAt), "yyyy-MM-dd hh:mm a") : "-",
+      Driver: item.driverName,
+      Zone: item.zoneName || "-",
+      Outlet: `${item.outletName} (${item.outletCode})`,
+      Product: `${item.description} (${item.itemCode})`,
+      "Requested Qty": item.requestedQty ?? "-",
+      "Delivered Qty": item.deliveredQty ?? "-",
+      Remaining: item.remainingQty ?? "-",
+      Damaged: item.damagedQty ?? "-",
+      Status: item.status || "-",
+      Temperature: item.temperature || "-",
+      Remarks: item.remark || "-"
+    }));
+
+    return (
+      <div className="space-y-4">
+        <div className="flex gap-4 items-end justify-between flex-wrap no-print">
+          <div className="space-y-1">
+            <Label>Driver</Label>
+            <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="All Drivers" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Drivers</SelectItem>
+                {drivers.map((drv: any) => (
+                  <SelectItem key={drv.id} value={drv.id}>{drv.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={() => exportToCSV("driver-delivery-report", csvData)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-green-600">
+                {driverDeliveriesReport.filter(d => d.status === 'delivered').length}
+              </div>
+              <div className="text-sm text-muted-foreground">Full Deliveries</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-blue-600">
+                {driverDeliveriesReport.filter(d => d.status === 'partial').length}
+              </div>
+              <div className="text-sm text-muted-foreground">Partial Deliveries</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-red-600">
+                {driverDeliveriesReport.filter(d => d.status === 'failed').length}
+              </div>
+              <div className="text-sm text-muted-foreground">Failed Deliveries</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-orange-600">
+                {driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.damagedQty || "0"), 0)}
+              </div>
+              <div className="text-sm text-muted-foreground">Damaged Items</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardContent className="pt-4 p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Delivery Timestamp</TableHead>
+                  <TableHead>Driver Name</TableHead>
+                  <TableHead>Zone/Route</TableHead>
+                  <TableHead>Outlet</TableHead>
+                  <TableHead>Product / Item</TableHead>
+                  <TableHead className="text-right">Req. Qty</TableHead>
+                  <TableHead className="text-right">Del. Qty</TableHead>
+                  <TableHead>Temp</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>POD</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {driverDeliveriesReport.map((row: any) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-mono text-xs">
+                      {row.deliveredAt ? format(new Date(row.deliveredAt), "yyyy-MM-dd hh:mm a") : "-"}
+                      {row.deliveryTime ? ` (${row.deliveryTime})` : ""}
+                    </TableCell>
+                    <TableCell>{row.driverName}</TableCell>
+                    <TableCell className="text-xs">{row.zoneName || "-"}</TableCell>
+                    <TableCell>
+                      <div className="text-sm font-semibold">{row.outletName}</div>
+                      <div className="text-xs text-muted-foreground">Code: {row.outletCode}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">{row.description}</div>
+                      <div className="text-xs text-muted-foreground font-mono">{row.itemCode}</div>
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{row.requestedQty ?? "-"}</TableCell>
+                    <TableCell className="text-right font-mono text-green-700 font-bold">{row.deliveredQty ?? "-"}</TableCell>
+                    <TableCell className="font-mono text-xs">{row.temperature || "-"}</TableCell>
+                    <TableCell>
+                      <Badge variant={row.status === "delivered" ? "default" : row.status === "partial" ? "outline" : "destructive"}>
+                        {String(row.status).toUpperCase()}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {row.podUrl ? (
+                        <a href={row.podUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline text-xs">
+                          View POD
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">No POD</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {driverDeliveriesReport.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                      No delivery logs found.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    );
   };
 
   const renderSalaryReport = () => {

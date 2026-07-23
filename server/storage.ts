@@ -595,6 +595,8 @@ export interface IStorage {
   getDriverAttendance(driverId?: string, date?: string): Promise<DriverAttendance[]>;
   createDriverAttendance(data: InsertDriverAttendance): Promise<DriverAttendance>;
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
+  getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
+  getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
 
   // Logistics Fleet Advanced
   getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]>;
@@ -6304,6 +6306,94 @@ export class DatabaseStorage implements IStorage {
   async updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance> {
     const [row] = await db.update(driverAttendance).set(data).where(eq(driverAttendance.id, id)).returning();
     return row;
+  }
+
+  async getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]> {
+    await ensureDriverTablesSchema();
+    const conditions = [];
+    if (driverId) conditions.push(eq(driverAttendance.driverId, driverId));
+    if (startDate) {
+      conditions.push(sql`driver_attendance.check_in_time >= ${startDate + "T00:00:00.000Z"}`);
+    }
+    if (endDate) {
+      conditions.push(sql`driver_attendance.check_in_time <= ${endDate + "T23:59:59.999Z"}`);
+    }
+
+    const list = await db.select()
+      .from(driverAttendance)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(driverAttendance.checkInTime));
+
+    const driversList = await this.getDrivers();
+    const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+    
+    return list.map(item => ({
+      ...item,
+      driverName: driverMap.get(item.driverId) || "Unknown Driver"
+    }));
+  }
+
+  async getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]> {
+    await ensureDriverTablesSchema();
+    const conditions = [];
+    if (driverId) {
+      conditions.push(eq(dispatchDeliveries.driverId, driverId));
+    }
+    if (startDate) {
+      conditions.push(sql`dispatch_sheets.date >= ${startDate}`);
+    }
+    if (endDate) {
+      conditions.push(sql`dispatch_sheets.date <= ${endDate}`);
+    }
+
+    const query = db.select({
+      id: dispatchDeliveries.id,
+      dispatchItemId: dispatchDeliveries.dispatchItemId,
+      driverId: dispatchDeliveries.driverId,
+      outletId: dispatchDeliveries.outletId,
+      deliveredQty: dispatchDeliveries.deliveredQty,
+      remainingQty: dispatchDeliveries.remainingQty,
+      damagedQty: dispatchDeliveries.damagedQty,
+      damageReason: dispatchDeliveries.damageReason,
+      remark: dispatchDeliveries.remark,
+      podUrl: dispatchDeliveries.podUrl,
+      temperature: dispatchDeliveries.temperature,
+      status: dispatchDeliveries.status,
+      deliveredAt: dispatchDeliveries.deliveredAt,
+      deliveryTime: dispatchDeliveries.deliveryTime,
+      
+      itemCode: dispatchItems.itemCode,
+      description: dispatchItems.description,
+      requestedQty: dispatchItems.requestedQty,
+      weight: dispatchItems.weight,
+      
+      sheetId: dispatchItems.sheetId,
+      sheetDate: dispatchSheets.date,
+      
+      outletName: outlets.name,
+      outletCode: outlets.code,
+      
+      zoneName: routes.name
+    })
+    .from(dispatchDeliveries)
+    .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+    .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
+    .leftJoin(outlets, eq(dispatchDeliveries.outletId, outlets.id))
+    .leftJoin(routes, eq(dispatchItems.routeId, routes.id));
+
+    if (conditions.length > 0) {
+      query.where(and(...conditions));
+    }
+    query.orderBy(desc(dispatchDeliveries.deliveredAt));
+
+    const list = await query;
+    const driversList = await this.getDrivers();
+    const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+
+    return list.map(item => ({
+      ...item,
+      driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned"
+    }));
   }
 
   // Logistics Fleet Advanced
