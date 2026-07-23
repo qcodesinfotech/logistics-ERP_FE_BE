@@ -64,7 +64,7 @@ function parseCSV(text: string): Record<string, string>[] {
   const normalize = (h: string) => {
     if (h.includes("outlet") && h.includes("code")) return "outlet_code";
     if (h.includes("item") && h.includes("code")) return "item_code";
-    if (h.includes("desc")) return "description";
+    if (h.includes("desc") && !h.includes("sub_desc")) return "description";
     if (h.includes("qty") && !h.includes("fus")) return "weight"; // Fallback for old format
     if (h === "remaining") return "remaining";
     if (h.includes("remark")) return "remark";
@@ -289,7 +289,7 @@ function OutletCard({
           {outlet.items.map(item => {
             const status = item.delivery?.status || "pending";
             return (
-              <div key={item.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors">
+              <div key={item.id} className="group flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-xs">{item.itemCode}</span>
@@ -580,7 +580,7 @@ export default function DailyDispatchPage() {
               const lower = h.toLowerCase().replace(/\s+/g, "_");
               if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
               if (lower.includes("item") && lower.includes("code")) return "item_code";
-              if (lower.includes("desc")) return "description";
+              if (lower.includes("desc") && !lower.includes("sub_desc")) return "description";
               if (lower.includes("qty") && !lower.includes("fus")) return "weight";
               if (lower === "remaining") return "remaining";
               if (lower.includes("remark")) return "remark";
