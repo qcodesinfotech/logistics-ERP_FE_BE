@@ -235,7 +235,7 @@ function MoveOverrideDialog({
 
 // ===== Outlet Card =====
 function OutletCard({
-  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride,
+  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
@@ -562,35 +562,43 @@ export default function DailyDispatchPage() {
       } else {
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        
+        let allParsed: Record<string, string>[] = [];
+        
+        workbook.SheetNames.forEach(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
 
-        if (rawJson.length > 0) {
-          const rawHeaders = Object.keys(rawJson[0]);
-          const normalize = (h: string) => {
-            const lower = h.toLowerCase().replace(/\s+/g, "_");
-            if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
-            if (lower.includes("item") && lower.includes("code")) return "item_code";
-            if (lower.includes("desc")) return "description";
-            if (lower.includes("qty") && !lower.includes("fus")) return "weight";
-            if (lower === "remaining") return "remaining";
-            if (lower.includes("remark")) return "remark";
-            if (lower.includes("grn")) return "grn_number";
-            if (lower.includes("requested") && lower.includes("delivery") && lower.includes("date")) return "requested_delivery_date";
-            return lower;
-          };
-          const headerMap = new Map();
-          rawHeaders.forEach(h => headerMap.set(h, normalize(h)));
+          if (rawJson.length > 0) {
+            const rawHeaders = Object.keys(rawJson[0]);
+            const normalize = (h: string) => {
+              const lower = h.toLowerCase().replace(/\s+/g, "_");
+              if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
+              if (lower.includes("item") && lower.includes("code")) return "item_code";
+              if (lower.includes("desc")) return "description";
+              if (lower.includes("qty") && !lower.includes("fus")) return "weight";
+              if (lower === "remaining") return "remaining";
+              if (lower.includes("remark")) return "remark";
+              if (lower.includes("grn")) return "grn_number";
+              if (lower.includes("requested") && lower.includes("delivery") && lower.includes("date")) return "requested_delivery_date";
+              return lower;
+            };
+            const headerMap = new Map();
+            rawHeaders.forEach(h => headerMap.set(h, normalize(h)));
 
-          parsed = rawJson.map(row => {
-            const newRow: Record<string, string> = {};
-            Object.entries(row).forEach(([key, val]) => {
-              newRow[headerMap.get(key)] = String(val);
+            const sheetParsed = rawJson.map(row => {
+              const newRow: Record<string, string> = {};
+              Object.entries(row).forEach(([key, val]) => {
+                newRow[headerMap.get(key)] = String(val);
+              });
+              return newRow;
             });
-            return newRow;
-          });
-        }
+            
+            allParsed = allParsed.concat(sheetParsed);
+          }
+        });
+        
+        parsed = allParsed;
       }
 
       const today = new Date();
