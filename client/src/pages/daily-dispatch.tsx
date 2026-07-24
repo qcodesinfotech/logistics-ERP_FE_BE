@@ -249,6 +249,7 @@ function OutletCard({
   const total = outlet.items.length;
   const allDone = delivered === total && total > 0;
   const anyPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
+  const isOutletComplete = total > 0 && outlet.items.every(i => (i.delivery?.status || "pending") !== "pending");
 
   return (
     <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
@@ -275,7 +276,7 @@ function OutletCard({
             <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-xs">Override</Badge>
           )}
           <Badge variant="outline" className="text-xs">{delivered}/{total}</Badge>
-          {isSupervisor && (
+          {isSupervisor && !isOutletComplete && (
             <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50"
               onClick={e => { e.stopPropagation(); onOverride(outlet); }}>
               <ArrowRight className="h-3 w-3 mr-1" />Move
@@ -312,16 +313,18 @@ function OutletCard({
                   )}
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {isSupervisor && (
+                  {isSupervisor && status === "pending" && (
                     <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 flex-shrink-0"
                       onClick={() => onOverrideItem(item)}>
                       Move
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
-                    onClick={() => onDeliveryUpdate(item)}>
-                    <Eye className="h-3 w-3 mr-1" />Update
-                  </Button>
+                  {status === "pending" && (
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
+                      onClick={() => onDeliveryUpdate(item)}>
+                      <Eye className="h-3 w-3 mr-1" />Update
+                    </Button>
+                  )}
                 </div>
               </div>
             );
