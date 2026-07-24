@@ -35,7 +35,7 @@ interface DispatchSheet { id: string; date: string; fileName: string | null; sta
 interface DispatchItem {
   id: string; sheetId: string; outletCode: string; outletId: string | null;
   outletName?: string; itemCode: string; description: string | null;
-  weight: string | null; requestedQty?: string | null; uom?: string | null; 
+  weight: string | null; requestedQty?: string | null; uom?: string | null;
   totalDelivered: string | null; remaining: string | null;
   remark: string | null; grnNumber: string | null;
   delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; damagedQty?: string | null; damageReason?: string | null; } | null;
@@ -85,11 +85,8 @@ function parseCSV(text: string): Record<string, string>[] {
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
   pending: { label: "Pending", color: "bg-slate-100 text-slate-700 border-slate-200", icon: Clock },
   partial: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
-  partially_delivered: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
   delivered: { label: "Delivered", color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
   damaged: { label: "Damaged", color: "bg-red-100 text-red-700 border-red-200", icon: X },
-  failed: { label: "Cancelled", color: "bg-red-100 text-red-700 border-red-200", icon: X },
-  failed_delivery: { label: "Cancelled", color: "bg-red-100 text-red-700 border-red-200", icon: X },
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -135,9 +132,8 @@ function DeliveryDialog({
             <Select value={status} onValueChange={setStatus}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {/* Only render distinct values to avoid key duplicate in dropdown */}
-                {Array.from(new Map(Object.entries(statusConfig).map(([k, v]) => [v.label, { key: k, label: v.label }])).values()).map((opt) => (
-                  <SelectItem key={opt.key} value={opt.key}>{opt.label}</SelectItem>
+                {Object.entries(statusConfig).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>{v.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -152,7 +148,7 @@ function DeliveryDialog({
               <Input type="number" value={remainingQty} onChange={e => setRemainingQty(e.target.value)} placeholder="0" />
             </div>
           </div>
-          
+
           {/* Damaged fields */}
           <div className="grid grid-cols-2 gap-3 p-3 bg-red-50/50 rounded-lg border border-red-100">
             <div className="space-y-2">
@@ -249,11 +245,11 @@ function OutletCard({
   onOverrideItem: (item: DispatchItem) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const delivered = outlet.items.filter(i => (i.delivery?.status || "pending") === "delivered").length;
+  const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
   const total = outlet.items.length;
+  const allDone = delivered === total && total > 0;
+  const anyPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
   const isOutletComplete = total > 0 && outlet.items.every(i => (i.delivery?.status || "pending") !== "pending");
-  const allDone = isOutletComplete;
-  const anyPartial = !allDone && outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "partially_delivered" || i.delivery?.status === "damaged");
 
   return (
     <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
@@ -574,9 +570,9 @@ export default function DailyDispatchPage() {
       } else {
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: "array" });
-        
+
         let allParsed: Record<string, string>[] = [];
-        
+
         workbook.SheetNames.forEach(sheetName => {
           const worksheet = workbook.Sheets[sheetName];
           const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
@@ -605,11 +601,11 @@ export default function DailyDispatchPage() {
               });
               return newRow;
             });
-            
+
             allParsed = allParsed.concat(sheetParsed);
           }
         });
-        
+
         parsed = allParsed;
       }
 
@@ -618,10 +614,10 @@ export default function DailyDispatchPage() {
 
       const hasPastDate = parsed.some(row => {
         if (!row.requested_delivery_date) return false;
-        
+
         let dateStr = row.requested_delivery_date;
         let dateObj: Date | null = null;
-        
+
         if (!isNaN(Number(dateStr)) && Number(dateStr) > 10000) {
           dateObj = new Date(Math.round((Number(dateStr) - 25569) * 86400 * 1000));
         } else {
@@ -645,10 +641,10 @@ export default function DailyDispatchPage() {
       });
 
       if (hasPastDate) {
-        toast({ 
-          title: "Invalid Delivery Date", 
-          description: "One or more items have a requested delivery date prior to today.", 
-          variant: "destructive" 
+        toast({
+          title: "Invalid Delivery Date",
+          description: "One or more items have a requested delivery date prior to today.",
+          variant: "destructive"
         });
         setCsvPreview(null);
         setCsvFileName("");
@@ -684,7 +680,7 @@ export default function DailyDispatchPage() {
   const handleExportCSV = () => {
     if (!reportData) return;
     let csv = "ITEM_NUMBER,DESCRIPTION,UOM,FROM_ORG,STORAGE_TYPE,QTY\n";
-    
+
     const itemGroups: Record<string, any> = {};
     reportData.items.forEach(item => {
       const key = item.itemCode;
@@ -702,7 +698,7 @@ export default function DailyDispatchPage() {
     });
 
     const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
-    
+
     sortedItems.forEach(item => {
       csv += `"${item.itemCode || ''}","${item.description || ''}","${item.uom || ''}","${item.fromOrg || ''}","${item.storageType || ''}","${item.totalQty}"\n`;
     });
@@ -734,7 +730,7 @@ export default function DailyDispatchPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 print:block">
         <div className="px-6 pt-4 border-b bg-background print:hidden">
-        <TabsList className="gap-1 flex-wrap">
+          <TabsList className="gap-1 flex-wrap">
             <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
             <TabsTrigger value="trucks" className="gap-2"><Truck className="h-4 w-4" />Truck Planning</TabsTrigger>
             <TabsTrigger value="pending" className="gap-2"><Package className="h-4 w-4" />Pending</TabsTrigger>
@@ -842,7 +838,7 @@ export default function DailyDispatchPage() {
                 No sheet for this date.
               </div>
             )}
-            
+
             {boardSheetId && boardData && (
               <div className="ml-auto flex items-center gap-2 print:hidden">
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
@@ -853,19 +849,19 @@ export default function DailyDispatchPage() {
           </div>
 
           {!boardSheetId ? (
-             <div className="flex-1 flex items-center justify-center min-h-0">
-               <div className="text-center space-y-3">
-                 <p className="text-lg font-semibold">Select a Date to Load the Summary</p>
-               </div>
-             </div>
+            <div className="flex-1 flex items-center justify-center min-h-0">
+              <div className="text-center space-y-3">
+                <p className="text-lg font-semibold">Select a Date to Load the Summary</p>
+              </div>
+            </div>
           ) : boardLoading ? (
             <div className="flex-1 flex items-center justify-center min-h-0">
-               <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+              <RefreshCw className="h-6 w-6 text-primary animate-spin" />
             </div>
           ) : !boardData ? (
-             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load summary.</div>
+            <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load summary.</div>
           ) : (
-             <PivotSummaryTab boardData={boardData} />
+            <PivotSummaryTab boardData={boardData} />
           )}
         </TabsContent>
 
@@ -889,7 +885,7 @@ export default function DailyDispatchPage() {
                 No sheet for this date.
               </div>
             )}
-            
+
             {boardSheetId && reportData && (
               <div className="ml-auto flex items-center gap-2 print:hidden">
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
@@ -903,78 +899,78 @@ export default function DailyDispatchPage() {
           </div>
 
           {!boardSheetId ? (
-             <div className="flex-1 flex items-center justify-center min-h-0">
-               <div className="text-center space-y-3">
-                 <p className="text-lg font-semibold">Select a Date to Load the Report</p>
-               </div>
-             </div>
+            <div className="flex-1 flex items-center justify-center min-h-0">
+              <div className="text-center space-y-3">
+                <p className="text-lg font-semibold">Select a Date to Load the Report</p>
+              </div>
+            </div>
           ) : reportLoading ? (
             <div className="flex-1 flex items-center justify-center min-h-0">
-               <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+              <RefreshCw className="h-6 w-6 text-primary animate-spin" />
             </div>
           ) : !reportData ? (
-             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load report.</div>
+            <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load report.</div>
           ) : (
-             <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
-                 {(() => {
-                   const itemGroups: Record<string, any> = {};
-                   let grandTotal = 0;
+            <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
+              {(() => {
+                const itemGroups: Record<string, any> = {};
+                let grandTotal = 0;
 
-                   reportData.items.forEach(item => {
-                     const key = item.itemCode;
-                     if (!itemGroups[key]) {
-                       itemGroups[key] = {
-                         itemCode: item.itemCode,
-                         description: item.description,
-                         uom: item.uom,
-                         fromOrg: item.fromOrg,
-                         storageType: item.storageType,
-                         totalQty: 0
-                       };
-                     }
-                     const qty = Number(item.requestedQty || 0);
-                     itemGroups[key].totalQty += qty;
-                     grandTotal += qty;
-                   });
+                reportData.items.forEach(item => {
+                  const key = item.itemCode;
+                  if (!itemGroups[key]) {
+                    itemGroups[key] = {
+                      itemCode: item.itemCode,
+                      description: item.description,
+                      uom: item.uom,
+                      fromOrg: item.fromOrg,
+                      storageType: item.storageType,
+                      totalQty: 0
+                    };
+                  }
+                  const qty = Number(item.requestedQty || 0);
+                  itemGroups[key].totalQty += qty;
+                  grandTotal += qty;
+                });
 
-                   const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+                const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
 
-                   return (
-                     <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
-                       <table className="w-full text-left border-collapse">
-                         <thead className="bg-slate-100/80 border-b">
-                           <tr>
-                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">ITEM_NUMBER</th>
-                             <th className="py-2 px-3 font-semibold text-slate-700 border-r">DESCRIPTION</th>
-                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20">UOM</th>
-                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-24">FROM_ORG</th>
-                             <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">STORAGE_TYPE</th>
-                             <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">QTY</th>
-                           </tr>
-                         </thead>
-                         <tbody className="divide-y divide-slate-100">
-                           {sortedItems.map((item, idx) => (
-                             <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
-                               <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
-                               <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
-                               <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
-                               <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
-                               <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
-                               <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
-                             </tr>
-                           ))}
-                         </tbody>
-                         <tfoot className="bg-slate-100/80 border-t">
-                           <tr>
-                             <td colSpan={5} className="py-2 px-3 font-bold text-right border-r text-slate-900">Grand Total</td>
-                             <td className="py-2 px-3 font-bold text-right text-slate-900">{grandTotal}</td>
-                           </tr>
-                         </tfoot>
-                       </table>
-                     </div>
-                   );
-                 })()}
-               </div>
+                return (
+                  <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-100/80 border-b">
+                        <tr>
+                          <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">ITEM_NUMBER</th>
+                          <th className="py-2 px-3 font-semibold text-slate-700 border-r">DESCRIPTION</th>
+                          <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20">UOM</th>
+                          <th className="py-2 px-3 font-semibold text-slate-700 border-r w-24">FROM_ORG</th>
+                          <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">STORAGE_TYPE</th>
+                          <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">QTY</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {sortedItems.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
+                            <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
+                            <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
+                            <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
+                            <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
+                            <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
+                            <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-slate-100/80 border-t">
+                        <tr>
+                          <td colSpan={5} className="py-2 px-3 font-bold text-right border-r text-slate-900">Grand Total</td>
+                          <td className="py-2 px-3 font-bold text-right text-slate-900">{grandTotal}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
           )}
         </TabsContent>
 
@@ -1022,7 +1018,7 @@ export default function DailyDispatchPage() {
                           <Button size="sm" variant="outline" onClick={() => { setSelectedDate(s.date); setBoardSheetId(s.id); setActiveTab("board"); }}>
                             <Eye className="h-3.5 w-3.5 mr-1" />View
                           </Button>
-                          <Button size="icon" variant="outline" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" 
+                          <Button size="icon" variant="outline" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               if (confirm("Are you sure you want to delete this sheet? All associated items and delivery logs will be lost.")) {
                                 deleteSheetMutation.mutate(s.id);
@@ -1295,7 +1291,7 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
                     <td className="py-1.5 px-3 border-r"></td>
                     <td className="py-1.5 px-3 text-right">{routeTotal}</td>
                   </tr>
-                  
+
                   {isRouteExpanded && zone.outlets.map(outlet => {
                     const outletTotal = outlet.items.reduce((s, i) => s + Number((i as any).requestedQty || i.weight || 0), 0);
                     const outletId = `${zone.zoneId}-${outlet.outletCode}`;
@@ -1721,7 +1717,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                               value={ta.id}
                                               className={wouldOverflow ? "text-red-500" : ""}
                                             >
-                                              {veh?.plateNumber || "Truck"} 
+                                              {veh?.plateNumber || "Truck"}
                                               {remaining !== null ? ` (${remaining.toFixed(1)}T free${wouldOverflow ? " ⚠" : ""})` : ""}
                                             </SelectItem>
                                           );
@@ -1793,11 +1789,11 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setEditAssignment(null)}>Cancel</Button>
-                <Button 
-                  onClick={() => updateTruckAssignmentMutation.mutate({ 
-                    id: editAssignment.id, 
-                    truckId: editAssignment.truckId, 
-                    driverId: editAssignment.driverId || null 
+                <Button
+                  onClick={() => updateTruckAssignmentMutation.mutate({
+                    id: editAssignment.id,
+                    truckId: editAssignment.truckId,
+                    driverId: editAssignment.driverId || null
                   })}
                   disabled={updateTruckAssignmentMutation.isPending}
                 >
