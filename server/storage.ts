@@ -2423,19 +2423,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDispatchItemsForSheet(sheetId: string): Promise<any[]> {
-    const results = await db
-      .select({
-        dispatchItem: dispatchItems,
-        productName: products.name,
-      })
-      .from(dispatchItems)
-      .leftJoin(products, or(eq(products.productCode, dispatchItems.itemCode), eq(products.sku, dispatchItems.itemCode)))
-      .where(eq(dispatchItems.sheetId, sheetId));
-
-    return results.map(r => ({
-      ...r.dispatchItem,
-      itemName: r.productName || null
-    }));
+    return await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
   }
 
   async getDispatchBoard(sheetId: string): Promise<any> {
@@ -2443,20 +2431,8 @@ export class DatabaseStorage implements IStorage {
     // Auto-sync any trucks assigned in Zonal Config to this sheet
     await this.autoAssignZoneTrucksToSheet(sheetId);
 
-    // Get all items for sheet with product names resolved
-    const itemsRaw = await db
-      .select({
-        dispatchItem: dispatchItems,
-        productName: products.name,
-      })
-      .from(dispatchItems)
-      .leftJoin(products, or(eq(products.productCode, dispatchItems.itemCode), eq(products.sku, dispatchItems.itemCode)))
-      .where(eq(dispatchItems.sheetId, sheetId));
-
-    const items = itemsRaw.map(r => ({
-      ...r.dispatchItem,
-      itemName: r.productName || null
-    }));
+    // Get all items for sheet
+    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
 
     // Get overrides for sheet
     const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));

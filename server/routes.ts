@@ -7340,7 +7340,7 @@ export async function registerRoutes(
           outletId: outlet?.id || null,
           routeId: outlet?.routeId || null,
           itemCode: row.item_number || row.item_code || row.itemCode || "",
-          description: row.description || row.to_sub_desc || null,
+          description: row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || row.to_sub_desc || null,
           toNo: row.to_no || null,
           lineNumber: row.line_number || null,
           requestedDeliveryDate: row.requested_delivery_date ? new Date(row.requested_delivery_date.split('-').reverse().join('-')) : null, // Assuming DD-MM-YYYY

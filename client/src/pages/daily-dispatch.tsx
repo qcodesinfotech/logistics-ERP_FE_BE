@@ -35,7 +35,6 @@ interface DispatchSheet { id: string; date: string; fileName: string | null; sta
 interface DispatchItem {
   id: string; sheetId: string; outletCode: string; outletId: string | null;
   outletName?: string; itemCode: string; description: string | null;
-  itemName?: string | null;
   weight: string | null; requestedQty?: string | null; uom?: string | null;
   totalDelivered: string | null; remaining: string | null;
   remark: string | null; grnNumber: string | null;
@@ -66,6 +65,7 @@ function parseCSV(text: string): Record<string, string>[] {
     if (h.includes("outlet") && h.includes("code")) return "outlet_code";
     if (h.includes("item") && h.includes("code")) return "item_code";
     if (h.includes("desc") && !h.includes("sub_desc")) return "description";
+    if (h.includes("name") && (h.includes("item") || h.includes("product"))) return "description";
     if (h.includes("qty") && !h.includes("fus")) return "weight"; // Fallback for old format
     if (h === "remaining") return "remaining";
     if (h.includes("remark")) return "remark";
@@ -586,6 +586,7 @@ export default function DailyDispatchPage() {
               if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
               if (lower.includes("item") && lower.includes("code")) return "item_code";
               if (lower.includes("desc") && !lower.includes("sub_desc")) return "description";
+              if (lower.includes("name") && (lower.includes("item") || lower.includes("product"))) return "description";
               if (lower.includes("qty") && !lower.includes("fus")) return "weight";
               if (lower === "remaining") return "remaining";
               if (lower.includes("remark")) return "remark";
@@ -690,7 +691,6 @@ export default function DailyDispatchPage() {
         itemGroups[key] = {
           itemCode: item.itemCode,
           description: item.description,
-          itemName: item.itemName,
           uom: item.uom,
           fromOrg: item.fromOrg,
           storageType: item.storageType,
@@ -703,7 +703,7 @@ export default function DailyDispatchPage() {
     const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
 
     sortedItems.forEach(item => {
-      csv += `"${item.itemCode || ''}","${item.itemName || item.description || ''}","${item.uom || ''}","${item.fromOrg || ''}","${item.storageType || ''}","${item.totalQty}"\n`;
+      csv += `"${item.itemCode || ''}","${item.description || ''}","${item.uom || ''}","${item.fromOrg || ''}","${item.storageType || ''}","${item.totalQty}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -925,7 +925,6 @@ export default function DailyDispatchPage() {
                     itemGroups[key] = {
                       itemCode: item.itemCode,
                       description: item.description,
-                      itemName: item.itemName,
                       uom: item.uom,
                       fromOrg: item.fromOrg,
                       storageType: item.storageType,
@@ -956,7 +955,7 @@ export default function DailyDispatchPage() {
                         {sortedItems.map((item, idx) => (
                           <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
                             <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600">{item.itemName || item.description}</td>
+                            <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
                             <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
                             <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
                             <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
@@ -1320,7 +1319,7 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
                             <td className="py-1.5 px-3 border-r"></td>
                             <td className="py-1.5 px-3 border-r"></td>
                             <td className="py-1.5 px-3 border-r pl-6 font-medium text-xs">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-xs">{item.itemName || item.description}</td>
+                            <td className="py-1.5 px-3 border-r text-xs">{item.description}</td>
                             <td className="py-1.5 px-3 border-r text-center text-xs">{(item as any).uom || '-'}</td>
                             <td className="py-1.5 px-3 text-right font-medium">{Number((item as any).requestedQty || item.weight || 0)}</td>
                           </tr>
