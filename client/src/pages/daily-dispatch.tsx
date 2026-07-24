@@ -459,6 +459,7 @@ export default function DailyDispatchPage() {
   const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
     enabled: !!boardSheetId,
+    refetchInterval: 5000,
   });
 
   const { data: reportData, isLoading: reportLoading } = useQuery<{ items: any[]; routeMap: Record<string, string> }>({
