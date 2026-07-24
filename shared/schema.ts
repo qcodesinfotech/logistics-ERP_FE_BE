@@ -1701,6 +1701,7 @@ export const vehicles = pgTable("vehicles", {
   type: text("type").notNull(), // "owned" or "outsourced"
   capacity: text("capacity"),
   cartonCapacity: integer("carton_capacity"),
+  storageType: text("storage_type"),
   photos: jsonb("photos").$type<string[]>().default([]),
   documents: jsonb("documents").$type<string[]>().default([]),
   chassisNumber: text("chassis_number"),

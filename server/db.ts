@@ -78,6 +78,7 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "current_zone_id" varchar;
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "assigned_brand_id" varchar;
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "assigned_driver_id" varchar;
+      ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "storage_type" varchar;
 
       ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "to_no" varchar;
       ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "line_number" varchar;

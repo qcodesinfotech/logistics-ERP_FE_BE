@@ -2575,17 +2575,23 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string }): Promise<any> {
+  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string; toNo?: string }): Promise<any> {
+    const { toNo, ...deliveryData } = data;
+    if (toNo !== undefined) {
+      await db.update(dispatchItems)
+        .set({ toNo })
+        .where(eq(dispatchItems.id, dispatchItemId));
+    }
     const existing = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
     if (existing.length > 0) {
       const [updated] = await db.update(dispatchDeliveries)
-        .set({ ...data, deliveredAt: new Date() })
+        .set({ ...deliveryData, deliveredAt: new Date() })
         .where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId))
         .returning();
       return updated;
     } else {
       const [created] = await db.insert(dispatchDeliveries)
-        .values({ dispatchItemId, ...data, deliveredAt: new Date() })
+        .values({ dispatchItemId, ...deliveryData, deliveredAt: new Date() })
         .returning();
       return created;
     }

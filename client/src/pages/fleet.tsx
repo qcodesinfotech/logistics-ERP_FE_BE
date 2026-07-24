@@ -47,6 +47,7 @@ const vehicleSchema = z.object({
   type: z.enum(["owned", "outsourced"]),
   capacity: z.string().optional(),
   cartonCapacity: z.coerce.number().optional(),
+  storageType: z.string().optional(),
   photos: z.array(z.string()).default([]),
   chassisNumber: z.string().optional(),
   manufactureYear: z.string().optional(),
@@ -77,9 +78,9 @@ type MaintenanceFormData = z.infer<typeof maintenanceSchema>;
 
 const fuelSchema = z.object({
   vehicleId: z.string().min(1, "Vehicle is required"),
-  date: z.string().min(1, "Refueling date is required"),
-  liters: z.string().min(1, "Liters is required"),
-  fuelExpense: z.string().min(1, "Expense amount is required"),
+  date: z.string().min(1, "Date is required"),
+  liters: z.string().min(1, "Liters quantity is required"),
+  fuelExpense: z.string().min(1, "Fuel expense is required"),
   photos: z.array(z.string()).default([]),
 });
 
@@ -107,6 +108,7 @@ export default function FleetPage() {
       type: "owned",
       capacity: "",
       cartonCapacity: 0,
+      storageType: "",
       photos: [],
       chassisNumber: "",
       manufactureYear: "",
@@ -158,11 +160,9 @@ export default function FleetPage() {
     queryKey: ["/api/brands"],
   });
 
-  const { data: usersList } = useQuery<User[]>({
-    queryKey: ["/api/users"],
+  const { data: driversList = [] } = useQuery<any[]>({
+    queryKey: ["/api/drivers"],
   });
-
-  const driversList = usersList?.filter(u => u.role === "driver" || u.role === "admin") || [];
 
   const { data: maintLogs } = useQuery<any[]>({
     queryKey: ["/api/vehicles/maintenance"],
@@ -250,6 +250,7 @@ export default function FleetPage() {
       type: vehicle.type as any,
       capacity: vehicle.capacity || "",
       cartonCapacity: vehicle.cartonCapacity || 0,
+      storageType: vehicle.storageType || "",
       photos: vehicle.photos || [],
       documents: vehicle.documents || [],
       chassisNumber: vehicle.chassisNumber || "",
@@ -426,7 +427,12 @@ export default function FleetPage() {
                           <TableCell className="font-mono font-bold text-primary">{vehicle.plateNumber}</TableCell>
                           <TableCell className="font-semibold">{vehicle.name}</TableCell>
                           <TableCell className="capitalize text-xs font-semibold text-muted-foreground">{vehicle.type}</TableCell>
-                          <TableCell className="text-xs">{vehicle.capacity || "N/A"}</TableCell>
+                          <TableCell className="text-xs">
+                            <div>{vehicle.capacity || "N/A"}</div>
+                            {vehicle.storageType && (
+                              <div className="text-[10px] text-muted-foreground font-medium mt-0.5">{vehicle.storageType}</div>
+                            )}
+                          </TableCell>
                           <TableCell className="text-xs">{vehicle.cartonCapacity ? `${vehicle.cartonCapacity} Boxes` : "N/A"}</TableCell>
                           <TableCell>
                             <div>{getZoneName(vehicle.currentZoneId)}</div>
@@ -727,6 +733,30 @@ export default function FleetPage() {
                       <FormControl>
                         <Input type="number" placeholder="e.g. 500" {...field} />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={vehicleForm.control}
+                  name="storageType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Storage Type</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select storage type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Dry">Dry</SelectItem>
+                          <SelectItem value="Frozen">Frozen</SelectItem>
+                          <SelectItem value="Chilli">Chilli</SelectItem>
+                          <SelectItem value="Packaging">Packaging</SelectItem>
+                          <SelectItem value="Assorted">Assorted</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

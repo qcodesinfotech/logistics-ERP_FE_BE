@@ -1496,7 +1496,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                         .filter((v: any) => v.status === "available" && !trucksInSelectedZone.includes(v.id))
                         .map((v: any) => (
                           <SelectItem key={v.id} value={v.id}>
-                            {v.plateNumber} — {v.name} ({v.capacity || "?"} T)
+                            {v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
                           </SelectItem>
                         ))}
                     </SelectContent>
@@ -1758,7 +1758,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   <SelectContent>
                     {vehiclesList.map((v: any) => (
                       <SelectItem key={v.id} value={v.id}>
-                        {v.plateNumber} — {v.name}
+                        {v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1913,7 +1913,7 @@ function TruckTransfersTab({ zones, vehicles: _v }: any) {
               <Label>Truck</Label>
               <Select value={form.truckId} onValueChange={v => setForm(f => ({ ...f, truckId: v }))}>
                 <SelectTrigger><SelectValue placeholder="Select truck..." /></SelectTrigger>
-                <SelectContent>{vehiclesList.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plateNumber} — {v.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{vehiclesList.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
