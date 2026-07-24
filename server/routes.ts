@@ -7330,13 +7330,25 @@ export async function registerRoutes(
 
       // Resolve outlet codes to outlet IDs and route IDs
       const allOutlets = await storage.getOutlets();
-      const outletCodeMap = new Map(allOutlets.map(o => [o.code?.trim().toLowerCase(), o]));
+      
+      const normalizeOutletCode = (code: string | number | null | undefined): string => {
+        if (code === null || code === undefined) return "";
+        return String(code).trim().toLowerCase().replace(/^0+/, "");
+      };
+
+      const outletCodeMap = new Map();
+      allOutlets.forEach(o => {
+        if (o.code) {
+          outletCodeMap.set(normalizeOutletCode(o.code), o);
+        }
+      });
 
       const resolvedItems = items.map((row: any) => {
-        const outlet = outletCodeMap.get((row.to_sub_code || row.outlet_code || row.outletCode || "").trim().toLowerCase());
+        const rowCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
+        const outlet = outletCodeMap.get(normalizeOutletCode(rowCode));
         return {
           sheetId: sheet.id,
-          outletCode: row.to_sub_code || row.outlet_code || row.outletCode || "",
+          outletCode: String(rowCode),
           outletId: outlet?.id || null,
           routeId: outlet?.routeId || null,
           itemCode: row.item_number || row.item_code || row.itemCode || "",

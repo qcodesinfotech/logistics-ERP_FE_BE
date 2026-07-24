@@ -2423,7 +2423,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDispatchItemsForSheet(sheetId: string): Promise<any[]> {
-    return await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    const itemsRaw = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    const allOutlets = await db.select().from(outlets);
+    const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+    const outletCodeMap = new Map(allOutlets.map(o => [normalizeCode(o.code || ""), o]));
+
+    const items = [];
+    for (const item of itemsRaw) {
+      if (!item.outletId && item.outletCode) {
+        const outlet = outletCodeMap.get(normalizeCode(item.outletCode));
+        if (outlet) {
+          await db.update(dispatchItems)
+            .set({ outletId: outlet.id, routeId: item.routeId || outlet.routeId })
+            .where(eq(dispatchItems.id, item.id));
+          items.push({
+            ...item,
+            outletId: outlet.id,
+            routeId: item.routeId || outlet.routeId,
+          });
+          continue;
+        }
+      }
+      items.push(item);
+    }
+    return items;
   }
 
   async getDispatchBoard(sheetId: string): Promise<any> {
@@ -2431,8 +2454,8 @@ export class DatabaseStorage implements IStorage {
     // Auto-sync any trucks assigned in Zonal Config to this sheet
     await this.autoAssignZoneTrucksToSheet(sheetId);
 
-    // Get all items for sheet
-    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    // Get all items for sheet (using the helper which resolves and heals outletId/routeId)
+    const items = await this.getDispatchItemsForSheet(sheetId);
 
     // Get overrides for sheet
     const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));
@@ -2582,16 +2605,37 @@ export class DatabaseStorage implements IStorage {
         .set({ toNo })
         .where(eq(dispatchItems.id, dispatchItemId));
     }
+
+    // Resolve outletId to UUID if it's sent as a string code
+    let resolvedOutletId = deliveryData.outletId;
+    if (deliveryData.outletId) {
+      // Check if it matches an existing outlet by ID
+      const exists = await db.select().from(outlets).where(eq(outlets.id, deliveryData.outletId));
+      if (exists.length === 0) {
+        // Not a valid ID, it must be the code (e.g. "8167090" or "008167090")
+        const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+        const matched = await db.select().from(outlets).where(eq(sql`LOWER(REGEXP_REPLACE(code, '^0+', ''))`, normalizeCode(deliveryData.outletId)));
+        if (matched.length > 0) {
+          resolvedOutletId = matched[0].id;
+        }
+      }
+    }
+
+    const finalDeliveryData = {
+      ...deliveryData,
+      outletId: resolvedOutletId,
+    };
+
     const existing = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
     if (existing.length > 0) {
       const [updated] = await db.update(dispatchDeliveries)
-        .set({ ...deliveryData, deliveredAt: new Date() })
+        .set({ ...finalDeliveryData, deliveredAt: new Date() })
         .where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId))
         .returning();
       return updated;
     } else {
       const [created] = await db.insert(dispatchDeliveries)
-        .values({ dispatchItemId, ...deliveryData, deliveredAt: new Date() })
+        .values({ dispatchItemId, ...finalDeliveryData, deliveredAt: new Date() })
         .returning();
       return created;
     }
@@ -6492,7 +6536,7 @@ export class DatabaseStorage implements IStorage {
   async autoAssignZoneTrucksToSheet(sheetId: string): Promise<void> {
     try {
       // 1. Get all dispatch items for this sheet
-      const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+      const items = await this.getDispatchItemsForSheet(sheetId);
       if (items.length === 0) return;
       
       // 2. Determine all zone IDs involved in this sheet
@@ -6546,7 +6590,7 @@ export class DatabaseStorage implements IStorage {
 
   async autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }> {
     // Get all dispatch items for this sheet, grouped by outlet
-    const items = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    const items = await this.getDispatchItemsForSheet(sheetId);
     const outletMap: Record<string, { outletCode: string; outletId: string | null; totalWeight: number }> = {};
     for (const item of items) {
       if (!outletMap[item.outletCode]) {
