@@ -85,8 +85,11 @@ function parseCSV(text: string): Record<string, string>[] {
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
   pending: { label: "Pending", color: "bg-slate-100 text-slate-700 border-slate-200", icon: Clock },
   partial: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
+  partially_delivered: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
   delivered: { label: "Delivered", color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
   damaged: { label: "Damaged", color: "bg-red-100 text-red-700 border-red-200", icon: X },
+  failed: { label: "Cancelled", color: "bg-red-100 text-red-700 border-red-200", icon: X },
+  failed_delivery: { label: "Cancelled", color: "bg-red-100 text-red-700 border-red-200", icon: X },
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -132,8 +135,9 @@ function DeliveryDialog({
             <Select value={status} onValueChange={setStatus}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.entries(statusConfig).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                {/* Only render distinct values to avoid key duplicate in dropdown */}
+                {Array.from(new Map(Object.entries(statusConfig).map(([k, v]) => [v.label, { key: k, label: v.label }])).values()).map((opt) => (
+                  <SelectItem key={opt.key} value={opt.key}>{opt.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -245,11 +249,11 @@ function OutletCard({
   onOverrideItem: (item: DispatchItem) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
+  const delivered = outlet.items.filter(i => (i.delivery?.status || "pending") === "delivered").length;
   const total = outlet.items.length;
-  const allDone = delivered === total && total > 0;
-  const anyPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
   const isOutletComplete = total > 0 && outlet.items.every(i => (i.delivery?.status || "pending") !== "pending");
+  const allDone = isOutletComplete;
+  const anyPartial = !allDone && outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "partially_delivered" || i.delivery?.status === "damaged");
 
   return (
     <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
