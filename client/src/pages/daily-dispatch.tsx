@@ -27,7 +27,7 @@ import {
 import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
-  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2,
+  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
 } from "lucide-react";
 
 // ===== Types =====
@@ -35,6 +35,7 @@ interface DispatchSheet { id: string; date: string; fileName: string | null; sta
 interface DispatchItem {
   id: string; sheetId: string; outletCode: string; outletId: string | null;
   outletName?: string; itemCode: string; description: string | null;
+  itemName?: string | null;
   weight: string | null; requestedQty?: string | null; uom?: string | null;
   totalDelivered: string | null; remaining: string | null;
   remark: string | null; grnNumber: string | null;
@@ -689,6 +690,7 @@ export default function DailyDispatchPage() {
         itemGroups[key] = {
           itemCode: item.itemCode,
           description: item.description,
+          itemName: item.itemName,
           uom: item.uom,
           fromOrg: item.fromOrg,
           storageType: item.storageType,
@@ -701,7 +703,7 @@ export default function DailyDispatchPage() {
     const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
 
     sortedItems.forEach(item => {
-      csv += `"${item.itemCode || ''}","${item.description || ''}","${item.uom || ''}","${item.fromOrg || ''}","${item.storageType || ''}","${item.totalQty}"\n`;
+      csv += `"${item.itemCode || ''}","${item.itemName || item.description || ''}","${item.uom || ''}","${item.fromOrg || ''}","${item.storageType || ''}","${item.totalQty}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -923,6 +925,7 @@ export default function DailyDispatchPage() {
                     itemGroups[key] = {
                       itemCode: item.itemCode,
                       description: item.description,
+                      itemName: item.itemName,
                       uom: item.uom,
                       fromOrg: item.fromOrg,
                       storageType: item.storageType,
@@ -953,7 +956,7 @@ export default function DailyDispatchPage() {
                         {sortedItems.map((item, idx) => (
                           <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
                             <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
+                            <td className="py-1.5 px-3 border-r text-slate-600">{item.itemName || item.description}</td>
                             <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
                             <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
                             <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
@@ -978,7 +981,7 @@ export default function DailyDispatchPage() {
 
         {/* ===== TRUCK PLANNING TAB ===== */}
         <TabsContent value="trucks" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
-          <TruckPlanningTab boardSheetId={boardSheetId} zones={zones} drivers={drivers} selectedDate={selectedDate} onSelectSheet={(id) => { setBoardSheetId(id); }} sheets={sheets} />
+          <TruckPlanningTab boardSheetId={boardSheetId} zones={zones} drivers={drivers} selectedDate={selectedDate} onSelectSheet={(id: string | null) => { setBoardSheetId(id); }} sheets={sheets} />
         </TabsContent>
 
         {/* ===== PENDING QUANTITIES TAB ===== */}
@@ -1317,7 +1320,7 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
                             <td className="py-1.5 px-3 border-r"></td>
                             <td className="py-1.5 px-3 border-r"></td>
                             <td className="py-1.5 px-3 border-r pl-6 font-medium text-xs">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-xs">{item.description}</td>
+                            <td className="py-1.5 px-3 border-r text-xs">{item.itemName || item.description}</td>
                             <td className="py-1.5 px-3 border-r text-center text-xs">{(item as any).uom || '-'}</td>
                             <td className="py-1.5 px-3 text-right font-medium">{Number((item as any).requestedQty || item.weight || 0)}</td>
                           </tr>

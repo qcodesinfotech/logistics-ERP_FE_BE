@@ -7358,9 +7358,10 @@ export async function registerRoutes(
 
       await storage.createDispatchItems(resolvedItems);
 
-      // Trigger Dispatch Engine Automation
-      await storage.autoAssignZoneTrucksToSheet(sheet.id);
-      await storage.autoAllocateFfd(sheet.id);
+
+      // Dispatch Engine Automation is NOT triggered automatically on upload anymore
+      // Users will trigger allocation manually from the UI
+
 
       res.status(201).json({ sheet, itemCount: resolvedItems.length });
     } catch (e) {
