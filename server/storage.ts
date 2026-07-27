@@ -2430,16 +2430,17 @@ export class DatabaseStorage implements IStorage {
 
     const items = [];
     for (const item of itemsRaw) {
-      if (!item.outletId && item.outletCode) {
-        const outlet = outletCodeMap.get(normalizeCode(item.outletCode));
-        if (outlet) {
+      const outlet = outletCodeMap.get(normalizeCode(item.outletCode));
+      if (outlet) {
+        const targetRouteId = outlet.routeId;
+        if (item.outletId !== outlet.id || item.routeId !== targetRouteId) {
           await db.update(dispatchItems)
-            .set({ outletId: outlet.id, routeId: item.routeId || outlet.routeId })
+            .set({ outletId: outlet.id, routeId: targetRouteId })
             .where(eq(dispatchItems.id, item.id));
           items.push({
             ...item,
             outletId: outlet.id,
-            routeId: item.routeId || outlet.routeId,
+            routeId: targetRouteId,
           });
           continue;
         }
@@ -2448,6 +2449,7 @@ export class DatabaseStorage implements IStorage {
     }
     return items;
   }
+
 
   async getDispatchBoard(sheetId: string): Promise<any> {
     await ensureDriverTablesSchema();
