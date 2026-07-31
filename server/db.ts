@@ -49,6 +49,12 @@ export async function ensureDriverTablesSchema() {
         "created_at" timestamp DEFAULT now()
       );
 
+      ALTER TABLE "vehicle_maintenance" ADD COLUMN IF NOT EXISTS "driver_id" varchar;
+      ALTER TABLE "vehicle_maintenance" ADD COLUMN IF NOT EXISTS "current_km" integer;
+      ALTER TABLE "vehicle_maintenance" ADD COLUMN IF NOT EXISTS "maintenance_type" text;
+      ALTER TABLE "vehicle_maintenance" ADD COLUMN IF NOT EXISTS "time" text;
+      ALTER TABLE "vehicle_maintenance" ADD COLUMN IF NOT EXISTS "notes" text;
+
       CREATE TABLE IF NOT EXISTS "fuel_logs" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         "vehicle_id" varchar NOT NULL,
@@ -64,6 +70,12 @@ export async function ensureDriverTablesSchema() {
         "time" text,
         "created_at" timestamp DEFAULT now()
       );
+
+      ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "driver_id" varchar;
+      ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "current_km" integer;
+      ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "fuel_station" text;
+      ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "notes" text;
+      ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "time" text;
 
       CREATE TABLE IF NOT EXISTS "user_activity_logs" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
