@@ -2,7 +2,8 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db, ensureDriverTablesSchema } from "./db";
-import { eq, and, or, inArray } from "drizzle-orm";
+import { eq, and, or, inArray, desc } from "drizzle-orm";
+import PDFDocument from "pdfkit";
 import * as schema from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
@@ -8515,6 +8516,402 @@ export async function registerRoutes(
       res.json(usage);
     } catch (error) {
       res.status(500).json({ error: "Failed to update usage data" });
+    }
+  });
+
+  app.get("/api/reports/route-pod-pdf", async (req: Request, res) => {
+    try {
+      const sheetId = req.query.sheetId as string;
+      const routeId = req.query.routeId as string;
+
+      if (!sheetId || !routeId) {
+        return res.status(400).json({ error: "sheetId and routeId are required" });
+      }
+
+      // 1. Fetch route info
+      const [routeRow] = await db.select().from(schema.routes).where(eq(schema.routes.id, routeId));
+      const routeName = routeRow?.name || `Route ${routeId}`;
+
+      // 2. Fetch sheet info
+      const [sheetRow] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, sheetId));
+      const sheetDate = sheetRow?.date || "Today";
+
+      // 3. Fetch completed deliveries matching this sheet and route
+      const deliveriesQuery = await db.select({
+        id: schema.dispatchDeliveries.id,
+        dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
+        driverId: schema.dispatchDeliveries.driverId,
+        outletId: schema.dispatchDeliveries.outletId,
+        deliveredQty: schema.dispatchDeliveries.deliveredQty,
+        remainingQty: schema.dispatchDeliveries.remainingQty,
+        remark: schema.dispatchDeliveries.remark,
+        podUrl: schema.dispatchDeliveries.podUrl,
+        status: schema.dispatchDeliveries.status,
+        deliveredAt: schema.dispatchDeliveries.deliveredAt,
+        deliveryTime: schema.dispatchDeliveries.deliveryTime,
+        itemCode: schema.dispatchItems.itemCode,
+        description: schema.dispatchItems.description,
+        requestedQty: schema.dispatchItems.requestedQty,
+        storageType: schema.dispatchItems.storageType,
+        uom: schema.dispatchItems.uom,
+      })
+      .from(schema.dispatchDeliveries)
+      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+      .where(
+        and(
+          eq(schema.dispatchItems.sheetId, sheetId),
+          or(
+            eq(schema.dispatchItems.routeId, routeId),
+            eq(schema.dispatchItems.overrideRouteId, routeId)
+          ),
+          inArray(schema.dispatchDeliveries.status, ["delivered", "failed"])
+        )
+      );
+
+      if (deliveriesQuery.length === 0) {
+        return res.status(404).json({ error: "No completed deliveries found for this route." });
+      }
+
+      // Group deliveries by Outlet + Storage Type
+      const grouped: Record<string, any> = {};
+      const outletIds = new Set<string>();
+
+      for (const row of deliveriesQuery) {
+        const outletId = row.outletId || "unknown";
+        if (row.outletId) outletIds.add(row.outletId);
+        
+        const storageType = row.storageType || "Dry";
+        const groupKey = `${outletId}_${storageType}`;
+
+        if (!grouped[groupKey]) {
+          grouped[groupKey] = {
+            outletId,
+            storageType,
+            deliveredAt: row.deliveredAt,
+            deliveryTime: row.deliveryTime,
+            remark: row.remark,
+            podUrls: row.podUrl ? row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [],
+            items: [],
+          };
+        }
+        grouped[groupKey].items.push(row);
+      }
+
+      // Resolve Outlet Names & Codes
+      const allOutlets = outletIds.size > 0 ? await db.select().from(schema.outlets).where(inArray(schema.outlets.id, Array.from(outletIds))) : [];
+      const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+
+      for (const key of Object.keys(grouped)) {
+        const outlet = outletMap.get(grouped[key].outletId);
+        grouped[key].outletName = outlet?.name || `Outlet ${grouped[key].outletId}`;
+        grouped[key].outletCode = outlet?.code || "N/A";
+      }
+
+      const deliveriesList = Object.values(grouped);
+
+      // Create PDF Kit Document
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${routeName.replace(/\s+/g, '_')}_POD.pdf"`);
+      doc.pipe(res);
+
+      // Add Document Header
+      doc.fillColor("#1E3A8A").fontSize(22).text("LOGIX LOGISTICS HUB", { align: "center" });
+      doc.fillColor("#4B5563").fontSize(12).text("Route Proof of Delivery (POD) Report", { align: "center" });
+      doc.moveDown(1.5);
+
+      // Metadata Info Box
+      doc.fillColor("#1F2937").fontSize(10);
+      doc.text(`Route Name: ${routeName}`, 40, doc.y);
+      doc.text(`Sheet Date: ${sheetDate}`, 300, doc.y - 12);
+      doc.text(`Generated At: ${new Date().toLocaleString()}`, 40, doc.y + 6);
+      doc.moveDown(2);
+
+      // Horizontal separator line
+      doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+      doc.moveDown(1.5);
+
+      // Deliveries Summary Table Title
+      doc.fillColor("#1E3A8A").fontSize(14).text("Deliveries Summary", { underline: true });
+      doc.moveDown(0.8);
+
+      // Draw table headers
+      let y = doc.y;
+      doc.font("Helvetica-Bold").fillColor("#374151").fontSize(10).text("Outlet", 40, y);
+      doc.font("Helvetica").text("Storage Type", 200, y);
+      doc.text("Delivered At", 320, y);
+      doc.text("Items Status", 440, y);
+      doc.moveDown(0.5);
+
+      doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+      doc.moveDown(0.5);
+
+      // Draw table rows
+      for (const del of deliveriesList) {
+        y = doc.y;
+        doc.fillColor("#1F2937").fontSize(9).text(`${del.outletName} (${del.outletCode})`, 40, y, { width: 150 });
+        doc.text(del.storageType, 200, y);
+        doc.text(`${del.deliveryTime || "Recorded"}`, 320, y);
+        
+        const allCompleted = del.items.every((it: any) => it.status === "delivered");
+        const statusLabel = allCompleted ? "COMPLETED" : "FAILED / PARTIAL";
+        doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 440, y);
+
+        doc.moveDown(1.2);
+      }
+
+      // Process details and images on new pages
+      for (const del of deliveriesList) {
+        doc.addPage();
+
+        doc.fillColor("#1E3A8A").fontSize(18).text(`${del.outletName} (${del.outletCode})`, { align: "left" });
+        doc.fillColor("#4B5563").fontSize(11).text(`Storage Type: ${del.storageType} | Route: ${routeName}`);
+        doc.moveDown(1);
+
+        doc.fillColor("#1F2937").fontSize(10);
+        doc.text(`Delivery Time: ${del.deliveryTime || "N/A"}`);
+        doc.text(`Remarks: ${del.remark || "None"}`);
+        doc.moveDown(1.5);
+
+        // Product Details Table
+        doc.fillColor("#1E3A8A").fontSize(12).text("Delivered Items List", { underline: true });
+        doc.moveDown(0.5);
+
+        y = doc.y;
+        doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
+        doc.text("Description", 120, y);
+        doc.text("Ordered Qty", 350, y);
+        doc.text("Delivered Qty", 450, y);
+        doc.moveDown(0.4);
+
+        doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(0.5);
+
+        for (const it of del.items) {
+          y = doc.y;
+          doc.fillColor("#1F2937").text(it.itemCode, 40, y);
+          doc.text(it.description || "N/A", 120, y, { width: 220 });
+          doc.text(parseFloat(it.requestedQty || "0").toFixed(1), 350, y);
+          doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
+          doc.moveDown(1.2);
+        }
+
+        doc.moveDown(2);
+
+        // Render POD Images
+        if (del.podUrls.length > 0) {
+          doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Delivery (POD) Images", { underline: true });
+          doc.moveDown(1);
+
+          let imgX = 40;
+          let imgY = doc.y;
+
+          for (const url of del.podUrls) {
+            try {
+              // Local images path
+              if (url.startsWith("/uploads/")) {
+                const localPath = path.join(process.cwd(), url);
+                if (fs.existsSync(localPath)) {
+                  doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
+                  imgX += 200;
+                  if (imgX > 450) {
+                    imgX = 40;
+                    imgY += 200;
+                  }
+                } else {
+                  doc.fillColor("#EF4444").text(`[Image missing on disk: ${url}]`, imgX, imgY);
+                  imgX += 200;
+                }
+              } else if (url.startsWith("http")) {
+                // Download remote images
+                const response = await fetch(url);
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
+                imgX += 200;
+                if (imgX > 450) {
+                  imgX = 40;
+                  imgY += 200;
+                }
+              }
+            } catch (err: any) {
+              doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POD Image: ${err.message}]`, imgX, imgY);
+              imgX += 200;
+              if (imgX > 450) {
+                imgX = 40;
+                imgY += 200;
+              }
+            }
+          }
+        } else {
+          doc.fillColor("#6B7280").fontSize(10).text("No POD images attached for this delivery.");
+        }
+      }
+
+      doc.end();
+    } catch (e: any) {
+      console.error("Generate PDF report error:", e);
+      res.status(500).json({ error: "Failed to generate Route POD PDF report", details: e?.message });
+    }
+  });
+
+  app.get("/api/reports/delivery-pod-pdf", async (req: Request, res) => {
+    try {
+      const sheetId = req.query.sheetId as string;
+      const outletId = req.query.outletId as string;
+      const storageType = req.query.storageType as string;
+
+      if (!sheetId || !outletId || !storageType) {
+        return res.status(400).json({ error: "sheetId, outletId, and storageType are required" });
+      }
+
+      // Fetch outlet details
+      const [outletRow] = await db.select().from(schema.outlets).where(eq(schema.outlets.id, outletId));
+      const outletName = outletRow?.name || `Outlet ${outletId}`;
+      const outletCode = outletRow?.code || "N/A";
+
+      // Fetch completed deliveries matching this outlet and storageType
+      const deliveriesQuery = await db.select({
+        id: schema.dispatchDeliveries.id,
+        dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
+        driverId: schema.dispatchDeliveries.driverId,
+        outletId: schema.dispatchDeliveries.outletId,
+        deliveredQty: schema.dispatchDeliveries.deliveredQty,
+        remainingQty: schema.dispatchDeliveries.remainingQty,
+        remark: schema.dispatchDeliveries.remark,
+        podUrl: schema.dispatchDeliveries.podUrl,
+        status: schema.dispatchDeliveries.status,
+        deliveredAt: schema.dispatchDeliveries.deliveredAt,
+        deliveryTime: schema.dispatchDeliveries.deliveryTime,
+        itemCode: schema.dispatchItems.itemCode,
+        description: schema.dispatchItems.description,
+        requestedQty: schema.dispatchItems.requestedQty,
+        storageType: schema.dispatchItems.storageType,
+        uom: schema.dispatchItems.uom,
+        sheetId: schema.dispatchItems.sheetId,
+        routeId: schema.dispatchItems.routeId,
+        overrideRouteId: schema.dispatchItems.overrideRouteId,
+      })
+      .from(schema.dispatchDeliveries)
+      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+      .where(
+        and(
+          eq(schema.dispatchItems.sheetId, sheetId),
+          eq(schema.dispatchDeliveries.outletId, outletId),
+          eq(schema.dispatchItems.storageType, storageType),
+          inArray(schema.dispatchDeliveries.status, ["delivered", "failed"])
+        )
+      );
+
+      if (deliveriesQuery.length === 0) {
+        return res.status(404).json({ error: "No completed delivery items found." });
+      }
+
+      const activeRouteId = deliveriesQuery[0].overrideRouteId || deliveriesQuery[0].routeId;
+      let routeName = "N/A";
+      if (activeRouteId) {
+        const [routeRow] = await db.select().from(schema.routes).where(eq(schema.routes.id, activeRouteId));
+        routeName = routeRow?.name || "Route Assignment";
+      }
+
+      const firstRow = deliveriesQuery[0];
+      const podUrls = firstRow.podUrl ? firstRow.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
+
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${outletName.replace(/\s+/g, '_')}_POD.pdf"`);
+      doc.pipe(res);
+
+      doc.fillColor("#1E3A8A").fontSize(22).text("LOGIX LOGISTICS HUB", { align: "center" });
+      doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
+      doc.moveDown(1.5);
+
+      doc.fillColor("#1F2937").fontSize(10);
+      doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, doc.y);
+      doc.text(`Storage Type: ${storageType}`, 300, doc.y - 12);
+      doc.text(`Route: ${routeName}`, 40, doc.y + 6);
+      doc.text(`Delivery Date: ${firstRow.deliveredAt ? new Date(firstRow.deliveredAt).toLocaleDateString() : "Today"}`, 300, doc.y - 12);
+      doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, doc.y + 6);
+      doc.text(`Remarks: ${firstRow.remark || "None"}`, 40, doc.y + 12);
+      doc.moveDown(2);
+
+      doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+      doc.moveDown(1.5);
+
+      doc.fillColor("#1E3A8A").fontSize(14).text("Delivered Items List", { underline: true });
+      doc.moveDown(0.8);
+
+      let y = doc.y;
+      doc.fillColor("#374151").fontSize(10).text("Item Code", 40, y);
+      doc.text("Description", 120, y);
+      doc.text("Ordered Qty", 350, y);
+      doc.text("Delivered Qty", 450, y);
+      doc.moveDown(0.5);
+
+      doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+      doc.moveDown(0.5);
+
+      for (const it of deliveriesQuery) {
+        y = doc.y;
+        doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y);
+        doc.text(it.description || "N/A", 120, y, { width: 220 });
+        doc.text(parseFloat(it.requestedQty || "0").toFixed(1), 350, y);
+        doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
+        doc.moveDown(1.2);
+      }
+
+      doc.moveDown(2);
+
+      if (podUrls.length > 0) {
+        doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Delivery (POD) Images", { underline: true });
+        doc.moveDown(1);
+
+        let imgX = 40;
+        let imgY = doc.y;
+
+        for (const url of podUrls) {
+          try {
+            if (url.startsWith("/uploads/")) {
+              const localPath = path.join(process.cwd(), url);
+              if (fs.existsSync(localPath)) {
+                doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
+                imgX += 200;
+                if (imgX > 450) {
+                  imgX = 40;
+                  imgY += 200;
+                }
+              } else {
+                doc.fillColor("#EF4444").text(`[Image missing on disk: ${url}]`, imgX, imgY);
+                imgX += 200;
+              }
+            } else if (url.startsWith("http")) {
+              const response = await fetch(url);
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+              doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
+              imgX += 200;
+              if (imgX > 450) {
+                imgX = 40;
+                imgY += 200;
+              }
+            }
+          } catch (err: any) {
+            doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POD Image: ${err.message}]`, imgX, imgY);
+            imgX += 200;
+            if (imgX > 450) {
+              imgX = 40;
+              imgY += 200;
+            }
+          }
+        }
+      }
+
+      doc.end();
+    } catch (e: any) {
+      console.error("Generate Delivery PDF report error:", e);
+      res.status(500).json({ error: "Failed to generate Delivery POD PDF receipt", details: e?.message });
     }
   });
 
