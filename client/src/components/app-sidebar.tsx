@@ -95,6 +95,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { title: "Trucking Invoices", url: "/logistics/invoices", icon: Receipt },
       { title: "Contract Invoices", url: "/logistics/contract-invoices", icon: Receipt },
+      { title: "Delivery Invoices", url: "/logistics/delivery-invoices", icon: Receipt },
       { title: "Logistics Finance", url: "/logistics/finance", icon: Calculator },
     ],
   },

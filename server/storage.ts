@@ -47,6 +47,8 @@ import {
   type TruckTransfer, type InsertTruckTransfer,
   type ContractInvoice, type InsertContractInvoice,
   type ContractMonthlyUsage, type InsertContractMonthlyUsage,
+  fmcgInvoices, type FmcgInvoice, type InsertFmcgInvoice,
+  fmcgInvoiceItems, type FmcgInvoiceItem, type InsertFmcgInvoiceItem
 } from "@shared/schema";
 import { db, pool, ensureDriverTablesSchema } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -599,6 +601,7 @@ export interface IStorage {
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
   getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
   getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
+  getCompletedDeliveries(startDate?: string, endDate?: string): Promise<any[]>;
 
   // Logistics Fleet Advanced
   getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]>;
@@ -613,6 +616,20 @@ export interface IStorage {
   // Dispatch Engine Automation
   autoAssignZoneTrucksToSheet(sheetId: string): Promise<void>;
   autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }>;
+
+  // ====================== FMCG DELIVERY INVOICES ======================
+  getFmcgInvoices(): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] })[]>;
+  getFmcgInvoice(id: string): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] }) | undefined>;
+  createFmcgInvoice(data: InsertFmcgInvoice, items: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice>;
+  updateFmcgInvoice(id: string, data: Partial<InsertFmcgInvoice>, items?: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice>;
+
+  // ====================== FMCG DELIVERY INVOICES ======================
+  getFmcgInvoices(): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] })[]>;
+  getFmcgInvoice(id: string): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] }) | undefined>;
+  createFmcgInvoice(data: InsertFmcgInvoice, items: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice>;
+  updateFmcgInvoice(id: string, data: Partial<InsertFmcgInvoice>, items?: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice>;
+
+  getAdvancedPendingDeliveries(filters?: any): Promise<any[]>;
 }
 
 // Database storage implementation
@@ -1881,11 +1898,47 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createEmployee(data: InsertEmployee): Promise<Employee> {
+    if (data.employeeCode) {
+      const existingByCode = await db.select().from(employees).where(sql`LOWER(employee_code) = LOWER(${data.employeeCode})`);
+      if (existingByCode.length > 0) {
+        throw new Error(`An employee with code "${data.employeeCode}" already exists`);
+      }
+    }
+    if (data.phone) {
+      const existingByPhone = await db.select().from(employees).where(eq(employees.phone, data.phone));
+      if (existingByPhone.length > 0) {
+        throw new Error(`An employee with phone "${data.phone}" already exists`);
+      }
+    }
+    if (data.name) {
+      const existingByName = await db.select().from(employees).where(sql`LOWER(name) = LOWER(${data.name})`);
+      if (existingByName.length > 0) {
+        throw new Error(`An employee with name "${data.name}" already exists`);
+      }
+    }
     const [employee] = await db.insert(employees).values(data).returning();
     return employee;
   }
 
   async updateEmployee(id: string, data: Partial<InsertEmployee>): Promise<Employee | undefined> {
+    if (data.employeeCode) {
+      const existingByCode = await db.select().from(employees).where(and(sql`LOWER(employee_code) = LOWER(${data.employeeCode})`, ne(employees.id, id)));
+      if (existingByCode.length > 0) {
+        throw new Error(`An employee with code "${data.employeeCode}" already exists`);
+      }
+    }
+    if (data.phone) {
+      const existingByPhone = await db.select().from(employees).where(and(eq(employees.phone, data.phone), ne(employees.id, id)));
+      if (existingByPhone.length > 0) {
+        throw new Error(`An employee with phone "${data.phone}" already exists`);
+      }
+    }
+    if (data.name) {
+      const existingByName = await db.select().from(employees).where(and(sql`LOWER(name) = LOWER(${data.name})`, ne(employees.id, id)));
+      if (existingByName.length > 0) {
+        throw new Error(`An employee with name "${data.name}" already exists`);
+      }
+    }
     const [employee] = await db.update(employees).set(data).where(eq(employees.id, id)).returning();
     return employee || undefined;
   }
@@ -6560,6 +6613,7 @@ export class DatabaseStorage implements IStorage {
       description: dispatchItems.description,
       requestedQty: dispatchItems.requestedQty,
       weight: dispatchItems.weight,
+      storageType: dispatchItems.storageType,
       
       sheetId: dispatchItems.sheetId,
       sheetDate: dispatchSheets.date,
@@ -6579,6 +6633,68 @@ export class DatabaseStorage implements IStorage {
       query.where(and(...conditions));
     }
     query.orderBy(desc(dispatchDeliveries.deliveredAt));
+
+    const list = await query;
+    const driversList = await this.getDrivers();
+    const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+
+    return list.map(item => ({
+      ...item,
+      driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned"
+    }));
+  }
+
+  async getCompletedDeliveries(startDate?: string, endDate?: string): Promise<any[]> {
+    const conditions = [];
+    
+    // Filter for completed deliveries based on status or deliveredAt
+    conditions.push(sql`${dispatchDeliveries.status} = 'delivered'`);
+    
+    if (startDate) {
+      conditions.push(sql`${dispatchDeliveries.deliveredAt} >= ${startDate + "T00:00:00.000Z"}`);
+    }
+    if (endDate) {
+      conditions.push(sql`${dispatchDeliveries.deliveredAt} <= ${endDate + "T23:59:59.999Z"}`);
+    }
+
+    const query = db.select({
+      id: dispatchDeliveries.id,
+      dispatchItemId: dispatchDeliveries.dispatchItemId,
+      driverId: dispatchDeliveries.driverId,
+      outletId: dispatchDeliveries.outletId,
+      deliveredQty: dispatchDeliveries.deliveredQty,
+      remainingQty: dispatchDeliveries.remainingQty,
+      damagedQty: dispatchDeliveries.damagedQty,
+      damageReason: dispatchDeliveries.damageReason,
+      remark: dispatchDeliveries.remark,
+      podUrl: dispatchDeliveries.podUrl,
+      temperature: dispatchDeliveries.temperature,
+      status: dispatchDeliveries.status,
+      deliveredAt: dispatchDeliveries.deliveredAt,
+      deliveryTime: dispatchDeliveries.deliveryTime,
+      
+      itemCode: dispatchItems.itemCode,
+      description: dispatchItems.description,
+      requestedQty: dispatchItems.requestedQty,
+      weight: dispatchItems.weight,
+      storageType: dispatchItems.storageType,
+      routeId: dispatchItems.routeId,
+      
+      sheetId: dispatchItems.sheetId,
+      sheetDate: dispatchSheets.date,
+      
+      outletName: outlets.name,
+      outletCode: outlets.code,
+      
+      zoneName: routes.name
+    })
+    .from(dispatchDeliveries)
+    .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+    .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
+    .leftJoin(outlets, eq(dispatchDeliveries.outletId, outlets.id))
+    .leftJoin(routes, eq(dispatchItems.routeId, routes.id))
+    .where(and(...conditions))
+    .orderBy(desc(dispatchDeliveries.deliveredAt));
 
     const list = await query;
     const driversList = await this.getDrivers();
@@ -6786,6 +6902,122 @@ export class DatabaseStorage implements IStorage {
   // Pending quantities
   async getPendingQuantities(): Promise<DispatchPendingQuantity[]> {
     return db.select().from(dispatchPendingQuantities).where(eq(dispatchPendingQuantities.isCarriedForward, false));
+  }
+
+  async getAdvancedPendingDeliveries(filters: any = {}): Promise<any[]> {
+    const { startDate, endDate, routeId, outletId, driverId, storageType } = filters;
+    
+    let conditions: any[] = [
+      or(
+        isNull(schema.dispatchDeliveries.id),
+        inArray(schema.dispatchDeliveries.status, ["pending", "partial"])
+      )
+    ];
+
+    if (startDate) {
+      conditions.push(gte(schema.dispatchSheets.date, startDate));
+    }
+    if (endDate) {
+      conditions.push(lte(schema.dispatchSheets.date, endDate));
+    }
+    if (routeId && routeId !== 'all') {
+      conditions.push(or(
+        eq(schema.dispatchItems.routeId, routeId),
+        eq(schema.dispatchItems.overrideRouteId, routeId)
+      ));
+    }
+    if (outletId && outletId !== 'all') {
+      conditions.push(eq(schema.dispatchItems.outletId, outletId));
+    }
+    if (storageType && storageType !== 'all') {
+      conditions.push(eq(schema.dispatchItems.storageType, storageType));
+    }
+    
+    const results = await db.select({
+      delivery: schema.dispatchDeliveries,
+      item: schema.dispatchItems,
+      sheet: schema.dispatchSheets,
+      route: schema.routes,
+      outlet: schema.outlets
+    })
+    .from(schema.dispatchItems)
+    .leftJoin(schema.dispatchDeliveries, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+    .innerJoin(schema.dispatchSheets, eq(schema.dispatchItems.sheetId, schema.dispatchSheets.id))
+    .leftJoin(schema.routes, eq(schema.routes.id, sql`COALESCE(${schema.dispatchItems.overrideRouteId}, ${schema.dispatchItems.routeId})`))
+    .leftJoin(schema.outlets, eq(schema.outlets.id, schema.dispatchItems.outletId))
+    .where(and(...conditions))
+    .orderBy(desc(schema.dispatchSheets.date));
+    
+    const sheetIds = [...new Set(results.map(r => r.sheet.id))];
+    const assignmentsMap = new Map();
+    
+    if (sheetIds.length > 0) {
+      const allTruckAssignments = await db.select().from(schema.dispatchTruckAssignments)
+        .where(inArray(schema.dispatchTruckAssignments.sheetId, sheetIds));
+        
+      if (allTruckAssignments.length > 0) {
+        const truckAssigIds = allTruckAssignments.map(t => t.id);
+        const outletAssignments = await db.select().from(schema.dispatchOutletTruckAssignments)
+          .where(inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckAssigIds));
+          
+        for (const oa of outletAssignments) {
+          const ta = allTruckAssignments.find(t => t.id === oa.truckAssignmentId);
+          if (ta) {
+            const key = `${ta.sheetId}_${oa.outletCode}${oa.storageType ? '_' + oa.storageType : ''}`;
+            assignmentsMap.set(key, ta);
+          }
+        }
+      }
+    }
+    
+    const vehicles = await db.select().from(schema.vehicles);
+    const users = await db.select().from(schema.users);
+    
+    const mapped = results.map(r => {
+      const outletCode = r.outlet?.code || r.item.outletCode;
+      const sheetId = r.sheet.id;
+      const st = r.item.storageType;
+      
+      let assignment = assignmentsMap.get(`${sheetId}_${outletCode}_${st}`);
+      if (!assignment) {
+        assignment = assignmentsMap.get(`${sheetId}_${outletCode}`);
+      }
+      
+      let assignedTruckPlate = null;
+      let assignedDriverName = null;
+      let actualDriverId = null;
+      
+      if (assignment) {
+        actualDriverId = assignment.driverId;
+        const vehicle = vehicles.find(v => v.id === assignment.truckId);
+        const driver = users.find(u => u.id === assignment.driverId);
+        assignedTruckPlate = vehicle ? vehicle.plateNumber : null;
+        assignedDriverName = driver ? (driver.displayName || driver.username) : null;
+      }
+      
+      return {
+        ...r.delivery,
+        date: r.sheet.date,
+        sheetId: r.sheet.id,
+        itemCode: r.item.itemCode,
+        description: r.item.description,
+        requestedQty: r.item.requestedQty,
+        storageType: r.item.storageType,
+        uom: r.item.uom,
+        zoneName: r.route?.name || "Unassigned Route",
+        outletName: r.outlet?.name || "Unknown Outlet",
+        outletCode: r.outlet?.code || r.item.outletCode || "Unknown",
+        assignedDriverId: actualDriverId,
+        assignedTruckPlate,
+        assignedDriverName
+      };
+    });
+    
+    if (driverId && driverId !== 'all') {
+      return mapped.filter(m => m.assignedDriverId === driverId);
+    }
+    
+    return mapped;
   }
 
   async createPendingQuantity(data: InsertDispatchPendingQuantity): Promise<DispatchPendingQuantity> {

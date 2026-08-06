@@ -7412,6 +7412,59 @@ export async function registerRoutes(
   app.patch("/api/dispatch/items/:id/delivery", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const result = await storage.updateDispatchDelivery(req.params.id, { ...req.body, driverId: req.user?.id });
+      
+      // Auto-generate fmcg invoice logic
+      if (req.body.status === "delivered" || req.body.status === "partial") {
+        try {
+          const [dispatchItem] = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, req.params.id));
+          if (dispatchItem && dispatchItem.toNo && dispatchItem.outletId) {
+            // check if invoice exists
+            let [invoice] = await db.select().from(schema.fmcgInvoices).where(
+              and(
+                eq(schema.fmcgInvoices.toNo, dispatchItem.toNo),
+                eq(schema.fmcgInvoices.outletId, dispatchItem.outletId)
+              )
+            );
+            
+            if (!invoice) {
+               invoice = await storage.createFmcgInvoice({
+                 invoiceNumber: `FMCG-${Date.now()}`,
+                 toNo: dispatchItem.toNo,
+                 outletId: dispatchItem.outletId,
+                 status: "pending"
+               } as any, []);
+            }
+            
+            // check if item already added
+            const [existingItem] = await db.select().from(schema.fmcgInvoiceItems).where(
+              and(
+                eq(schema.fmcgInvoiceItems.invoiceId, invoice.id),
+                eq(schema.fmcgInvoiceItems.dispatchItemId, dispatchItem.id)
+              )
+            );
+            
+            if (!existingItem) {
+              await db.insert(schema.fmcgInvoiceItems).values({
+                invoiceId: invoice.id,
+                dispatchItemId: dispatchItem.id,
+                dispatchDeliveryId: result.id,
+                stockNo: dispatchItem.itemCode || "N/A",
+                itemName: dispatchItem.description || "N/A",
+                packSize: dispatchItem.storageType || dispatchItem.uom || "N/A",
+                requestedQty: dispatchItem.requestedQty ? String(dispatchItem.requestedQty) : "0",
+                deliveredQty: req.body.deliveredQty ? String(req.body.deliveredQty) : "0"
+              });
+            } else {
+               await db.update(schema.fmcgInvoiceItems).set({
+                 deliveredQty: req.body.deliveredQty ? String(req.body.deliveredQty) : "0"
+               }).where(eq(schema.fmcgInvoiceItems.id, existingItem.id));
+            }
+          }
+        } catch(invoiceErr) {
+          console.error("Auto invoice generation error:", invoiceErr);
+        }
+      }
+
       res.json(result);
     } catch (e) {
       console.error("Update delivery error:", e);
@@ -7489,6 +7542,71 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Contract upload error:", error);
       res.status(500).json({ error: "Failed to upload documents" });
+    }
+  });
+
+
+  // ==================== FMCG INVOICES ====================
+  app.get("/api/fmcg-invoices", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoices = await storage.getFmcgInvoices();
+      res.json(invoices);
+    } catch (e) {
+      console.error("Get fmcg invoices error:", e);
+      res.status(500).json({ error: "Failed to fetch invoices" });
+    }
+  });
+
+  app.get("/api/fmcg-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.getFmcgInvoice(req.params.id);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (e) {
+      console.error("Get fmcg invoice error:", e);
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.put("/api/fmcg-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { items, ...data } = req.body;
+      const oldInvoice = await storage.getFmcgInvoice(req.params.id);
+      const invoice = await storage.updateFmcgInvoice(req.params.id, data, items);
+      
+      // Handle payment and Chart of Accounts
+      if (data.status === "paid" && oldInvoice?.status !== "paid") {
+         try {
+           // Create journal entry for payment
+           const amount = parseFloat(invoice.totalAmount?.toString() || "0");
+           if (amount > 0) {
+             const accounts = await storage.getChartOfAccounts();
+             const cashAccount = accounts.find((a: any) => a.accountCode === "1000"); // Cash
+             const salesAccount = accounts.find((a: any) => a.accountCode === "4000"); // Sales Revenue
+             
+             if (cashAccount && salesAccount) {
+               await storage.createJournalEntry({
+                 date: new Date(),
+                 referenceId: invoice.invoiceNumber,
+                 sourceType: "customer_payment",
+                 sourceId: invoice.id,
+                 description: `Payment received for Delivery Invoice ${invoice.invoiceNumber}`,
+                 status: "posted"
+               } as any, [
+                 { accountId: cashAccount.id, debit: amount, credit: 0, description: "Payment received" },
+                 { accountId: salesAccount.id, debit: 0, credit: amount, description: "Sales revenue" }
+               ] as any);
+             }
+           }
+         } catch(accountErr) {
+           console.error("Chart of accounts integration error:", accountErr);
+         }
+      }
+      
+      res.json(invoice);
+    } catch (e) {
+      console.error("Update fmcg invoice error:", e);
+      res.status(500).json({ error: "Failed to update invoice" });
     }
   });
 
@@ -8137,12 +8255,31 @@ export async function registerRoutes(
         });
       }
 
+      let shiftHours = "0.00";
+      let overtimeHours = "0.00";
+      const checkOutTime = new Date();
+      
+      if (record && record.checkInTime) {
+        const diffMs = checkOutTime.getTime() - new Date(record.checkInTime).getTime();
+        const diffHours = Math.max(0, diffMs / (1000 * 60 * 60));
+        shiftHours = diffHours.toFixed(2);
+        
+        const employee = await storage.getEmployee(record.driverId);
+        const standardWorkingHours = parseFloat((employee as any)?.standardWorkingHours || "8.00");
+        
+        if (diffHours > standardWorkingHours) {
+          overtimeHours = (diffHours - standardWorkingHours).toFixed(2);
+        }
+      }
+
       const updated = await storage.updateDriverAttendance(attendanceId, {
         closingKm: closeKmVal,
         closingKmTimestamp: new Date(),
-        checkOutTime: new Date(),
+        checkOutTime: checkOutTime,
         endLatitude: latitude ? latitude.toString() : null,
         endLongitude: longitude ? longitude.toString() : null,
+        shiftHours,
+        overtimeHours,
       });
 
       // Record driver activity log
@@ -8394,6 +8531,16 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/dispatch/pending-advanced", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const pending = await storage.getAdvancedPendingDeliveries(req.query);
+      res.json(pending);
+    } catch (error: any) {
+      console.error("Failed to fetch advanced pending deliveries:", error);
+      res.status(500).json({ error: "Failed to fetch pending deliveries: " + error.message });
+    }
+  });
+
   app.post("/api/dispatch/pending", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const item = await storage.createPendingQuantity(req.body);
@@ -8409,6 +8556,17 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to mark as carried forward" });
+    }
+  });
+
+  app.get("/api/dispatch/completed-deliveries", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { startDate, endDate } = req.query as any;
+      const deliveries = await storage.getCompletedDeliveries(startDate, endDate);
+      res.json(deliveries);
+    } catch (error) {
+      console.error("Error fetching completed deliveries:", error);
+      res.status(500).json({ error: "Failed to fetch completed deliveries" });
     }
   });
 

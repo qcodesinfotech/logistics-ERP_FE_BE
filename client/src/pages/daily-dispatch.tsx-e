@@ -744,7 +744,6 @@ export default function DailyDispatchPage() {
             <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
             <TabsTrigger value="trucks" className="gap-2"><Truck className="h-4 w-4" />Truck Planning</TabsTrigger>
             <TabsTrigger value="pending" className="gap-2"><Package className="h-4 w-4" />Pending</TabsTrigger>
-            <TabsTrigger value="completed" className="gap-2"><CheckCircle2 className="h-4 w-4" />Completed</TabsTrigger>
             <TabsTrigger value="upload" className="gap-2"><Upload className="h-4 w-4" />Upload Sheet</TabsTrigger>
             <TabsTrigger value="drivers" className="gap-2"><User className="h-4 w-4" />Driver Zones</TabsTrigger>
             <TabsTrigger value="transfers" className="gap-2"><ArrowRight className="h-4 w-4" />Transfers</TabsTrigger>
@@ -993,14 +992,37 @@ export default function DailyDispatchPage() {
 
         {/* ===== PENDING QUANTITIES TAB ===== */}
         <TabsContent value="pending" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
-          <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
-            <PendingQuantitiesTab />
+          <div className="px-6 py-3 border-b flex items-center gap-4 flex-wrap bg-background print:hidden">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                className="w-40 h-8 text-sm" />
+            </div>
+            {sheetForDate ? (
+              <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
+                onClick={() => setBoardSheetId(sheetForDate.id)}>
+                <Eye className="h-3.5 w-3.5 mr-1" />
+                {boardSheetId === sheetForDate.id ? "Viewing Pending" : "Load Pending"}
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="h-4 w-4" />
+                No sheet for this date.
+              </div>
+            )}
+            
+            {boardSheetId && boardData && (
+              <div className="ml-auto flex items-center gap-2 print:hidden">
+                <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
+                  <Printer className="h-4 w-4" /> Print
+                </Button>
+              </div>
+            )}
           </div>
-        </TabsContent>
 
-        {/* ===== COMPLETED TAB ===== */}
-        <TabsContent value="completed" className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
-          <CompletedDeliveriesTab />
+          <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
+            <PendingQuantitiesTab boardData={boardData} boardSheetId={boardSheetId} isLoading={boardLoading} />
+          </div>
         </TabsContent>
 
         {/* ===== UPLOAD TAB ===== */}
@@ -1941,155 +1963,91 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 }
 
 // ===== PENDING QUANTITIES TAB =====
-function PendingQuantitiesTab() {
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [routeFilter, setRouteFilter] = useState("all");
-  const [outletFilter, setOutletFilter] = useState("all");
-  const [driverFilter, setDriverFilter] = useState("all");
-  const [storageTypeFilter, setStorageTypeFilter] = useState("all");
-
+function PendingQuantitiesTab({ boardData, boardSheetId, isLoading }: { boardData?: BoardData; boardSheetId: string | null; isLoading: boolean }) {
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
+  const [storageTypeFilter, setStorageTypeFilter] = useState<string>("all");
 
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
   const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
 
-  const { data: routes = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
-  const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
-  const { data: drivers = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
+  if (!boardSheetId) {
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-0 py-12">
+        <div className="text-center space-y-3">
+          <p className="text-lg font-semibold">Select a Date to Load Pending Deliveries</p>
+        </div>
+      </div>
+    );
+  }
 
-  const queryKey = ["/api/dispatch/pending-advanced", { startDate, endDate, routeId: routeFilter, outletId: outletFilter, driverId: driverFilter, storageType: storageTypeFilter }];
-  
-  const { data: pendingDeliveries = [], isLoading } = useQuery<any[]>({
-    queryKey,
-    queryFn: async () => {
-      const q = new URLSearchParams();
-      if (startDate) q.append("startDate", startDate);
-      if (endDate) q.append("endDate", endDate);
-      if (routeFilter !== "all") q.append("routeId", routeFilter);
-      if (outletFilter !== "all") q.append("outletId", outletFilter);
-      if (driverFilter !== "all") q.append("driverId", driverFilter);
-      if (storageTypeFilter !== "all") q.append("storageType", storageTypeFilter);
-      const res = await apiRequest("GET", `/api/dispatch/pending-advanced?${q.toString()}`);
-      return res.json();
-    }
-  });
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-0 py-12">
+        <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+      </div>
+    );
+  }
 
+  if (!boardData) {
+    return <div className="flex-1 flex items-center justify-center min-h-0 py-12 text-muted-foreground">Failed to load pending deliveries.</div>;
+  }
+
+  // Extract pending items grouped by zone and outlet
   const allStorageTypes = new Set<string>();
-  const groupedData: { zoneName: string; outlets: any[] }[] = [];
+  const groupedData: { zoneId: string; zoneName: string; outlets: any[] }[] = [];
   
-  // Group by zoneName -> outletName -> items
-  const routeMap = new Map<string, any>();
-  
-  pendingDeliveries.forEach((item: any) => {
-    if (item.storageType) allStorageTypes.add(item.storageType);
-    
-    if (!routeMap.has(item.zoneName)) {
-      routeMap.set(item.zoneName, { zoneName: item.zoneName, outletsMap: new Map() });
-    }
-    
-    const r = routeMap.get(item.zoneName);
-    const outletKey = `${item.outletCode}-${item.outletName}`;
-    
-    if (!r.outletsMap.has(outletKey)) {
-      r.outletsMap.set(outletKey, { 
-        outletName: item.outletName, 
-        outletCode: item.outletCode, 
-        items: [] 
+  boardData.zones.forEach(zone => {
+    const pendingOutlets: any[] = [];
+    zone.outlets.forEach(outlet => {
+      const pendingItems = outlet.items.filter((item: any) => {
+        if (item.storageType) allStorageTypes.add(item.storageType);
+        if (storageTypeFilter !== "all" && item.storageType !== storageTypeFilter) return false;
+        const status = item.delivery?.status || "pending";
+        return status === "pending" || status === "partial";
       });
-    }
-    
-    r.outletsMap.get(outletKey).items.push(item);
-  });
-  
-  routeMap.forEach(r => {
-    groupedData.push({
-      zoneName: r.zoneName,
-      outlets: Array.from(r.outletsMap.values())
+      if (pendingItems.length > 0) {
+        pendingOutlets.push({ ...outlet, items: pendingItems });
+      }
     });
+    if (pendingOutlets.length > 0) {
+      groupedData.push({ zoneId: zone.zoneId, zoneName: zone.zoneName, outlets: pendingOutlets });
+    }
   });
 
   const storageTypesArray = Array.from(allStorageTypes).sort();
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6">
       <Card>
-        <CardHeader className="pb-4">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Package className="h-4 w-4 text-primary" /> Advanced Pending Deliveries
-              </CardTitle>
-              <CardDescription className="mt-1">
-                View all pending items across dates, routes, and outlets.
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
-                <Printer className="h-4 w-4" /> Print
-              </Button>
-            </div>
+        <CardHeader className="flex flex-row items-center justify-between pb-4">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Package className="h-4 w-4 text-primary" /> Pending Deliveries
+            </CardTitle>
+            <CardDescription className="mt-1">
+              These items are scheduled for delivery but have not been fully completed yet.
+            </CardDescription>
           </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-4 pt-4 border-t">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Start Date</Label>
-              <Input type="date" className="h-8 text-xs" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">End Date</Label>
-              <Input type="date" className="h-8 text-xs" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Route</Label>
-              <Select value={routeFilter} onValueChange={setRouteFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Routes" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Routes</SelectItem>
-                  {routes.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Outlet</Label>
-              <Select value={outletFilter} onValueChange={setOutletFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Outlets" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  {outlets.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Driver</Label>
-              <Select value={driverFilter} onValueChange={setDriverFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Drivers" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Drivers</SelectItem>
-                  {drivers.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Storage Type</Label>
+          {storageTypesArray.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Storage Type:</Label>
               <Select value={storageTypeFilter} onValueChange={setStorageTypeFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Types" /></SelectTrigger>
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Types</SelectItem>
-                  {storageTypesArray.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                  {storageTypesArray.map(st => (
+                    <SelectItem key={st} value={st}>{st}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
+          )}
         </CardHeader>
-        
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-12 text-center text-muted-foreground flex items-center justify-center">
-              <RefreshCw className="h-6 w-6 text-primary animate-spin mr-2" /> Loading pending deliveries...
-            </div>
-          ) : groupedData.length === 0 ? (
+          {groupedData.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground">
               <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-emerald-500/60" />
               <p className="font-medium">No pending quantities!</p>
@@ -2100,24 +2058,23 @@ function PendingQuantitiesTab() {
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-100/80 border-b">
                   <tr>
-                    <th className="py-2 px-3 font-semibold text-slate-700 border-r w-64">Route / Outlet</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 border-r">Date</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 border-r w-80">Route / Outlet</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r">Item Code</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r">Description</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 border-r">Assigned To</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20">Req Qty</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20">Remaining</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 w-24">Status</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Req Qty</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Delivered</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Remaining</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 w-28">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {groupedData.map(zone => {
-                    const isRouteExpanded = expandedRoutes[zone.zoneName] !== false; // Default true
+                    const isRouteExpanded = expandedRoutes[zone.zoneId] !== false; // Default true
                     
                     return (
-                      <React.Fragment key={zone.zoneName}>
-                        <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneName)}>
-                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={8}>
+                      <React.Fragment key={zone.zoneId}>
+                        <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneId)}>
+                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={7}>
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
@@ -2126,13 +2083,13 @@ function PendingQuantitiesTab() {
                         </tr>
 
                         {isRouteExpanded && zone.outlets.map(outlet => {
-                          const outletId = `${zone.zoneName}-${outlet.outletCode}`;
-                          const isOutletExpanded = expandedOutlets[outletId] !== false;
+                          const outletId = `${zone.zoneId}-${outlet.outletCode}`;
+                          const isOutletExpanded = expandedOutlets[outletId] !== false; // Default true for now
 
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
-                                <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={8}>
+                                <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={7}>
                                   {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                                   {outlet.outletName}
                                   <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
@@ -2142,36 +2099,24 @@ function PendingQuantitiesTab() {
 
                               {isOutletExpanded && outlet.items.map((p: any) => {
                                 const reqQty = parseFloat(p.requestedQty || p.weight || "0");
-                                const delQty = parseFloat(p.deliveredQty || p.totalDelivered || "0");
-                                let remQty = parseFloat(p.remainingQty || p.remaining || "0");
-                                if (remQty === 0 && !p.remainingQty && !p.remaining) remQty = reqQty - delQty;
+                                const delQty = parseFloat(p.delivery?.deliveredQty || p.totalDelivered || "0");
+                                let remQty = parseFloat(p.delivery?.remainingQty || p.remaining || "0");
+                                if (remQty === 0 && !p.delivery?.remainingQty && !p.remaining) remQty = reqQty - delQty;
                                 
                                 return (
                                   <tr key={p.id} className="hover:bg-slate-50 text-slate-600 bg-white">
                                     <td className="py-1.5 px-3 border-r pl-12 text-xs text-muted-foreground">
                                       {p.storageType && <Badge variant="outline" className="text-[9px] h-4 px-1 mr-1">{p.storageType}</Badge>}
                                     </td>
-                                    <td className="py-1.5 px-3 border-r text-xs whitespace-nowrap">
-                                      {format(new Date(p.date), "dd MMM yy")}
-                                    </td>
                                     <td className="py-1.5 px-3 border-r font-mono text-xs">{p.itemCode}</td>
                                     <td className="py-1.5 px-3 border-r text-xs max-w-[200px] truncate" title={p.description || ""}>
                                       {p.description || "—"}
                                     </td>
-                                    <td className="py-1.5 px-3 border-r text-xs">
-                                      {p.assignedDriverName || p.assignedTruckPlate ? (
-                                        <div className="flex flex-col gap-0.5">
-                                          {p.assignedDriverName && <span className="font-medium text-slate-700 flex items-center gap-1"><User className="h-3 w-3" />{p.assignedDriverName}</span>}
-                                          {p.assignedTruckPlate && <span className="text-muted-foreground flex items-center gap-1 text-[10px]"><Truck className="h-2.5 w-2.5" />{p.assignedTruckPlate}</span>}
-                                        </div>
-                                      ) : (
-                                        <span className="text-muted-foreground italic text-xs">Unassigned</span>
-                                      )}
-                                    </td>
                                     <td className="py-1.5 px-3 border-r text-right font-medium">{reqQty.toFixed(2)}</td>
+                                    <td className="py-1.5 px-3 border-r text-right text-emerald-600 font-medium">{delQty > 0 ? delQty.toFixed(2) : "-"}</td>
                                     <td className="py-1.5 px-3 border-r text-right font-bold text-amber-600">{remQty.toFixed(2)}</td>
                                     <td className="py-1.5 px-3 text-xs">
-                                      <StatusBadge status={p.status || "pending"} />
+                                      <StatusBadge status={p.delivery?.status || "pending"} />
                                     </td>
                                   </tr>
                                 );
@@ -2193,304 +2138,6 @@ function PendingQuantitiesTab() {
 }
 
 // ===== TRUCK TRANSFERS TAB =====
-// ===== COMPLETED DELIVERIES TAB =====
-function CompletedDeliveriesTab() {
-  const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [storageTypeFilter, setStorageTypeFilter] = useState("all");
-  const [routeFilter, setRouteFilter] = useState("all");
-  const [outletFilter, setOutletFilter] = useState("all");
-  const [driverFilter, setDriverFilter] = useState("all");
-  const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
-  const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
-  const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; images: string[] }>({ isOpen: false, title: "", images: [] });
-  const { toast } = useToast();
-
-  const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
-  const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
-
-  const { data: deliveries = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/dispatch/completed-deliveries", { startDate, endDate }],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/dispatch/completed-deliveries?startDate=${startDate}&endDate=${endDate}`);
-      return res.json();
-    }
-  });
-
-  if (isLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center min-h-0 py-12">
-        <RefreshCw className="h-6 w-6 text-primary animate-spin" />
-      </div>
-    );
-  }
-
-  // Build filter options
-  const allStorageTypes = new Set<string>();
-  const allRoutes = new Map<string, string>();
-  const allOutlets = new Map<string, string>();
-  const allDrivers = new Map<string, string>();
-
-  (deliveries || []).forEach(d => {
-    if (d.storageType) allStorageTypes.add(d.storageType);
-    if (d.routeId && d.zoneName) allRoutes.set(d.routeId, d.zoneName);
-    if (d.outletId && d.outletName) allOutlets.set(d.outletId, `${d.outletName} (${d.outletCode})`);
-    if (d.driverId && d.driverName) allDrivers.set(d.driverId, d.driverName);
-  });
-
-  // Apply filters
-  const filteredDeliveries = (deliveries || []).filter(d => {
-    if (storageTypeFilter !== "all" && d.storageType !== storageTypeFilter) return false;
-    if (routeFilter !== "all" && d.routeId !== routeFilter) return false;
-    if (outletFilter !== "all" && d.outletId !== outletFilter) return false;
-    if (driverFilter !== "all" && d.driverId !== driverFilter) return false;
-    return true;
-  });
-
-  // Group by Route -> Outlet
-  const groupedMap = new Map<string, { zoneId: string; zoneName: string; outlets: Map<string, { outletId: string; outletCode: string; outletName: string; items: any[]; podUrls: Set<string> }> }>();
-  
-  filteredDeliveries.forEach(d => {
-    const routeId = d.routeId || "unassigned";
-    const routeName = d.zoneName || "Unassigned Route";
-    const outletId = d.outletId || d.outletCode || "unassigned";
-    
-    if (!groupedMap.has(routeId)) {
-      groupedMap.set(routeId, { zoneId: routeId, zoneName: routeName, outlets: new Map() });
-    }
-    const routeGroup = groupedMap.get(routeId)!;
-    
-    if (!routeGroup.outlets.has(outletId)) {
-      routeGroup.outlets.set(outletId, { outletId: d.outletId, outletCode: d.outletCode, outletName: d.outletName || "Unassigned", items: [], podUrls: new Set() });
-    }
-    const outletGroup = routeGroup.outlets.get(outletId)!;
-    outletGroup.items.push(d);
-    
-    if (d.podUrl) outletGroup.podUrls.add(d.podUrl);
-  });
-
-  const groupedData = Array.from(groupedMap.values()).map(r => ({ ...r, outlets: Array.from(r.outlets.values()) }));
-  
-  const handlePrint = () => window.print();
-  
-  const handleExport = () => {
-    if (!filteredDeliveries.length) return;
-    const ws = XLSX.utils.json_to_sheet(filteredDeliveries.map(d => ({
-      Date: d.deliveredAt ? format(new Date(d.deliveredAt), "dd/MM/yyyy HH:mm") : "",
-      Route: d.zoneName,
-      Outlet: d.outletName,
-      Code: d.outletCode,
-      ItemCode: d.itemCode,
-      Description: d.description,
-      RequestedQty: d.requestedQty,
-      DeliveredQty: d.deliveredQty,
-      Driver: d.driverName,
-      Status: d.status
-    })));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Completed Deliveries");
-    XLSX.writeFile(wb, `Completed_Deliveries_${startDate}_to_${endDate}.xlsx`);
-  };
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <Card>
-        <CardHeader className="flex flex-col md:flex-row md:items-start justify-between pb-4 gap-4">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Completed Deliveries
-            </CardTitle>
-            <CardDescription className="mt-1">
-              View delivered items, track PODs, and filter historical data.
-            </CardDescription>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleExport}><Download className="h-4 w-4 mr-2" /> Export</Button>
-            <Button variant="outline" size="sm" onClick={handlePrint} className="print:hidden"><Printer className="h-4 w-4 mr-2" /> Print</Button>
-          </div>
-        </CardHeader>
-        
-        <div className="px-6 pb-4 border-b space-y-4 print:hidden">
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Start Date</Label>
-              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-8 text-xs" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">End Date</Label>
-              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="h-8 text-xs" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Storage Type</Label>
-              <Select value={storageTypeFilter} onValueChange={setStorageTypeFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  {Array.from(allStorageTypes).sort().map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Route</Label>
-              <Select value={routeFilter} onValueChange={setRouteFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Routes</SelectItem>
-                  {Array.from(allRoutes.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Outlet</Label>
-              <Select value={outletFilter} onValueChange={setOutletFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  {Array.from(allOutlets.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Driver</Label>
-              <Select value={driverFilter} onValueChange={setDriverFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Drivers</SelectItem>
-                  {Array.from(allDrivers.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <CardContent className="p-0">
-          {groupedData.length === 0 ? (
-            <div className="p-12 text-center text-muted-foreground">
-              <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-emerald-500/60" />
-              <p className="font-medium">No completed deliveries found!</p>
-              <p className="text-sm">Try adjusting your filters or date range.</p>
-            </div>
-          ) : (
-            <div className="bg-white border-t overflow-hidden text-sm rounded-b-xl">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-slate-100/80 border-b">
-                  <tr>
-                    <th className="py-2 px-3 font-semibold text-slate-700 border-r w-80">Route / Outlet</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 border-r">Item Code</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 border-r">Description</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Req Qty</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Delivered</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 w-28 border-r">Status</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 w-40">Driver</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {groupedData.map(zone => {
-                    const isRouteExpanded = expandedRoutes[zone.zoneId] !== false;
-                    return (
-                      <React.Fragment key={zone.zoneId}>
-                        <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneId)}>
-                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={7}>
-                            {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
-                            <MapPin className="h-3.5 w-3.5 text-primary" />
-                            {zone.zoneName}
-                            <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{zone.outlets.length} Outlets</Badge>
-                          </td>
-                        </tr>
-                        {isRouteExpanded && zone.outlets.map(outlet => {
-                          const outletId = `${zone.zoneId}-${outlet.outletCode}`;
-                          const isOutletExpanded = expandedOutlets[outletId] !== false;
-                          return (
-                            <React.Fragment key={outletId}>
-                              <tr className="hover:bg-slate-50 text-slate-700 group">
-                                <td className="py-1.5 px-3 border-r flex items-center justify-between font-medium pl-6 bg-slate-50/50" colSpan={7}>
-                                  <div className="flex items-center gap-1.5 cursor-pointer flex-1" onClick={() => toggleOutlet(outletId)}>
-                                    {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
-                                    {outlet.outletName}
-                                    <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
-                                    <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{outlet.items.length} Items</Badge>
-                                  </div>
-                                  {outlet.podUrls.size > 0 && (
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      className="h-6 text-[10px] px-2 print:hidden"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setViewPodsModal({ isOpen: true, title: outlet.outletName, images: Array.from(outlet.podUrls) });
-                                      }}
-                                    >
-                                      <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.podUrls.size})
-                                    </Button>
-                                  )}
-                                </td>
-                              </tr>
-                              {isOutletExpanded && outlet.items.map((p: any) => {
-                                const reqQty = parseFloat(p.requestedQty || p.weight || "0");
-                                const delQty = parseFloat(p.deliveredQty || "0");
-                                return (
-                                  <tr key={p.id} className="hover:bg-slate-50 text-slate-600 bg-white">
-                                    <td className="py-1.5 px-3 border-r pl-12 text-xs text-muted-foreground">
-                                      {p.storageType && <Badge variant="outline" className="text-[9px] h-4 px-1 mr-1">{p.storageType}</Badge>}
-                                      {p.deliveredAt && format(new Date(p.deliveredAt), "dd/MM HH:mm")}
-                                    </td>
-                                    <td className="py-1.5 px-3 border-r font-mono text-xs">{p.itemCode}</td>
-                                    <td className="py-1.5 px-3 border-r text-xs max-w-[200px] truncate" title={p.description || ""}>
-                                      {p.description || "—"}
-                                    </td>
-                                    <td className="py-1.5 px-3 border-r text-right font-medium">{reqQty.toFixed(2)}</td>
-                                    <td className="py-1.5 px-3 border-r text-right text-emerald-600 font-medium">{delQty.toFixed(2)}</td>
-                                    <td className="py-1.5 px-3 text-xs border-r">
-                                      <StatusBadge status={p.status || "delivered"} />
-                                    </td>
-                                    <td className="py-1.5 px-3 text-xs max-w-[150px] truncate" title={p.driverName}>
-                                      {p.driverName}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </React.Fragment>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      
-      <Dialog open={viewPodsModal.isOpen} onOpenChange={(v) => setViewPodsModal(prev => ({ ...prev, isOpen: v }))}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Proof of Delivery - {viewPodsModal.title}</DialogTitle>
-            <DialogDescription>
-              Showing {viewPodsModal.images.length} attachment(s) for this outlet.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            {viewPodsModal.images.map((url, idx) => (
-              <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex items-center justify-center min-h-[300px]">
-                {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
-                  <img src={url} alt={`POD ${idx + 1}`} className="w-full h-auto object-contain max-h-[400px]" />
-                ) : (
-                  <div className="text-center p-4">
-                    <FileText className="mx-auto h-8 w-8 text-slate-400 mb-2" />
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">
-                      View Document {idx + 1}
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
 function TruckTransfersTab({ zones, vehicles: _v }: any) {
   const { toast } = useToast();
   const queryClient = useQueryClient();

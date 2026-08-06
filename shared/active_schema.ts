@@ -72,7 +72,9 @@ import {
   contractInvoices,
   orderExpenses,
   invoicePayments,
-  routes
+  routes,
+  fmcgInvoices,
+  fmcgInvoiceItems
 } from "./schema";
 
 export {
@@ -149,5 +151,7 @@ export {
   contractInvoices,
   orderExpenses,
   invoicePayments,
-  routes
+  routes,
+  fmcgInvoices,
+  fmcgInvoiceItems
 };

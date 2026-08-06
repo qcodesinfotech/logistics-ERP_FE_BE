@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { UserCircle, Plus, Pencil, Trash2, DollarSign, CreditCard, RotateCcw, FileText, Printer, History, Upload, X } from "lucide-react";
+import { UserCircle, Plus, Pencil, Trash2, DollarSign, CreditCard, RotateCcw, FileText, Printer, History, Upload, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -66,6 +66,7 @@ const employeeSchema = z.object({
   joiningDate: z.string().optional(),
   basicSalary: z.string().default("0.000"),
   allowances: z.string().default("0.000"),
+  standardWorkingHours: z.string().default("8.00"),
   status: z.string().default("active"),
 });
 
@@ -84,6 +85,7 @@ export default function Employees() {
   const [isSalaryDialogOpen, setIsSalaryDialogOpen] = useState(false);
   const [isAdvanceDialogOpen, setIsAdvanceDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const { toast } = useToast();
 
   const currentDate = new Date();
@@ -143,6 +145,7 @@ export default function Employees() {
       joiningDate: "",
       basicSalary: "0.000",
       allowances: "0.000",
+      standardWorkingHours: "8.00",
       status: "active",
     },
   });
@@ -395,6 +398,7 @@ export default function Employees() {
       joiningDate: employee.joiningDate || "",
       basicSalary: employee.basicSalary || "0.000",
       allowances: employee.allowances || "0.000",
+      standardWorkingHours: employee.standardWorkingHours || "8.00",
       status: employee.status,
     });
     setIsDialogOpen(true);
@@ -792,7 +796,18 @@ export default function Employees() {
                 <FormField control={form.control} name="password" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Password</FormLabel>
-                    <FormControl><Input {...field} type="password" placeholder="LogixD@123" /></FormControl>
+                    <FormControl>
+                      <div className="relative">
+                        <Input {...field} type={showPassword ? "text" : "password"} placeholder="LogixD@123" className="pr-10" />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -878,6 +893,13 @@ export default function Employees() {
                   <FormItem>
                     <FormLabel>Allowances (BD)</FormLabel>
                     <FormControl><Input {...field} type="number" step="0.001" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="standardWorkingHours" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Standard Working Hours / Day</FormLabel>
+                    <FormControl><Input {...field} type="number" step="0.5" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />

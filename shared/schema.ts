@@ -607,6 +607,7 @@ export const employees = pgTable("employees", {
   allowances: decimal("allowances", { precision: 12, scale: 3 }).default("0.000"),
   photoUrl: text("photo_url"),
   password: text("password").default("LogixD@123"),
+  standardWorkingHours: decimal("standard_working_hours", { precision: 5, scale: 2 }).default("8.00"),
   status: text("status").notNull().default("active"),
 });
 
@@ -2303,6 +2304,71 @@ export type InsertDispatchOutletTruckAssignment = z.infer<typeof insertDispatchO
 export const insertDispatchPendingQuantitySchema = createInsertSchema(dispatchPendingQuantities).omit({ id: true, createdAt: true });
 export type DispatchPendingQuantity = typeof dispatchPendingQuantities.$inferSelect;
 export type InsertDispatchPendingQuantity = z.infer<typeof insertDispatchPendingQuantitySchema>;
+
+// ==================== FMCG DELIVERY INVOICES ====================
+export const fmcgInvoices = pgTable("fmcg_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  toNo: text("to_no").notNull(),
+  outletId: varchar("outlet_id"),
+  customerId: varchar("customer_id"),
+  
+  // Header fields
+  gdnNumber: text("gdn_number"),
+  gdnDate: date("gdn_date"),
+  orderNumber: text("order_number"),
+  orderDate: date("order_date"),
+  vehicleNumber: text("vehicle_number"),
+  warehouseNo: text("warehouse_no"),
+  gatePassNo: text("gate_pass_no"),
+  containerNo: text("container_no"),
+  
+  // Financials
+  subtotal: decimal("subtotal", { precision: 12, scale: 3 }).default("0.000"),
+  vatAmount: decimal("vat_amount", { precision: 12, scale: 3 }).default("0.000"),
+  discount: decimal("discount", { precision: 12, scale: 3 }).default("0.000"),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 3 }).default("0.000"),
+  paidAmount: decimal("paid_amount", { precision: 12, scale: 3 }).default("0.000"),
+  paymentStatus: text("payment_status").notNull().default("unpaid"), // unpaid|partial|paid
+  
+  // Footer fields
+  status: text("status").notNull().default("pending"), // pending|approved|sent|paid|overdue
+  note: text("note"),
+  issuedBy: text("issued_by"),
+  supervisor: text("supervisor"),
+  customerSignUrl: text("customer_sign_url"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const fmcgInvoiceItems = pgTable("fmcg_invoice_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceId: varchar("invoice_id").notNull(),
+  dispatchItemId: varchar("dispatch_item_id"),
+  dispatchDeliveryId: varchar("dispatch_delivery_id"),
+  
+  // Item details
+  stockNo: text("stock_no").notNull(),
+  itemName: text("item_name").notNull(),
+  packSize: text("pack_size"),
+  requestedQty: decimal("requested_qty", { precision: 10, scale: 3 }),
+  deliveredQty: decimal("delivered_qty", { precision: 10, scale: 3 }),
+  
+  // Financials
+  unitPrice: decimal("unit_price", { precision: 12, scale: 3 }).default("0.000"),
+  totalPrice: decimal("total_price", { precision: 12, scale: 3 }).default("0.000"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertFmcgInvoiceSchema = createInsertSchema(fmcgInvoices).omit({ id: true, createdAt: true, updatedAt: true });
+export type FmcgInvoice = typeof fmcgInvoices.$inferSelect;
+export type InsertFmcgInvoice = z.infer<typeof insertFmcgInvoiceSchema>;
+
+export const insertFmcgInvoiceItemSchema = createInsertSchema(fmcgInvoiceItems).omit({ id: true, createdAt: true });
+export type FmcgInvoiceItem = typeof fmcgInvoiceItems.$inferSelect;
+export type InsertFmcgInvoiceItem = z.infer<typeof insertFmcgInvoiceItemSchema>;
 
 export const insertTruckTransferSchema = createInsertSchema(truckTransfers).omit({ id: true, createdAt: true });
 export type TruckTransfer = typeof truckTransfers.$inferSelect;

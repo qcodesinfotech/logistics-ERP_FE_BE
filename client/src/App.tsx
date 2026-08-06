@@ -45,6 +45,8 @@ import RoutesPage from "@/pages/routes";
 import ZonesPage from "@/pages/zones";
 import ContractsPage from "@/pages/contracts";
 import FleetPage from "@/pages/fleet";
+import ContractInvoicesPage from "@/pages/contract-invoices";
+import DeliveryInvoicesPage from "@/pages/delivery-invoices";
 import RfqPage from "@/pages/rfq";
 import OrdersPage from "@/pages/orders";
 import InvoicesPage from "@/pages/invoices";
@@ -54,7 +56,6 @@ import DriverHubPage from "@/pages/driver-hub";
 import DriverAllocationPage from "@/pages/driver-allocation";
 import FinanceExpandedPage from "@/pages/finance-expanded";
 import SettingsPage from "@/pages/settings";
-import ContractInvoicesPage from "@/pages/contract-invoices";
 
 function PrivateRouter() {
   return (
@@ -89,6 +90,7 @@ function PrivateRouter() {
       <Route path="/logistics/driver-allocation" component={DriverAllocationPage} />
       <Route path="/logistics/finance" component={FinanceExpandedPage} />
       <Route path="/logistics/contract-invoices" component={ContractInvoicesPage} />
+      <Route path="/logistics/delivery-invoices" component={DeliveryInvoicesPage} />
       <Route path="/settings" component={SettingsPage} />
 
       <Route component={NotFound} />
