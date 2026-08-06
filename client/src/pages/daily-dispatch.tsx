@@ -739,17 +739,17 @@ export default function DailyDispatchPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 print:block">
-        <div className="px-6 pt-4 border-b bg-background print:hidden">
-          <TabsList className="gap-1 flex-wrap h-auto justify-start">
-            <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
-            <TabsTrigger value="trucks" className="gap-2"><Truck className="h-4 w-4" />Truck Planning</TabsTrigger>
-            <TabsTrigger value="pending" className="gap-2"><Package className="h-4 w-4" />Pending</TabsTrigger>
-            <TabsTrigger value="completed" className="gap-2"><CheckCircle2 className="h-4 w-4" />Completed</TabsTrigger>
-            <TabsTrigger value="upload" className="gap-2"><Upload className="h-4 w-4" />Upload Sheet</TabsTrigger>
-            <TabsTrigger value="drivers" className="gap-2"><User className="h-4 w-4" />Driver Zones</TabsTrigger>
-            <TabsTrigger value="transfers" className="gap-2"><ArrowRight className="h-4 w-4" />Transfers</TabsTrigger>
-            <TabsTrigger value="summary" className="gap-2"><FileText className="h-4 w-4" />Summary</TabsTrigger>
-            <TabsTrigger value="item-summary" className="gap-2"><FileText className="h-4 w-4" />Item Summary</TabsTrigger>
+        <div className="px-6 pt-4 border-b bg-background print:hidden overflow-x-auto">
+          <TabsList className="gap-0.5 flex-nowrap h-auto justify-start w-max min-w-full">
+            <TabsTrigger value="board" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><MapPin className="h-3.5 w-3.5" />Dispatch Board</TabsTrigger>
+            <TabsTrigger value="trucks" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Truck className="h-3.5 w-3.5" />Truck Planning</TabsTrigger>
+            <TabsTrigger value="pending" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Package className="h-3.5 w-3.5" />Pending</TabsTrigger>
+            <TabsTrigger value="completed" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><CheckCircle2 className="h-3.5 w-3.5" />Completed</TabsTrigger>
+            <TabsTrigger value="upload" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Upload className="h-3.5 w-3.5" />Upload Sheet</TabsTrigger>
+            <TabsTrigger value="drivers" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><User className="h-3.5 w-3.5" />Driver Zones</TabsTrigger>
+            <TabsTrigger value="transfers" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><ArrowRight className="h-3.5 w-3.5" />Transfers</TabsTrigger>
+            <TabsTrigger value="summary" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />Summary</TabsTrigger>
+            <TabsTrigger value="item-summary" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />Item Summary</TabsTrigger>
           </TabsList>
         </div>
 
