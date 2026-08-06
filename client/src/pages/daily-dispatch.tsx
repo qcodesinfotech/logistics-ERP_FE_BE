@@ -1000,7 +1000,7 @@ export default function DailyDispatchPage() {
 
         {/* ===== COMPLETED TAB ===== */}
         <TabsContent value="completed" className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
-          <CompletedDeliveriesTab />
+          <CompletedDeliveriesTab selectedDate={selectedDate} />
         </TabsContent>
 
         {/* ===== UPLOAD TAB ===== */}
@@ -2201,9 +2201,16 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
 // ===== TRUCK TRANSFERS TAB =====
 // ===== COMPLETED DELIVERIES TAB =====
-function CompletedDeliveriesTab() {
-  const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
+  const [startDate, setStartDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
+  const [endDate, setEndDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
+
+  useEffect(() => {
+    if (selectedDate) {
+      setStartDate(selectedDate);
+      setEndDate(selectedDate);
+    }
+  }, [selectedDate]);
   const [storageTypeFilter, setStorageTypeFilter] = useState("all");
   const [routeFilter, setRouteFilter] = useState("all");
   const [outletFilter, setOutletFilter] = useState("all");
