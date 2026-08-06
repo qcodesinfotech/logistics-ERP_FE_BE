@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Receipt, Plus, FileText, Check, Send, Clock, AlertCircle, Banknote, ChevronDown, ChevronUp, Printer, Edit2, FileUp } from "lucide-react";
+import { Receipt, Plus, FileText, Check, Send, Clock, AlertCircle, Banknote, ChevronDown, ChevronUp, Printer, Edit2, FileUp, CreditCard, Share2, Search, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,9 @@ import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CurrencyDisplay } from "@/components/currency-display";
 import { MetricCard } from "@/components/metric-card";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -46,6 +49,19 @@ export default function ContractInvoicesPage() {
   const [generateDialog, setGenerateDialog] = useState(false);
   const [viewDialog, setViewDialog] = useState<any | null>(null);
   const [editUsageDialog, setEditUsageDialog] = useState<any | null>(null);
+  
+  // Search & Filter State
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterStartDate, setFilterStartDate] = useState("");
+  const [filterEndDate, setFilterEndDate] = useState("");
+
+  // Payment State
+  const [paymentOrder, setPaymentOrder] = useState<any | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+
   const [genForm, setGenForm] = useState({ contractId: "", periodStart: "", periodEnd: "" });
   const [usageForm, setUsageForm] = useState({
     otHours: "0", holidayDays: "0", extraTruckTrips: "0",
@@ -56,6 +72,14 @@ export default function ContractInvoicesPage() {
   const { data: contracts = [] } = useQuery<Contract[]>({ queryKey: ["/api/contracts"] });
   const { data: clients = [] } = useQuery<Client[]>({ queryKey: ["/api/clients"] });
   const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
+  const { data: bankAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/bank-accounts"] });
+  const { data: pettyCashAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/petty-cash"] });
+
+  // Fetch GDN Details for the currently viewed invoice
+  const { data: gdnDeliveries = [], isLoading: isLoadingGdn } = useQuery<any[]>({
+    queryKey: [viewDialog ? `/api/contract-invoices/${viewDialog.id}/deliveries` : null],
+    enabled: !!viewDialog,
+  });
 
   const totalPaid = invoices.filter(i => i.status === "paid").reduce((s, i) => s + parseFloat(i.totalAmount || "0"), 0);
   const totalOutstanding = invoices.filter(i => ["sent", "approved", "partially_paid", "overdue"].includes(i.status)).reduce((s, i) => s + parseFloat(i.totalAmount || "0"), 0);
@@ -93,9 +117,83 @@ export default function ContractInvoicesPage() {
     onError: (e: unknown) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
 
+  const paymentMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return apiRequest("POST", `/api/contract-invoices/${paymentOrder.id}/pay`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contract-invoices"] });
+      toast({ title: "Payment recorded successfully" });
+      setPaymentOrder(null);
+    },
+    onError: (error) => toast({ title: getErrorMessage(error), variant: "destructive" })
+  });
+
+  const handlePayClick = (e: any, invoice: any) => {
+    e.stopPropagation();
+    setPaymentOrder(invoice);
+    const balance = Number(invoice.totalAmount || 0) - Number(invoice.paidAmount || 0);
+    setPaymentAmount(balance > 0 ? balance.toFixed(3) : "0.000");
+    setPaymentMethod("bank_transfer");
+    setPaymentAccountId("");
+    setPaymentReference("");
+  };
+
+  const handlePaymentSubmit = () => {
+    if (!paymentAmount || Number(paymentAmount) <= 0) {
+      toast({ title: "Please enter a valid amount", variant: "destructive" });
+      return;
+    }
+    if ((paymentMethod === "bank_transfer" || paymentMethod === "cheque") && !paymentAccountId) {
+      toast({ title: "Please select a bank account", variant: "destructive" });
+      return;
+    }
+    if (paymentMethod === "cash" && !paymentAccountId) {
+      toast({ title: "Please select a petty cash account", variant: "destructive" });
+      return;
+    }
+    
+    paymentMutation.mutate({
+      customerId: paymentOrder.customerId,
+      amount: paymentAmount,
+      paymentMethod,
+      reference: paymentReference,
+      bankAccountId: (paymentMethod === "bank_transfer" || paymentMethod === "cheque") ? paymentAccountId : null,
+      pettyCashId: paymentMethod === "cash" ? paymentAccountId : null,
+    });
+  };
+
+  const handleShare = (invoice: any, statusType: string) => {
+    // Generate text/link to share
+    const text = `Contract Invoice ${invoice.invoiceNumber}\nCustomer: ${getClientName(invoice.customerId)}\nAmount: ${invoice.totalAmount} BHD\nStatus: ${statusType}`;
+    if (navigator.share) {
+      navigator.share({ title: `Invoice ${invoice.invoiceNumber}`, text }).catch(console.error);
+    } else {
+      window.location.href = `mailto:?subject=Invoice ${invoice.invoiceNumber}&body=${encodeURIComponent(text)}`;
+    }
+  };
+
   const getClientName = (id: string) => clients.find(c => c.id === id)?.name || "Unknown";
   const getContractName = (id: string) => contracts.find(c => c.id === id)?.name || id;
   const getOutletName = (id: string) => outlets.find(o => o.id === id)?.name || id;
+
+  const filteredInvoices = invoices.filter(inv => {
+    const matchesSearch = searchTerm === "" || 
+      inv.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      getClientName(inv.customerId).toLowerCase().includes(searchTerm.toLowerCase());
+    
+    let matchesStartDate = true;
+    let matchesEndDate = true;
+    
+    if (filterStartDate) {
+      matchesStartDate = new Date(inv.periodStart) >= new Date(filterStartDate);
+    }
+    if (filterEndDate) {
+      matchesEndDate = new Date(inv.periodEnd) <= new Date(filterEndDate);
+    }
+    
+    return matchesSearch && matchesStartDate && matchesEndDate;
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -123,11 +221,39 @@ export default function ContractInvoicesPage() {
           <CardDescription>All invoices generated from active contracts. Click an invoice to view details or update status.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="p-4 bg-muted/20 border-b flex flex-wrap gap-4 items-center justify-between">
+            <div className="flex flex-wrap gap-3 items-center flex-1">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by customer or invoice #"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 bg-background"
+                />
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Input
+                  type="date"
+                  value={filterStartDate}
+                  onChange={(e) => setFilterStartDate(e.target.value)}
+                  className="bg-background w-36 text-xs"
+                />
+                <span className="text-muted-foreground text-xs">to</span>
+                <Input
+                  type="date"
+                  value={filterEndDate}
+                  onChange={(e) => setFilterEndDate(e.target.value)}
+                  className="bg-background w-36 text-xs"
+                />
+              </div>
+            </div>
+          </div>
           {isLoading ? (
             <div className="p-8 text-center text-muted-foreground">Loading invoices...</div>
-          ) : invoices.length === 0 ? (
+          ) : filteredInvoices.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground">
-              No contract invoices yet. Click 'Generate Invoice' to create one from a contract.
+              No contract invoices found matching the criteria.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -147,7 +273,7 @@ export default function ContractInvoicesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {invoices.map((inv) => {
+                  {filteredInvoices.map((inv) => {
                     const extras = parseFloat(inv.holidayAmount || "0") + parseFloat(inv.extraTruckAmount || "0") +
                       parseFloat(inv.emergencyAmount || "0") + parseFloat(inv.redeliveryAmount || "0") + parseFloat(inv.outsourcedAmount || "0");
                     return (
@@ -165,9 +291,28 @@ export default function ContractInvoicesPage() {
                         <TableCell className="text-right font-bold"><CurrencyDisplay amount={inv.totalAmount} /></TableCell>
                         <TableCell><InvoiceStatusBadge status={inv.status} /></TableCell>
                         <TableCell className="text-right">
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setViewDialog(inv); }}>
-                            <Receipt className="h-4 w-4 mr-1" /> View
-                          </Button>
+                          <div className="flex justify-end gap-1 items-center" onClick={(e) => e.stopPropagation()}>
+                            {["sent", "partially_paid"].includes(inv.status) && (
+                              <Button size="sm" variant="outline" className="h-8 gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={(e) => handlePayClick(e, inv)}>
+                                <CreditCard className="h-3.5 w-3.5" /> Pay
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="h-8" onClick={(e) => { e.stopPropagation(); setViewDialog(inv); }}>
+                              <Receipt className="h-4 w-4 mr-1" /> View
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleShare(inv, inv.status)}>
+                                  <Share2 className="mr-2 h-4 w-4" /> Share with Customer
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -398,6 +543,45 @@ export default function ContractInvoicesPage() {
                 </div>
               </div>
 
+              {/* GDN Details Table */}
+              <div className="mt-8 border-t pt-4">
+                <h3 className="font-bold text-lg text-gray-800 mb-3">Goods Delivery Note (GDN) Details</h3>
+                {isLoadingGdn ? (
+                  <p className="text-gray-500 text-sm">Loading delivery records...</p>
+                ) : gdnDeliveries.length === 0 ? (
+                  <p className="text-gray-500 text-sm">No delivery records found for this period.</p>
+                ) : (
+                  <Table className="border text-sm">
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Outlet</TableHead>
+                        <TableHead>Item # / Desc</TableHead>
+                        <TableHead>Storage</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {gdnDeliveries.map((del: any, idx: number) => (
+                        <TableRow key={idx}>
+                          <TableCell>{del.deliveredAt ? format(new Date(del.deliveredAt), 'dd/MM/yyyy') : (del.sheetDate ? format(new Date(del.sheetDate), 'dd/MM/yyyy') : 'N/A')}</TableCell>
+                          <TableCell>
+                            <div>{del.outletName || 'N/A'}</div>
+                            <div className="text-[10px] text-gray-500">{del.outletCode}</div>
+                          </TableCell>
+                          <TableCell>
+                            <div>{del.itemCode}</div>
+                            <div className="text-xs text-gray-500">{del.description}</div>
+                          </TableCell>
+                          <TableCell>{del.storageType || 'N/A'}</TableCell>
+                          <TableCell className="text-right font-medium">{del.deliveredQty || del.requestedQty}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+
               {/* Delivery Attachments Section */}
               {viewDialog.deliveryAttachments && viewDialog.deliveryAttachments.length > 0 && (
                 <div className="mt-8 border-t pt-4">
@@ -443,11 +627,6 @@ export default function ContractInvoicesPage() {
                     <Send className="h-3.5 w-3.5" /> Mark as Sent
                   </Button>
                 )}
-                {["sent", "partially_paid"].includes(viewDialog.status) && (
-                  <Button size="sm" onClick={() => statusMutation.mutate({ id: viewDialog.id, status: "paid" })} className="bg-emerald-600 hover:bg-emerald-700 gap-1">
-                    <Banknote className="h-3.5 w-3.5" /> Mark as Paid
-                  </Button>
-                )}
                 {viewDialog.status === "sent" && (
                   <Button size="sm" variant="outline" onClick={() => statusMutation.mutate({ id: viewDialog.id, status: "overdue" })} className="text-red-600 border-red-200 gap-1">
                     <AlertCircle className="h-3.5 w-3.5" /> Mark Overdue
@@ -461,6 +640,89 @@ export default function ContractInvoicesPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Payment Dialog */}
+      <Dialog open={!!paymentOrder} onOpenChange={() => setPaymentOrder(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Payment for {paymentOrder?.invoiceNumber}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Amount (BHD)</Label>
+              <Input
+                type="number"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                className="col-span-3"
+                min="0.001"
+                step="0.001"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Method</Label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="cheque">Cheque</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {(paymentMethod === "bank_transfer" || paymentMethod === "cheque") && (
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Bank Account</Label>
+                <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select bank account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts.map(account => (
+                      <SelectItem key={account.id} value={account.id}>{account.bankName} - {account.accountNumber}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {paymentMethod === "cash" && (
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Petty Cash</Label>
+                <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select petty cash account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pettyCashAccounts.map(account => (
+                      <SelectItem key={account.id} value={account.id}>{account.accountName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Reference</Label>
+              <Input
+                value={paymentReference}
+                onChange={(e) => setPaymentReference(e.target.value)}
+                placeholder={paymentMethod === "cheque" ? "Cheque Number" : "Transaction ID"}
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaymentOrder(null)}>Cancel</Button>
+            <Button onClick={handlePaymentSubmit} disabled={paymentMutation.isPending}>
+              {paymentMutation.isPending ? "Processing..." : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

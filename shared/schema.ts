@@ -1791,7 +1791,8 @@ export const orders = pgTable("orders", {
 
 export const invoicePayments = pgTable("invoice_payments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  orderId: varchar("order_id").notNull(), // points to orders.id
+  orderId: varchar("order_id"), // points to orders.id
+  contractInvoiceId: varchar("contract_invoice_id"), // points to contract_invoices.id
   customerId: varchar("customer_id").notNull(), // points to clients.id
   amount: decimal("amount", { precision: 12, scale: 3 }).notNull(),
   paymentDate: timestamp("payment_date").defaultNow(),
@@ -2207,6 +2208,7 @@ export const dispatchOutletTruckAssignments = pgTable("dispatch_outlet_truck_ass
   truckAssignmentId: varchar("truck_assignment_id").notNull(),
   outletCode: text("outlet_code").notNull(),
   outletId: varchar("outlet_id"),
+  storageType: varchar("storage_type"),
   assignedWeight: decimal("assigned_weight", { precision: 10, scale: 3 }).default("0"),
   overrideReason: text("override_reason"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -2265,6 +2267,8 @@ export const contractInvoices = pgTable("contract_invoices", {
   discount: decimal("discount", { precision: 12, scale: 3 }).default("0"),
   creditAmount: decimal("credit_amount", { precision: 12, scale: 3 }).default("0"),
   totalAmount: decimal("total_amount", { precision: 12, scale: 3 }).default("0"),
+  paidAmount: decimal("paid_amount", { precision: 12, scale: 3 }).default("0"),
+  paymentStatus: text("payment_status").notNull().default("unpaid"), // unpaid|partial|paid
   status: text("status").notNull().default("draft"), // draft|approved|sent|paid|partially_paid|overdue
   notes: text("notes"),
   deliveryAttachments: jsonb("delivery_attachments").$type<{ id: string, podUrl: string, status: string, issueLog?: string, createdAt: string }[]>().default([]),

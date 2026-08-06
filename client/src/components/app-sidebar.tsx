@@ -73,21 +73,28 @@ const menuGroups: MenuGroup[] = [
     ],
   },
   {
-    label: "Logistics ERP",
+    label: "Config Menu",
     items: [
       { title: "Routes & Outlets", url: "/logistics/routes", icon: Route, menuKey: "routes" },
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
-      { title: "Contracts", url: "/logistics/contracts", icon: FileText },
       { title: "Fleet & Assets", url: "/logistics/fleet", icon: Truck },
+      { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },
+    ],
+  },
+  {
+    label: "Order Menu",
+    items: [
+      { title: "Contracts", url: "/logistics/contracts", icon: FileText },
+      { title: "Daily Dispatch", url: "/logistics/daily-dispatch", icon: Truck },
       { title: "RFQ System", url: "/logistics/rfq", icon: Calculator },
       { title: "Order Book", url: "/logistics/orders", icon: ClipboardList },
-      // { title: "Dispatch Board", url: "/logistics/dispatch", icon: BarChart3 },
-      { title: "Daily Dispatch", url: "/logistics/daily-dispatch", icon: Truck },
-      // { title: "Delivery Receipts", url: "/logistics/deliveries", icon: FileCheck },
-      { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },
+    ],
+  },
+  {
+    label: "Invoices Menu",
+    items: [
       { title: "Trucking Invoices", url: "/logistics/invoices", icon: Receipt },
       { title: "Contract Invoices", url: "/logistics/contract-invoices", icon: Receipt },
-      // { title: "Driver Geo-Hub", url: "/logistics/driver-hub", icon: UserCircle },
       { title: "Logistics Finance", url: "/logistics/finance", icon: Calculator },
     ],
   },

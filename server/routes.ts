@@ -8253,10 +8253,10 @@ export async function registerRoutes(
     }
   });
 
-  // Manually assign a specific outlet to a specific truck (with capacity check)
+  // Manually assign a specific outlet (or storage type) to a specific truck (with capacity check)
   app.post("/api/dispatch/outlets/assign", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { outletCode, truckAssignmentId, outletWeight, sheetId } = req.body;
+      const { outletCode, truckAssignmentId, outletWeight, sheetId, storageType } = req.body;
       if (!outletCode || !truckAssignmentId) {
         return res.status(400).json({ error: "outletCode and truckAssignmentId are required" });
       }
@@ -8275,7 +8275,7 @@ export async function registerRoutes(
 
       if (capacity > 0 && usedCapacity + weight > capacity) {
         return res.status(422).json({
-          error: `Capacity exceeded: Adding this outlet (${weight.toFixed(3)}T) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${capacity}T. Current load: ${usedCapacity.toFixed(3)}T.`
+          error: `Capacity exceeded: Adding this (${weight.toFixed(3)}T) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${capacity}T. Current load: ${usedCapacity.toFixed(3)}T.`
         });
       }
 
@@ -8285,11 +8285,25 @@ export async function registerRoutes(
           .where(eq(schema.dispatchTruckAssignments.sheetId, sheetId));
         const existingTruckIds = existingTrucks.map((t: any) => t.id);
         if (existingTruckIds.length > 0) {
-          const existing = await db.select().from(schema.dispatchOutletTruckAssignments)
-            .where(and(
-              inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, existingTruckIds),
-              eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode)
-            ));
+          let conditions = [
+            inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, existingTruckIds),
+            eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode)
+          ];
+          
+          if (storageType) {
+            // If assigning specific storage, only clear the specific storage type, OR clear the "all" assignment if it exists
+            conditions.push(
+              or(
+                eq(schema.dispatchOutletTruckAssignments.storageType, storageType),
+                isNull(schema.dispatchOutletTruckAssignments.storageType)
+              ) as any
+            );
+          } else {
+            // If assigning all, clear everything for this outlet
+          }
+
+          const existing = await db.select().from(schema.dispatchOutletTruckAssignments).where(and(...conditions));
+          
           for (const e of existing) {
             // Reduce old truck's usedCapacity
             const [oldTruck] = await db.select().from(schema.dispatchTruckAssignments)
@@ -8311,6 +8325,7 @@ export async function registerRoutes(
       await db.insert(schema.dispatchOutletTruckAssignments).values({
         truckAssignmentId,
         outletCode,
+        storageType: storageType || null,
         assignedWeight: weight.toFixed(3),
       });
 
@@ -8329,17 +8344,24 @@ export async function registerRoutes(
   // Unassign an outlet from its current truck
   app.delete("/api/dispatch/outlets/assign", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { outletCode, sheetId } = req.body;
+      const { outletCode, sheetId, storageType } = req.body;
       const allTrucks = await db.select().from(schema.dispatchTruckAssignments)
         .where(eq(schema.dispatchTruckAssignments.sheetId, sheetId));
       const truckIds = allTrucks.map((t: any) => t.id);
       if (truckIds.length === 0) return res.json({ success: true });
 
-      const existing = await db.select().from(schema.dispatchOutletTruckAssignments)
-        .where(and(
-          inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckIds),
-          eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode)
-        ));
+      let conditions = [
+        inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckIds),
+        eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode)
+      ];
+
+      if (storageType) {
+        conditions.push(eq(schema.dispatchOutletTruckAssignments.storageType, storageType));
+      } else {
+        conditions.push(isNull(schema.dispatchOutletTruckAssignments.storageType));
+      }
+
+      const existing = await db.select().from(schema.dispatchOutletTruckAssignments).where(and(...conditions));
 
       for (const e of existing) {
         const [truck] = await db.select().from(schema.dispatchTruckAssignments)
@@ -8493,6 +8515,26 @@ export async function registerRoutes(
       res.json(invoice);
     } catch (error) {
       res.status(500).json({ error: "Failed to update invoice status" });
+    }
+  });
+
+  app.post("/api/contract-invoices/:id/pay", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.payContractInvoice(req.params.id, req.body);
+      res.json(invoice);
+    } catch (error: any) {
+      console.error("Pay contract invoice error:", error);
+      res.status(500).json({ error: "Failed to process payment: " + error.message });
+    }
+  });
+
+  app.get("/api/contract-invoices/:id/deliveries", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const deliveries = await storage.getContractInvoiceDeliveries(req.params.id);
+      res.json(deliveries);
+    } catch (error: any) {
+      console.error("Get contract invoice deliveries error:", error);
+      res.status(500).json({ error: "Failed to fetch deliveries: " + error.message });
     }
   });
 

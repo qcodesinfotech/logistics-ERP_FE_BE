@@ -861,28 +861,6 @@ export default function FleetPage() {
                 )}
               />
 
-              <FormField
-                control={vehicleForm.control}
-                name="assignedDriverId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Assigned Driver</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select driver" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {driversList.map(d => (
-                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t pt-4">
                 <FormField

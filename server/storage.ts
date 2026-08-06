@@ -567,6 +567,8 @@ export interface IStorage {
   createOrder(data: InsertOrder & { charges?: any[] }): Promise<Order>;
   updateOrder(id: string, data: Partial<InsertOrder> & { charges?: any[], expenses?: any[] }): Promise<Order | undefined>;
   payOrderInvoice(id: string, payment: InsertInvoicePayment): Promise<Order>;
+  payContractInvoice(id: string, payment: InsertInvoicePayment): Promise<ContractInvoice>;
+  getContractInvoiceDeliveries(id: string): Promise<any[]>;
   deleteOrder(id: string): Promise<void>;
 
   // Logistics Trips
@@ -6089,6 +6091,146 @@ export class DatabaseStorage implements IStorage {
     }
 
     return updatedOrder;
+  }
+
+  async payContractInvoice(id: string, payment: InsertInvoicePayment): Promise<ContractInvoice> {
+    const [invoice] = await db.select().from(contractInvoices).where(eq(contractInvoices.id, id));
+    if (!invoice) throw new Error("Contract Invoice not found");
+
+    const [insertedPayment] = await db.insert(invoicePayments).values({
+      ...payment,
+      contractInvoiceId: id,
+    }).returning();
+
+    const newPaidAmount = Number(invoice.paidAmount || 0) + Number(payment.amount);
+    const grandTotal = Number(invoice.totalAmount || 0);
+    const paymentStatus = newPaidAmount >= grandTotal ? "paid" : "partial";
+    const overallStatus = newPaidAmount >= grandTotal ? "paid" : "partially_paid";
+
+    const [updatedInvoice] = await db.update(contractInvoices)
+      .set({ paidAmount: newPaidAmount.toFixed(3), paymentStatus, status: overallStatus })
+      .where(eq(contractInvoices.id, id))
+      .returning();
+
+    const client = await this.getClient(payment.customerId);
+    const branchId = client?.branchId || "1";
+    const shopId = client?.shopId;
+
+    if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
+      if (payment.bankAccountId) {
+        await this.createBankTransaction({
+          bankAccountId: payment.bankAccountId,
+          branchId: branchId,
+          type: "deposit",
+          amount: String(payment.amount),
+          reference: payment.reference || null,
+          description: `Contract Invoice Payment for ${invoice.invoiceNumber}`,
+          relatedType: "contract_invoice",
+          relatedId: id,
+        });
+
+        await db.transaction(async (tx) => {
+          await this.createJournalEntryInTx(tx, {
+            sourceType: "contract_invoice",
+            sourceId: id,
+            shopId: shopId,
+            branchId: branchId,
+            reference: payment.reference || `CINV-PAY-${invoice.invoiceNumber}`,
+            description: `Payment received for Contract Invoice ${invoice.invoiceNumber}`,
+            lines: [
+              { accountCode: "1000", debit: Number(payment.amount), description: `Bank Deposit - Invoice ${invoice.invoiceNumber}` },
+              { accountCode: "1100", credit: Number(payment.amount), description: `Accounts Receivable Payment - Invoice ${invoice.invoiceNumber}` }
+            ],
+          });
+        });
+      }
+    } else if (payment.paymentMethod === 'cash') {
+      if (payment.pettyCashId) {
+        await db.transaction(async (tx) => {
+          const [pc] = await tx.select().from(pettyCash).where(eq(pettyCash.id, payment.pettyCashId!));
+          if (!pc) throw new Error("Petty cash account not found");
+
+          await tx.insert(pettyCashTransactions).values({
+            pettyCashId: payment.pettyCashId!,
+            branchId: pc.branchId || branchId,
+            type: "receipt",
+            amount: String(payment.amount),
+            reference: payment.reference || null,
+            description: `Contract Invoice Cash Receipt for ${invoice.invoiceNumber}`,
+          });
+
+          const currentBalance = parseFloat(pc.currentBalance || "0");
+          const newBalance = currentBalance + Number(payment.amount);
+          await tx.update(pettyCash)
+            .set({ currentBalance: newBalance.toFixed(3) })
+            .where(eq(pettyCash.id, payment.pettyCashId!));
+
+          await this.createJournalEntryInTx(tx, {
+            sourceType: "contract_invoice",
+            sourceId: id,
+            shopId: pc.shopId || shopId,
+            branchId: pc.branchId || branchId,
+            reference: payment.reference || `CASH-PAY-${invoice.invoiceNumber}`,
+            description: `Cash Payment received for Contract Invoice ${invoice.invoiceNumber}`,
+            lines: [
+              { accountCode: "1010", debit: Number(payment.amount), description: `Cash Receipt - Invoice ${invoice.invoiceNumber}` },
+              { accountCode: "1100", credit: Number(payment.amount), description: `Accounts Receivable Payment - Invoice ${invoice.invoiceNumber}` }
+            ],
+          });
+        });
+      }
+    }
+
+    return updatedInvoice;
+  }
+
+  async getContractInvoiceDeliveries(id: string): Promise<any[]> {
+    const [invoice] = await db.select().from(contractInvoices).where(eq(contractInvoices.id, id));
+    if (!invoice) throw new Error("Contract Invoice not found");
+
+    const [contract] = await db.select().from(contracts).where(eq(contracts.id, invoice.contractId));
+    let outletIds = Array.isArray(contract?.linkedOutlets) ? contract.linkedOutlets : [];
+    if (invoice.outletId) outletIds = [invoice.outletId];
+
+    if (outletIds.length === 0) return [];
+    
+    // We want completed deliveries within the invoice period for the assigned outlets.
+    // Assuming status "delivered" or similar.
+    const conditions = [
+      inArray(dispatchDeliveries.outletId, outletIds as string[]),
+      gte(dispatchDeliveries.deliveredAt, new Date(invoice.periodStart)),
+      lte(dispatchDeliveries.deliveredAt, new Date(invoice.periodEnd + "T23:59:59Z"))
+    ];
+
+    const results = await db.select({
+      id: dispatchDeliveries.id,
+      deliveredQty: dispatchDeliveries.deliveredQty,
+      deliveredAt: dispatchDeliveries.deliveredAt,
+      podUrl: dispatchDeliveries.podUrl,
+      
+      itemCode: dispatchItems.itemCode,
+      description: dispatchItems.description,
+      storageType: dispatchItems.storageType,
+      requestedQty: dispatchItems.requestedQty,
+      
+      outletName: outlets.name,
+      outletCode: outlets.code,
+      
+      sheetDate: dispatchSheets.date,
+      
+      // Attempt to get truck info via the driver or dispatchTruckAssignments
+      // But typically GDN comes from trip -> vehicle
+    })
+    .from(dispatchDeliveries)
+    .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+    .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
+    .leftJoin(outlets, eq(dispatchDeliveries.outletId, outlets.id))
+    .where(and(...conditions))
+    .orderBy(dispatchDeliveries.deliveredAt);
+    
+    // Also attach vehicle info: driver -> attendance -> truck
+    // Or we just query it manually for each if it's missing, since dispatch deliveries doesn't have direct truck link unless via truckAssignments
+    return results;
   }
 
   // Logistics Trips
