@@ -8763,8 +8763,7 @@ export async function registerRoutes(
           or(
             eq(schema.dispatchItems.routeId, routeId),
             eq(schema.dispatchItems.overrideRouteId, routeId)
-          ),
-          inArray(schema.dispatchDeliveries.status, ["delivered", "failed"])
+          )
         )
       );
 
@@ -8778,7 +8777,9 @@ export async function registerRoutes(
 
       for (const row of deliveriesQuery) {
         const outletId = row.outletId || "unknown";
-        if (row.outletId) outletIds.add(row.outletId);
+        if (row.outletId && row.status !== "pending") {
+          outletIds.add(row.outletId);
+        }
         
         const storageType = row.storageType || "Dry";
         const groupKey = `${outletId}_${storageType}`;
@@ -8797,6 +8798,13 @@ export async function registerRoutes(
         grouped[groupKey].items.push(row);
       }
 
+      // Filter out groups that have no visited items (meaning they are completely pending)
+      for (const key of Object.keys(grouped)) {
+        if (!outletIds.has(grouped[key].outletId)) {
+          delete grouped[key];
+        }
+      }
+
       // Resolve Outlet Names & Codes
       const allOutlets = outletIds.size > 0 ? await db.select().from(schema.outlets).where(inArray(schema.outlets.id, Array.from(outletIds))) : [];
       const outletMap = new Map(allOutlets.map(o => [o.id, o]));
@@ -8808,6 +8816,10 @@ export async function registerRoutes(
       }
 
       const deliveriesList = Object.values(grouped);
+
+      if (deliveriesList.length === 0) {
+        return res.status(404).json({ error: "No completed deliveries found for this route." });
+      }
 
       // Create PDF Kit Document
       const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -8999,8 +9011,7 @@ export async function registerRoutes(
         and(
           eq(schema.dispatchItems.sheetId, sheetId),
           eq(schema.dispatchDeliveries.outletId, outletId),
-          eq(schema.dispatchItems.storageType, storageType),
-          inArray(schema.dispatchDeliveries.status, ["delivered", "failed"])
+          eq(schema.dispatchItems.storageType, storageType)
         )
       );
 
