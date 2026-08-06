@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileText, Printer, Check, CreditCard } from "lucide-react";
+import { FileText, Printer, Check, CreditCard, RefreshCw } from "lucide-react";
 import { FmcgInvoice, FmcgInvoiceItem } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -21,9 +21,16 @@ export default function DeliveryInvoicesPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<(FmcgInvoice & { items: FmcgInvoiceItem[] }) | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const { data: invoices = [], isLoading } = useQuery<(FmcgInvoice & { items: FmcgInvoiceItem[] })[]>({
+  const { data: invoices = [], isLoading, refetch } = useQuery<(FmcgInvoice & { items: FmcgInvoiceItem[] })[]>({
     queryKey: ["/api/fmcg-invoices"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/fmcg-invoices");
+      return res.json();
+    },
+    refetchOnMount: true,
+    staleTime: 0,
   });
+
 
   const updateInvoiceMutation = useMutation({
     mutationFn: async (payload: { id: string, data: any }) => {
@@ -34,6 +41,24 @@ export default function DeliveryInvoicesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/fmcg-invoices"] });
       toast({ title: "Invoice updated successfully" });
       setIsModalOpen(false);
+    }
+  });
+
+  const backfillMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/fmcg-invoices/backfill");
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fmcg-invoices"] });
+      refetch();
+      toast({ 
+        title: "Invoices Generated", 
+        description: `Created ${data.invoicesCreated} invoices, linked ${data.itemsLinked} items from ${data.total} deliveries.` 
+      });
+    },
+    onError: () => {
+      toast({ title: "Generation failed", description: "Could not generate invoices from deliveries.", variant: "destructive" });
     }
   });
 
@@ -58,6 +83,22 @@ export default function DeliveryInvoicesPage() {
           <h1 className="text-2xl font-bold tracking-tight">Delivery Invoices</h1>
           <p className="text-muted-foreground">Auto-generated invoices from driver deliveries.</p>
         </div>
+        <div className="flex items-center gap-2">
+          {invoices.length === 0 && (
+            <Button 
+              onClick={() => backfillMutation.mutate()} 
+              disabled={backfillMutation.isPending}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${backfillMutation.isPending ? "animate-spin" : ""}`} />
+              {backfillMutation.isPending ? "Generating..." : "Generate from Deliveries"}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+            {isLoading ? "Loading..." : "Refresh"}
+          </Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-md border shadow-sm">
@@ -65,7 +106,8 @@ export default function DeliveryInvoicesPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Invoice #</TableHead>
-              <TableHead>TO NO.</TableHead>
+              <TableHead>TO / Outlet</TableHead>
+              <TableHead>Items</TableHead>
               <TableHead>Date</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Total Amount</TableHead>
@@ -76,7 +118,12 @@ export default function DeliveryInvoicesPage() {
             {invoices.map((inv) => (
               <TableRow key={inv.id}>
                 <TableCell className="font-medium">{inv.invoiceNumber}</TableCell>
-                <TableCell>{inv.toNo}</TableCell>
+                <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={inv.toNo}>
+                  {inv.toNo?.startsWith("OUTLET-") ? `Outlet: ${inv.toNo.split("-")[1]?.slice(0, 8)}…` : inv.toNo}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-[10px]">{inv.items?.length || 0} items</Badge>
+                </TableCell>
                 <TableCell>{format(new Date(inv.createdAt || new Date()), "dd/MM/yyyy")}</TableCell>
                 <TableCell>{getStatusBadge(inv.status)}</TableCell>
                 <TableCell>{inv.totalAmount || "0.000"} BD</TableCell>

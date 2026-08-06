@@ -1442,11 +1442,27 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   const getZoneName = (id: string) => zones.find((z: any) => z.id === id)?.name || "Unknown";
 
   // Build zone-based grouping of truck assignments
-  const zoneGroups = zones.map((zone: any) => {
-    const zoneTrucks = truckAssignments.filter((ta: any) => ta.zoneId === zone.id);
+  // Collect all zone IDs from truck assignments + board data (don't rely solely on full route list)
+  const activeZoneIds = new Set<string>([
+    ...truckAssignments.map((ta: any) => ta.zoneId).filter(Boolean),
+    ...(boardData?.zones || []).map((z: any) => z.zoneId).filter((id: string) => id && id !== "unassigned"),
+  ]);
+
+  // Build a zone lookup: prefer data from zones prop (routes API), fallback to boardData
+  const zoneInfoMap = new Map<string, any>();
+  zones.forEach((z: any) => zoneInfoMap.set(z.id, z));
+  (boardData?.zones || []).forEach((z: any) => {
+    if (z.zoneId && z.zoneId !== "unassigned" && !zoneInfoMap.has(z.zoneId)) {
+      zoneInfoMap.set(z.zoneId, { id: z.zoneId, name: z.zoneName });
+    }
+  });
+
+  const zoneGroups = Array.from(activeZoneIds).map((zoneId: string) => {
+    const zone = zoneInfoMap.get(zoneId) || { id: zoneId, name: getZoneName(zoneId) };
+    const zoneTrucks = truckAssignments.filter((ta: any) => ta.zoneId === zoneId);
 
     // Get all outlets in this zone from board data
-    const boardZone = boardData?.zones?.find((z: any) => z.zoneId === zone.id);
+    const boardZone = boardData?.zones?.find((z: any) => z.zoneId === zoneId);
     const outlets: any[] = boardZone?.outlets || [];
 
     // Calculate total weight per outlet (sum of item weights) and sort heaviest first
@@ -1463,7 +1479,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     }).sort((a: any, b: any) => b.totalWeight - a.totalWeight);
 
     return { zone, zoneTrucks, outletRows };
-  }).filter((g: any) => g.zoneTrucks.length > 0 || g.outletRows.length > 0);
+  }).filter((g: any) => g.zoneTrucks.length > 0 || g.outletRows.length > 0)
+    .sort((a: any, b: any) => (a.zone.name || "").localeCompare(b.zone.name || ""));
 
   // Trucks already assigned in this sheet (to filter out from add form)
   const trucksAssignedInSheet = truckAssignments.map((ta: any) => ta.truckId);
@@ -1514,12 +1531,27 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     <SelectTrigger><SelectValue placeholder={truckForm.zoneId ? "Select vehicle..." : "Select zone first"} /></SelectTrigger>
                     <SelectContent>
                       {vehiclesList
-                        .filter((v: any) => v.status === "available" && !trucksAssignedInSheet.includes(v.id))
-                        .map((v: any) => (
-                          <SelectItem key={v.id} value={v.id}>
-                            {v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
-                          </SelectItem>
-                        ))}
+                        .filter((v: any) => {
+                          if (!truckForm.zoneId) return false;
+                          // Show vehicles assigned to selected zone, or all available if none are zone-matched
+                          return v.currentZoneId === truckForm.zoneId || v.status === "available";
+                        })
+                        .sort((a: any, b: any) => {
+                          // Sort: zone-matched vehicles first
+                          const aMatch = a.currentZoneId === truckForm.zoneId ? 0 : 1;
+                          const bMatch = b.currentZoneId === truckForm.zoneId ? 0 : 1;
+                          return aMatch - bMatch;
+                        })
+                        .map((v: any) => {
+                          const isZoneMatch = v.currentZoneId === truckForm.zoneId;
+                          const isAssigned = trucksAssignedInSheet.includes(v.id);
+                          return (
+                            <SelectItem key={v.id} value={v.id} disabled={isAssigned}>
+                              {isZoneMatch ? "✓ " : ""}{v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
+                              {isAssigned ? " (Already in sheet)" : !isZoneMatch ? " (Other Zone)" : ""}
+                            </SelectItem>
+                          );
+                        })}
                     </SelectContent>
                   </Select>
                 </div>

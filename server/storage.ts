@@ -7241,7 +7241,50 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db.insert(contractMonthlyUsage).values({ contractId, periodMonth: month, ...data } as any).returning();
     return row;
   }
+
+  // ====================== FMCG DELIVERY INVOICES ======================
+  async getFmcgInvoices(): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] })[]> {
+    const invoiceRows = await db.select().from(fmcgInvoices).orderBy(desc(fmcgInvoices.createdAt));
+    if (invoiceRows.length === 0) return [];
+    const ids = invoiceRows.map(i => i.id);
+    const allItems = await db.select().from(fmcgInvoiceItems).where(inArray(fmcgInvoiceItems.invoiceId, ids));
+    return invoiceRows.map(inv => ({
+      ...inv,
+      items: allItems.filter(item => item.invoiceId === inv.id),
+    }));
+  }
+
+  async getFmcgInvoice(id: string): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] }) | undefined> {
+    const [inv] = await db.select().from(fmcgInvoices).where(eq(fmcgInvoices.id, id));
+    if (!inv) return undefined;
+    const items = await db.select().from(fmcgInvoiceItems).where(eq(fmcgInvoiceItems.invoiceId, id));
+    return { ...inv, items };
+  }
+
+  async createFmcgInvoice(data: InsertFmcgInvoice, items: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice> {
+    const [inv] = await db.insert(fmcgInvoices).values(data as any).returning();
+    if (items && items.length > 0) {
+      await db.insert(fmcgInvoiceItems).values(items.map(item => ({ ...item, invoiceId: inv.id })) as any);
+    }
+    return inv;
+  }
+
+  async updateFmcgInvoice(id: string, data: Partial<InsertFmcgInvoice>, items?: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice> {
+    const [inv] = await db.update(fmcgInvoices)
+      .set({ ...data as any, updatedAt: new Date() })
+      .where(eq(fmcgInvoices.id, id))
+      .returning();
+    if (items) {
+      // Replace all items
+      await db.delete(fmcgInvoiceItems).where(eq(fmcgInvoiceItems.invoiceId, id));
+      if (items.length > 0) {
+        await db.insert(fmcgInvoiceItems).values(items.map(item => ({ ...item, invoiceId: id })) as any);
+      }
+    }
+    return inv;
+  }
 }
+
 
 
 export const storage = new DatabaseStorage();

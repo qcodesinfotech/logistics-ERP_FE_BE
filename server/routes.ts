@@ -7417,19 +7417,20 @@ export async function registerRoutes(
       if (req.body.status === "delivered" || req.body.status === "partial") {
         try {
           const [dispatchItem] = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, req.params.id));
-          if (dispatchItem && dispatchItem.toNo && dispatchItem.outletId) {
-            // check if invoice exists
+          if (dispatchItem && dispatchItem.outletId) {
+            // Group invoices by outlet + sheet date (or toNo if available)
+            const [dispatchSheet] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, dispatchItem.sheetId));
+            const invoiceKey = dispatchItem.toNo || `OUTLET-${dispatchItem.outletId}-${dispatchSheet?.date || 'unknown'}`;
+            
+            // check if invoice exists for this outlet+date
             let [invoice] = await db.select().from(schema.fmcgInvoices).where(
-              and(
-                eq(schema.fmcgInvoices.toNo, dispatchItem.toNo),
-                eq(schema.fmcgInvoices.outletId, dispatchItem.outletId)
-              )
+              eq(schema.fmcgInvoices.toNo, invoiceKey)
             );
             
             if (!invoice) {
                invoice = await storage.createFmcgInvoice({
                  invoiceNumber: `FMCG-${Date.now()}`,
-                 toNo: dispatchItem.toNo,
+                 toNo: invoiceKey,
                  outletId: dispatchItem.outletId,
                  status: "pending"
                } as any, []);
@@ -7547,6 +7548,75 @@ export async function registerRoutes(
 
 
   // ==================== FMCG INVOICES ====================
+
+  // Backfill: generate invoices for all existing completed deliveries
+  app.post("/api/fmcg-invoices/backfill", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      // Get all delivered/partial dispatch deliveries with their items and sheets
+      const deliveries = await db.select({
+        delivery: schema.dispatchDeliveries,
+        item: schema.dispatchItems,
+        sheet: schema.dispatchSheets,
+      })
+      .from(schema.dispatchDeliveries)
+      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+      .innerJoin(schema.dispatchSheets, eq(schema.dispatchItems.sheetId, schema.dispatchSheets.id))
+      .where(inArray(schema.dispatchDeliveries.status, ["delivered", "partial"]));
+
+      let created = 0;
+      let updated = 0;
+
+      for (const row of deliveries) {
+        const { delivery, item, sheet } = row;
+        if (!item.outletId) continue;
+
+        const invoiceKey = item.toNo || `OUTLET-${item.outletId}-${sheet.date}`;
+
+        // Find or create invoice
+        let [invoice] = await db.select().from(schema.fmcgInvoices).where(
+          eq(schema.fmcgInvoices.toNo, invoiceKey)
+        );
+
+        if (!invoice) {
+          invoice = await storage.createFmcgInvoice({
+            invoiceNumber: `FMCG-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            toNo: invoiceKey,
+            outletId: item.outletId,
+            status: "pending",
+          } as any, []);
+          created++;
+        }
+
+        // Check if item already linked
+        const [existing] = await db.select().from(schema.fmcgInvoiceItems).where(
+          and(
+            eq(schema.fmcgInvoiceItems.invoiceId, invoice.id),
+            eq(schema.fmcgInvoiceItems.dispatchItemId, item.id)
+          )
+        );
+
+        if (!existing) {
+          await db.insert(schema.fmcgInvoiceItems).values({
+            invoiceId: invoice.id,
+            dispatchItemId: item.id,
+            dispatchDeliveryId: delivery.id,
+            stockNo: item.itemCode || "N/A",
+            itemName: item.description || "N/A",
+            packSize: item.storageType || item.uom || "N/A",
+            requestedQty: item.requestedQty ? String(item.requestedQty) : "0",
+            deliveredQty: delivery.deliveredQty ? String(delivery.deliveredQty) : "0",
+          });
+          updated++;
+        }
+      }
+
+      res.json({ success: true, invoicesCreated: created, itemsLinked: updated, total: deliveries.length });
+    } catch (e) {
+      console.error("Backfill error:", e);
+      res.status(500).json({ error: "Backfill failed", details: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get("/api/fmcg-invoices", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const invoices = await storage.getFmcgInvoices();
