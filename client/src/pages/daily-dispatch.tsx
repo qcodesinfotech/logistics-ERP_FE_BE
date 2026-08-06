@@ -2417,14 +2417,12 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 text-slate-700 group">
-                                <td className="py-1.5 px-3 border-r flex items-center justify-between font-medium pl-6 bg-slate-50/50" colSpan={7}>
-                                  <div className="flex items-center gap-1.5 cursor-pointer flex-1" onClick={() => toggleOutlet(outletId)}>
-                                    {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
-                                    {outlet.outletName}
-                                    <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
-                                    <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{outlet.items.length} Items</Badge>
-                                  </div>
-                                  <div className="flex items-center gap-2 flex-wrap">
+                                <td className="py-1.5 px-3 border-r bg-slate-50/50" colSpan={7}>
+                                  <div className="flex items-center gap-2 flex-nowrap w-full cursor-pointer" onClick={() => toggleOutlet(outletId)}>
+                                    {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
+                                    <span className="font-medium text-sm whitespace-nowrap">{outlet.outletName}</span>
+                                    <span className="text-xs text-muted-foreground whitespace-nowrap">({outlet.outletCode})</span>
+                                    <Badge variant="outline" className="bg-white text-[10px] h-4 whitespace-nowrap flex-shrink-0">{outlet.items.length} Items</Badge>
                                     {outlet.pods.size > 0 && (() => {
                                       const uniqueDates = Array.from(new Set(
                                         Array.from(outlet.pods.values())
@@ -2432,17 +2430,18 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                           .map((d: any) => format(new Date(d), "dd MMM yyyy, HH:mm"))
                                       ));
                                       return uniqueDates.map((dt, i) => (
-                                        <span key={i} className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-                                          <Clock className="h-3 w-3" />
+                                        <span key={i} className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
+                                          <Clock className="h-3 w-3 flex-shrink-0" />
                                           {dt}
                                         </span>
                                       ));
                                     })()}
+                                    <div className="flex-1" />
                                     {outlet.pods.size > 0 && (
                                       <Button 
                                         variant="outline" 
                                         size="sm" 
-                                        className="h-6 text-[10px] px-2 print:hidden"
+                                        className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           setViewPodsModal({ 
