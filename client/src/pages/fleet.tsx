@@ -589,9 +589,9 @@ export default function FleetPage() {
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="text-right"><CurrencyDisplay amount={log.fuelExpense} /></TableCell>
+                        <TableCell className="text-right"><CurrencyDisplay amount={log.fuelExpense} currency={log.currency} /></TableCell>
                         <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                          {(parseFloat(log.fuelExpense || "0") / parseFloat(log.liters || "1")).toFixed(3)} BD/L
+                          {(parseFloat(log.fuelExpense || "0") / parseFloat(log.liters || "1")).toFixed(3)} {log.currency || "BD"}/L
                         </TableCell>
                       </TableRow>
                     ))}

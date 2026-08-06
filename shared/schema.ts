@@ -1932,6 +1932,7 @@ export const fuelLogs = pgTable("fuel_logs", {
   photos: jsonb("photos").$type<string[]>().default([]),
   date: date("date"),
   time: text("time"),
+  currency: text("currency").default("OMR"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

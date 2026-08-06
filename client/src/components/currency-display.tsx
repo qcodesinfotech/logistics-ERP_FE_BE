@@ -6,17 +6,19 @@ interface CurrencyDisplayProps {
   className?: string;
   size?: "sm" | "md" | "lg" | "xl";
   showSign?: boolean;
+  currency?: string;
 }
 
 export function CurrencyDisplay({ 
   amount, 
   className, 
   size = "md",
-  showSign = false 
+  showSign = false,
+  currency
 }: CurrencyDisplayProps) {
   const numAmount = typeof amount === "string" ? parseFloat(amount) : (amount ?? 0);
   const isNegative = numAmount < 0;
-  const formatted = formatCurrency(Math.abs(numAmount));
+  const formatted = formatCurrency(Math.abs(numAmount), currency);
   
   const sizeClasses = {
     sm: "text-xs",

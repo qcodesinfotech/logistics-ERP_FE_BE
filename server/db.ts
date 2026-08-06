@@ -68,6 +68,7 @@ export async function ensureDriverTablesSchema() {
         "photos" jsonb DEFAULT '[]'::jsonb,
         "date" date,
         "time" text,
+        "currency" text DEFAULT 'OMR',
         "created_at" timestamp DEFAULT now()
       );
 
@@ -76,6 +77,7 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "fuel_station" text;
       ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "notes" text;
       ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "time" text;
+      ALTER TABLE "fuel_logs" ADD COLUMN IF NOT EXISTS "currency" text DEFAULT 'OMR';
 
       CREATE TABLE IF NOT EXISTS "user_activity_logs" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),

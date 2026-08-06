@@ -6612,9 +6612,9 @@ export class DatabaseStorage implements IStorage {
     if (tripId) conditions.push(eq(fuelLogs.tripId, tripId));
     if (driverId) conditions.push(eq(fuelLogs.driverId, driverId));
     if (conditions.length > 0) {
-      return db.select().from(fuelLogs).where(and(...conditions));
+      return db.select().from(fuelLogs).where(and(...conditions)).orderBy(desc(fuelLogs.createdAt));
     }
-    return db.select().from(fuelLogs);
+    return db.select().from(fuelLogs).orderBy(desc(fuelLogs.createdAt));
   }
 
   async createFuelLog(data: InsertFuelLog): Promise<FuelLog> {
