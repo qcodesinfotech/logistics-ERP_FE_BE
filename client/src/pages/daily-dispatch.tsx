@@ -2210,7 +2210,7 @@ function CompletedDeliveriesTab() {
   const [driverFilter, setDriverFilter] = useState("all");
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
-  const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; images: string[] }>({ isOpen: false, title: "", images: [] });
+  const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; pods: {url: string, date: string}[] }>({ isOpen: false, title: "", pods: [] });
   const { toast } = useToast();
 
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
@@ -2255,7 +2255,7 @@ function CompletedDeliveriesTab() {
   });
 
   // Group by Route -> Outlet
-  const groupedMap = new Map<string, { zoneId: string; zoneName: string; outlets: Map<string, { outletId: string; outletCode: string; outletName: string; items: any[]; podUrls: Set<string> }> }>();
+  const groupedMap = new Map<string, { zoneId: string; zoneName: string; outlets: Map<string, { outletId: string; outletCode: string; outletName: string; items: any[]; pods: Map<string, string> }> }>();
   
   filteredDeliveries.forEach(d => {
     const routeId = d.routeId || "unassigned";
@@ -2268,12 +2268,12 @@ function CompletedDeliveriesTab() {
     const routeGroup = groupedMap.get(routeId)!;
     
     if (!routeGroup.outlets.has(outletId)) {
-      routeGroup.outlets.set(outletId, { outletId: d.outletId, outletCode: d.outletCode, outletName: d.outletName || "Unassigned", items: [], podUrls: new Set() });
+      routeGroup.outlets.set(outletId, { outletId: d.outletId, outletCode: d.outletCode, outletName: d.outletName || "Unassigned", items: [], pods: new Map() });
     }
     const outletGroup = routeGroup.outlets.get(outletId)!;
     outletGroup.items.push(d);
     
-    if (d.podUrl) outletGroup.podUrls.add(d.podUrl);
+    if (d.podUrl) outletGroup.pods.set(d.podUrl, d.deliveredAt);
   });
 
   const groupedData = Array.from(groupedMap.values()).map(r => ({ ...r, outlets: Array.from(r.outlets.values()) }));
@@ -2417,19 +2417,38 @@ function CompletedDeliveriesTab() {
                                     <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
                                     <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{outlet.items.length} Items</Badge>
                                   </div>
-                                  {outlet.podUrls.size > 0 && (
-                                    <Button 
-                                      variant="outline" 
-                                      size="sm" 
-                                      className="h-6 text-[10px] px-2 print:hidden"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setViewPodsModal({ isOpen: true, title: outlet.outletName, images: Array.from(outlet.podUrls) });
-                                      }}
-                                    >
-                                      <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.podUrls.size})
-                                    </Button>
-                                  )}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {outlet.pods.size > 0 && (() => {
+                                      const uniqueDates = Array.from(new Set(
+                                        Array.from(outlet.pods.values())
+                                          .filter(Boolean)
+                                          .map((d: any) => format(new Date(d), "dd MMM yyyy, HH:mm"))
+                                      ));
+                                      return uniqueDates.map((dt, i) => (
+                                        <span key={i} className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                                          <Clock className="h-3 w-3" />
+                                          {dt}
+                                        </span>
+                                      ));
+                                    })()}
+                                    {outlet.pods.size > 0 && (
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm" 
+                                        className="h-6 text-[10px] px-2 print:hidden"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setViewPodsModal({ 
+                                            isOpen: true, 
+                                            title: outlet.outletName, 
+                                            pods: Array.from(outlet.pods.entries()).map(([url, date]) => ({ url, date: date as string })) 
+                                          });
+                                        }}
+                                      >
+                                        <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.pods.size})
+                                      </Button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                               {isOutletExpanded && outlet.items.map((p: any) => {
@@ -2474,26 +2493,33 @@ function CompletedDeliveriesTab() {
           <DialogHeader>
             <DialogTitle>Proof of Delivery - {viewPodsModal.title}</DialogTitle>
             <DialogDescription>
-              Showing {viewPodsModal.images.length} attachment(s) for this outlet.
+              Showing {viewPodsModal.pods.length} attachment(s) for this outlet.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            {viewPodsModal.images.map((rawUrl, idx) => {
-              const url = rawUrl.replace(/\\/g, '/');
+            {viewPodsModal.pods.map((pod, idx) => {
+              const url = pod.url.replace(/\\/g, '/');
               const srcUrl = (url.startsWith('http') || url.startsWith('data:') || url.startsWith('/')) ? url : `/${url}`;
+              const dateStr = pod.date ? format(new Date(pod.date), "dd MMM yyyy, HH:mm") : "Unknown Date";
               
               return (
-                <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex items-center justify-center min-h-[300px]">
-                  {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
-                    <img src={srcUrl} alt={`POD ${idx + 1}`} className="w-full h-auto object-contain max-h-[400px]" />
-                  ) : (
-                    <div className="text-center p-4">
-                      <FileText className="mx-auto h-8 w-8 text-slate-400 mb-2" />
-                      <a href={srcUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">
-                        View Document {idx + 1}
-                      </a>
-                    </div>
-                  )}
+                <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex flex-col min-h-[300px]">
+                  <div className="p-2 bg-slate-100 border-b text-xs font-medium text-slate-600 text-center flex items-center justify-center gap-2">
+                    <Clock className="h-3.5 w-3.5" />
+                    Delivered At: {dateStr}
+                  </div>
+                  <div className="flex-1 flex items-center justify-center p-2">
+                    {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
+                      <img src={srcUrl} alt={`POD ${idx + 1}`} className="w-full h-auto object-contain max-h-[400px]" />
+                    ) : (
+                      <div className="text-center p-4">
+                        <FileText className="mx-auto h-8 w-8 text-slate-400 mb-2" />
+                        <a href={srcUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">
+                          View Document {idx + 1}
+                        </a>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
