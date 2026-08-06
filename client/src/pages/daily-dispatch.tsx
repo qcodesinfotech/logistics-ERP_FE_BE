@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -704,7 +704,7 @@ export default function DailyDispatchPage() {
           totalQty: 0
         };
       }
-      itemGroups[key].totalQty += Number(item.requestedQty || 0);
+      itemGroups[key].totalQty += Number(item.requestedQty || item.weight || 0);
     });
 
     const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
@@ -740,7 +740,7 @@ export default function DailyDispatchPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 print:block">
         <div className="px-6 pt-4 border-b bg-background print:hidden">
-          <TabsList className="gap-1 flex-wrap">
+          <TabsList className="gap-1 flex-wrap h-auto justify-start">
             <TabsTrigger value="board" className="gap-2"><MapPin className="h-4 w-4" />Dispatch Board</TabsTrigger>
             <TabsTrigger value="trucks" className="gap-2"><Truck className="h-4 w-4" />Truck Planning</TabsTrigger>
             <TabsTrigger value="pending" className="gap-2"><Package className="h-4 w-4" />Pending</TabsTrigger>
@@ -939,7 +939,7 @@ export default function DailyDispatchPage() {
                       totalQty: 0
                     };
                   }
-                  const qty = Number(item.requestedQty || 0);
+                  const qty = Number(item.requestedQty || item.weight || 0);
                   itemGroups[key].totalQty += qty;
                   grandTotal += qty;
                 });
@@ -994,7 +994,7 @@ export default function DailyDispatchPage() {
         {/* ===== PENDING QUANTITIES TAB ===== */}
         <TabsContent value="pending" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
           <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
-            <PendingQuantitiesTab />
+            <PendingQuantitiesTab selectedDate={selectedDate} />
           </div>
         </TabsContent>
 
@@ -1457,7 +1457,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
       // Find current truck assignment for this outlet
       const assignment = outletAssignments.find((oa: any) =>
         oa.outletCode === outlet.outletCode &&
-        zoneTrucks.some((zt: any) => zt.id === oa.truckAssignmentId)
+        truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId)
       );
       return { ...outlet, totalWeight, assignment };
     }).sort((a: any, b: any) => b.totalWeight - a.totalWeight);
@@ -1465,8 +1465,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     return { zone, zoneTrucks, outletRows };
   }).filter((g: any) => g.zoneTrucks.length > 0 || g.outletRows.length > 0);
 
-  // Trucks already assigned to the selected zone (to filter out from add form)
-  const trucksInSelectedZone = truckAssignments.filter((ta: any) => ta.zoneId === truckForm.zoneId).map((ta: any) => ta.truckId);
+  // Trucks already assigned in this sheet (to filter out from add form)
+  const trucksAssignedInSheet = truckAssignments.map((ta: any) => ta.truckId);
 
   // Drivers already assigned in this sheet
   const assignedDriversInSheet = new Set(truckAssignments.map((ta: any) => ta.driverId).filter(Boolean));
@@ -1514,7 +1514,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     <SelectTrigger><SelectValue placeholder={truckForm.zoneId ? "Select vehicle..." : "Select zone first"} /></SelectTrigger>
                     <SelectContent>
                       {vehiclesList
-                        .filter((v: any) => v.status === "available" && !trucksInSelectedZone.includes(v.id))
+                        .filter((v: any) => v.status === "available" && !trucksAssignedInSheet.includes(v.id))
                         .map((v: any) => (
                           <SelectItem key={v.id} value={v.id}>
                             {v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
@@ -1716,7 +1716,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                       <Select
                                         onValueChange={(truckAssignId) => {
                                           if (!truckAssignId) return;
-                                          const truck = zoneTrucks.find((t: any) => t.id === truckAssignId);
+                                          const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
                                           const veh = getVehicleInfo(truck?.truckId);
                                           const cap = parseFloat(veh?.capacity || "0");
                                           const used = parseFloat(truck?.usedCapacity || "0");
@@ -1739,7 +1739,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                           <SelectValue placeholder="Assign all →" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          {zoneTrucks.map((ta: any) => {
+                                          {truckAssignments.map((ta: any) => {
                                             const veh = getVehicleInfo(ta.truckId);
                                             const cap = parseFloat(veh?.capacity || "0");
                                             const used = parseFloat(ta.usedCapacity || "0");
@@ -1814,7 +1814,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                           <Select
                                             onValueChange={(truckAssignId) => {
                                               if (!truckAssignId) return;
-                                              const truck = zoneTrucks.find((t: any) => t.id === truckAssignId);
+                                              const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
                                               const veh = getVehicleInfo(truck?.truckId);
                                               const cap = parseFloat(veh?.capacity || "0");
                                               const used = parseFloat(truck?.usedCapacity || "0");
@@ -1838,7 +1838,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                               <SelectValue placeholder={`Assign ${st} →`} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                              {zoneTrucks.map((ta: any) => {
+                                              {truckAssignments.map((ta: any) => {
                                                 const veh = getVehicleInfo(ta.truckId);
                                                 const cap = parseFloat(veh?.capacity || "0");
                                                 const used = parseFloat(ta.usedCapacity || "0");
@@ -1941,9 +1941,16 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 }
 
 // ===== PENDING QUANTITIES TAB =====
-function PendingQuantitiesTab() {
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
+  const [startDate, setStartDate] = useState(selectedDate || "");
+  const [endDate, setEndDate] = useState(selectedDate || "");
+
+  useEffect(() => {
+    if (selectedDate) {
+      setStartDate(selectedDate);
+      setEndDate(selectedDate);
+    }
+  }, [selectedDate]);
   const [routeFilter, setRouteFilter] = useState("all");
   const [outletFilter, setOutletFilter] = useState("all");
   const [driverFilter, setDriverFilter] = useState("all");
@@ -2471,20 +2478,25 @@ function CompletedDeliveriesTab() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            {viewPodsModal.images.map((url, idx) => (
-              <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex items-center justify-center min-h-[300px]">
-                {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
-                  <img src={url} alt={`POD ${idx + 1}`} className="w-full h-auto object-contain max-h-[400px]" />
-                ) : (
-                  <div className="text-center p-4">
-                    <FileText className="mx-auto h-8 w-8 text-slate-400 mb-2" />
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">
-                      View Document {idx + 1}
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))}
+            {viewPodsModal.images.map((rawUrl, idx) => {
+              const url = rawUrl.replace(/\\/g, '/');
+              const srcUrl = (url.startsWith('http') || url.startsWith('data:') || url.startsWith('/')) ? url : `/${url}`;
+              
+              return (
+                <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex items-center justify-center min-h-[300px]">
+                  {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
+                    <img src={srcUrl} alt={`POD ${idx + 1}`} className="w-full h-auto object-contain max-h-[400px]" />
+                  ) : (
+                    <div className="text-center p-4">
+                      <FileText className="mx-auto h-8 w-8 text-slate-400 mb-2" />
+                      <a href={srcUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">
+                        View Document {idx + 1}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

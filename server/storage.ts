@@ -52,7 +52,7 @@ import {
 } from "@shared/schema";
 import { db, pool, ensureDriverTablesSchema } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq, desc, and, sql, asc, or, ne, gt, ilike, count, isNull, inArray, type SQL } from "drizzle-orm";
+import { eq, desc, and, sql, asc, or, ne, gt, gte, lte, ilike, count, isNull, inArray, type SQL } from "drizzle-orm";
 import * as schema from "@shared/schema";
 import { sendLeaveRequestNotification } from "./lib/email";
 import { type ScopeParams } from "./auth";
@@ -7002,6 +7002,7 @@ export class DatabaseStorage implements IStorage {
         itemCode: r.item.itemCode,
         description: r.item.description,
         requestedQty: r.item.requestedQty,
+        weight: r.item.weight,
         storageType: r.item.storageType,
         uom: r.item.uom,
         zoneName: r.route?.name || "Unassigned Route",
