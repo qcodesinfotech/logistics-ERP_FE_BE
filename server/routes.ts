@@ -8822,6 +8822,7 @@ export async function registerRoutes(
         itemCode: schema.dispatchItems.itemCode,
         description: schema.dispatchItems.description,
         requestedQty: schema.dispatchItems.requestedQty,
+        weight: schema.dispatchItems.weight,
         storageType: schema.dispatchItems.storageType,
         uom: schema.dispatchItems.uom,
       })
@@ -8974,7 +8975,7 @@ export async function registerRoutes(
           y = doc.y;
           doc.fillColor("#1F2937").text(it.itemCode, 40, y);
           doc.text(it.description || "N/A", 120, y, { width: 220 });
-          doc.text(parseFloat(it.requestedQty || "0").toFixed(1), 350, y);
+          doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
           doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
           doc.moveDown(1.2);
         }
@@ -9069,6 +9070,7 @@ export async function registerRoutes(
         itemCode: schema.dispatchItems.itemCode,
         description: schema.dispatchItems.description,
         requestedQty: schema.dispatchItems.requestedQty,
+        weight: schema.dispatchItems.weight,
         storageType: schema.dispatchItems.storageType,
         uom: schema.dispatchItems.uom,
         sheetId: schema.dispatchItems.sheetId,
@@ -9138,7 +9140,7 @@ export async function registerRoutes(
         y = doc.y;
         doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y);
         doc.text(it.description || "N/A", 120, y, { width: 220 });
-        doc.text(parseFloat(it.requestedQty || "0").toFixed(1), 350, y);
+        doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
         doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
         doc.moveDown(1.2);
       }

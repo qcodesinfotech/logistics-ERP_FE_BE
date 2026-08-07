@@ -101,7 +101,7 @@ export default function DeliveryInvoicesPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-md border shadow-sm">
+      <div className="bg-card rounded-md border shadow-sm">
         <Table>
           <TableHeader>
             <TableRow>

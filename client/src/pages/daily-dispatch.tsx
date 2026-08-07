@@ -28,6 +28,7 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
+  Share2,
 } from "lucide-react";
 
 // ===== Types =====
@@ -2485,6 +2486,44 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                       >
                                         <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.pods.size})
                                       </Button>
+                                    )}
+                                    {outlet.items.length > 0 && (
+                                      <>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const firstItem = outlet.items[0];
+                                            if (firstItem) {
+                                              const url = `/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}`;
+                                              window.open(url, "_blank");
+                                            }
+                                          }}
+                                        >
+                                          <Download className="h-3 w-3 mr-1" /> Download PDF
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const firstItem = outlet.items[0];
+                                            if (firstItem) {
+                                              const shareUrl = `${window.location.origin}/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}`;
+                                              navigator.clipboard.writeText(shareUrl);
+                                              toast({
+                                                title: "Link Copied!",
+                                                description: "POD PDF link copied to clipboard.",
+                                              });
+                                            }
+                                          }}
+                                        >
+                                          <Share2 className="h-3 w-3 mr-1" /> Share PDF
+                                        </Button>
+                                      </>
                                     )}
                                   </div>
                                 </td>
