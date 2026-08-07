@@ -8825,6 +8825,7 @@ export async function registerRoutes(
         weight: schema.dispatchItems.weight,
         storageType: schema.dispatchItems.storageType,
         uom: schema.dispatchItems.uom,
+        toNo: schema.dispatchItems.toNo,
       })
       .from(schema.dispatchDeliveries)
       .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
@@ -8957,27 +8958,46 @@ export async function registerRoutes(
         doc.text(`Remarks: ${del.remark || "None"}`);
         doc.moveDown(1.5);
 
-        // Product Details Table
+        // Group items by TO Number
+        const groupedByTo: Record<string, any[]> = {};
+        for (const it of del.items) {
+          const toNo = it.toNo || "N/A";
+          if (!groupedByTo[toNo]) {
+            groupedByTo[toNo] = [];
+          }
+          groupedByTo[toNo].push(it);
+        }
+
         doc.fillColor("#1E3A8A").fontSize(12).text("Delivered Items List", { underline: true });
         doc.moveDown(0.5);
 
-        y = doc.y;
-        doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
-        doc.text("Description", 120, y);
-        doc.text("Ordered Qty", 350, y);
-        doc.text("Delivered Qty", 450, y);
-        doc.moveDown(0.4);
+        for (const [toNo, items] of Object.entries(groupedByTo)) {
+          doc.font("Helvetica-Bold").fillColor("#1E3A8A").fontSize(10).text(`TO Number: ${toNo}`);
+          doc.font("Helvetica").moveDown(0.3);
 
-        doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-        doc.moveDown(0.5);
-
-        for (const it of del.items) {
           y = doc.y;
-          doc.fillColor("#1F2937").text(it.itemCode, 40, y);
-          doc.text(it.description || "N/A", 120, y, { width: 220 });
-          doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
-          doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
-          doc.moveDown(1.2);
+          doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
+          doc.text("Description", 120, y);
+          doc.text("Ordered Qty", 350, y);
+          doc.text("Delivered Qty", 450, y);
+          doc.moveDown(0.3);
+
+          doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+          doc.moveDown(0.4);
+
+          for (const it of items) {
+            y = doc.y;
+            if (y > 750) {
+              doc.addPage();
+              y = doc.y;
+            }
+            doc.fillColor("#1F2937").text(it.itemCode, 40, y);
+            doc.text(it.description || "N/A", 120, y, { width: 220 });
+            doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
+            doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
+            doc.moveDown(1.2);
+          }
+          doc.moveDown(1.5);
         }
 
         doc.moveDown(2);
@@ -9076,6 +9096,7 @@ export async function registerRoutes(
         sheetId: schema.dispatchItems.sheetId,
         routeId: schema.dispatchItems.routeId,
         overrideRouteId: schema.dispatchItems.overrideRouteId,
+        toNo: schema.dispatchItems.toNo,
       })
       .from(schema.dispatchDeliveries)
       .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
@@ -9123,26 +9144,46 @@ export async function registerRoutes(
       doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
       doc.moveDown(1.5);
 
+      // Group items by TO Number
+      const groupedByTo: Record<string, typeof deliveriesQuery> = {};
+      for (const it of deliveriesQuery) {
+        const toNo = it.toNo || "N/A";
+        if (!groupedByTo[toNo]) {
+          groupedByTo[toNo] = [];
+        }
+        groupedByTo[toNo].push(it);
+      }
+
       doc.fillColor("#1E3A8A").fontSize(14).text("Delivered Items List", { underline: true });
       doc.moveDown(0.8);
 
-      let y = doc.y;
-      doc.fillColor("#374151").fontSize(10).text("Item Code", 40, y);
-      doc.text("Description", 120, y);
-      doc.text("Ordered Qty", 350, y);
-      doc.text("Delivered Qty", 450, y);
-      doc.moveDown(0.5);
+      for (const [toNo, items] of Object.entries(groupedByTo)) {
+        doc.font("Helvetica-Bold").fillColor("#1E3A8A").fontSize(11).text(`TO Number: ${toNo}`);
+        doc.font("Helvetica").moveDown(0.4);
 
-      doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-      doc.moveDown(0.5);
+        let y = doc.y;
+        doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
+        doc.text("Description", 120, y);
+        doc.text("Ordered Qty", 350, y);
+        doc.text("Delivered Qty", 450, y);
+        doc.moveDown(0.3);
 
-      for (const it of deliveriesQuery) {
-        y = doc.y;
-        doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y);
-        doc.text(it.description || "N/A", 120, y, { width: 220 });
-        doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
-        doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
-        doc.moveDown(1.2);
+        doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(0.4);
+
+        for (const it of items) {
+          y = doc.y;
+          if (y > 750) {
+            doc.addPage();
+            y = doc.y;
+          }
+          doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y);
+          doc.text(it.description || "N/A", 120, y, { width: 220 });
+          doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
+          doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
+          doc.moveDown(1.2);
+        }
+        doc.moveDown(1.5);
       }
 
       doc.moveDown(2);
