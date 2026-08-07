@@ -8811,7 +8811,7 @@ export async function registerRoutes(
         id: schema.dispatchDeliveries.id,
         dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
         driverId: schema.dispatchDeliveries.driverId,
-        outletId: schema.dispatchDeliveries.outletId,
+        outletId: schema.dispatchItems.outletId,
         deliveredQty: schema.dispatchDeliveries.deliveredQty,
         remainingQty: schema.dispatchDeliveries.remainingQty,
         remark: schema.dispatchDeliveries.remark,
@@ -9058,7 +9058,7 @@ export async function registerRoutes(
         id: schema.dispatchDeliveries.id,
         dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
         driverId: schema.dispatchDeliveries.driverId,
-        outletId: schema.dispatchDeliveries.outletId,
+        outletId: schema.dispatchItems.outletId,
         deliveredQty: schema.dispatchDeliveries.deliveredQty,
         remainingQty: schema.dispatchDeliveries.remainingQty,
         remark: schema.dispatchDeliveries.remark,
@@ -9080,7 +9080,7 @@ export async function registerRoutes(
       .where(
         and(
           eq(schema.dispatchItems.sheetId, sheetId),
-          eq(schema.dispatchDeliveries.outletId, outletId),
+          eq(schema.dispatchItems.outletId, outletId),
           eq(schema.dispatchItems.storageType, storageType)
         )
       );

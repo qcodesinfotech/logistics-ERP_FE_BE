@@ -6250,7 +6250,7 @@ export class DatabaseStorage implements IStorage {
     // We want completed deliveries within the invoice period for the assigned outlets.
     // Assuming status "delivered" or similar.
     const conditions = [
-      inArray(dispatchDeliveries.outletId, outletIds as string[]),
+      inArray(dispatchItems.outletId, outletIds as string[]),
       gte(dispatchDeliveries.deliveredAt, new Date(invoice.periodStart)),
       lte(dispatchDeliveries.deliveredAt, new Date(invoice.periodEnd + "T23:59:59Z"))
     ];
@@ -6277,7 +6277,7 @@ export class DatabaseStorage implements IStorage {
     .from(dispatchDeliveries)
     .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
     .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
-    .leftJoin(outlets, eq(dispatchDeliveries.outletId, outlets.id))
+    .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
     .where(and(...conditions))
     .orderBy(dispatchDeliveries.deliveredAt);
     
@@ -6597,7 +6597,7 @@ export class DatabaseStorage implements IStorage {
       id: dispatchDeliveries.id,
       dispatchItemId: dispatchDeliveries.dispatchItemId,
       driverId: dispatchDeliveries.driverId,
-      outletId: dispatchDeliveries.outletId,
+      outletId: dispatchItems.outletId,
       deliveredQty: dispatchDeliveries.deliveredQty,
       remainingQty: dispatchDeliveries.remainingQty,
       damagedQty: dispatchDeliveries.damagedQty,
@@ -6626,7 +6626,7 @@ export class DatabaseStorage implements IStorage {
     .from(dispatchDeliveries)
     .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
     .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
-    .leftJoin(outlets, eq(dispatchDeliveries.outletId, outlets.id))
+    .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
     .leftJoin(routes, eq(dispatchItems.routeId, routes.id));
 
     if (conditions.length > 0) {
@@ -6661,7 +6661,7 @@ export class DatabaseStorage implements IStorage {
       id: dispatchDeliveries.id,
       dispatchItemId: dispatchDeliveries.dispatchItemId,
       driverId: dispatchDeliveries.driverId,
-      outletId: dispatchDeliveries.outletId,
+      outletId: dispatchItems.outletId,
       deliveredQty: dispatchDeliveries.deliveredQty,
       remainingQty: dispatchDeliveries.remainingQty,
       damagedQty: dispatchDeliveries.damagedQty,
@@ -6691,7 +6691,7 @@ export class DatabaseStorage implements IStorage {
     .from(dispatchDeliveries)
     .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
     .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
-    .leftJoin(outlets, eq(dispatchDeliveries.outletId, outlets.id))
+    .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
     .leftJoin(routes, eq(dispatchItems.routeId, routes.id))
     .where(and(...conditions))
     .orderBy(desc(dispatchDeliveries.deliveredAt));
