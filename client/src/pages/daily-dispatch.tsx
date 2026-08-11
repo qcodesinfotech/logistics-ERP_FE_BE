@@ -1,9 +1,10 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import * as XLSX from "xlsx";
+import { useAuth } from "@/contexts/auth-context";
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@/components/ui/tabs";
@@ -238,14 +239,18 @@ function MoveOverrideDialog({
 
 // ===== Outlet Card =====
 function OutletCard({
-  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem,
+  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
   onDeliveryUpdate: (item: DispatchItem) => void;
   onOverride: (outlet: OutletGroup) => void;
   onOverrideItem: (item: DispatchItem) => void;
+  selectedDate: string;
 }) {
+  const { user } = useAuth();
+  const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
+  const isToday = selectedDate === format(new Date(), "yyyy-MM-dd");
   const [expanded, setExpanded] = useState(true);
   const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
   const total = outlet.items.length;
@@ -329,6 +334,8 @@ function OutletCard({
                   )}
                   {status === "pending" && (
                     <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
+                      disabled={isDriver && !isToday}
+                      title={(isDriver && !isToday) ? "Drivers can only update deliveries for today's date." : ""}
                       onClick={() => onDeliveryUpdate(item)}>
                       <Eye className="h-3 w-3 mr-1" />Update
                     </Button>
@@ -345,12 +352,13 @@ function OutletCard({
 
 // ===== Zone Column =====
 function ZoneColumn({
-  zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem,
+  zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
   onOverride: (outlet: OutletGroup) => void;
   onOverrideItem: (item: DispatchItem) => void;
+  selectedDate: string;
 }) {
   const totalItems = zone.outlets.reduce((s, o) => s + o.items.length, 0);
   const deliveredItems = zone.outlets.reduce((s, o) => s + o.items.filter(i => i.delivery?.status === "delivered").length, 0);
@@ -431,6 +439,7 @@ function ZoneColumn({
                 onDeliveryUpdate={onDeliveryUpdate}
                 onOverride={onOverride}
                 onOverrideItem={onOverrideItem}
+                selectedDate={selectedDate}
               />
             );
           })
@@ -448,8 +457,24 @@ export default function DailyDispatchPage() {
 
   // State
   const [activeTab, setActiveTab] = useState("board");
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [boardSheetId, setBoardSheetId] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    return localStorage.getItem("dispatchSelectedDate") || format(new Date(), "yyyy-MM-dd");
+  });
+  const [boardSheetId, setBoardSheetId] = useState<string | null>(() => {
+    return localStorage.getItem("dispatchBoardSheetId") || null;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("dispatchSelectedDate", selectedDate);
+  }, [selectedDate]);
+
+  useEffect(() => {
+    if (boardSheetId) {
+      localStorage.setItem("dispatchBoardSheetId", boardSheetId);
+    } else {
+      localStorage.removeItem("dispatchBoardSheetId");
+    }
+  }, [boardSheetId]);
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -458,6 +483,12 @@ export default function DailyDispatchPage() {
   const [overrideDialog, setOverrideDialog] = useState<OutletGroup | null>(null);
   const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
   const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
+
+  const [boardRouteFilter, setBoardRouteFilter] = useState("all");
+  const [boardOutletFilter, setBoardOutletFilter] = useState("all");
+  const [boardDriverFilter, setBoardDriverFilter] = useState("all");
+  const [boardTruckFilter, setBoardTruckFilter] = useState("all");
+  const [boardStatusFilter, setBoardStatusFilter] = useState("all");
 
   // Queries
   const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
@@ -608,7 +639,24 @@ export default function DailyDispatchPage() {
             const sheetParsed = rawJson.map(row => {
               const newRow: Record<string, string> = {};
               Object.entries(row).forEach(([key, val]) => {
-                newRow[headerMap.get(key)] = String(val);
+                let finalVal = val;
+                
+                // If it's a numeric value and the column is likely a date (Excel serial number)
+                if (typeof val === "number" && headerMap.get(key).includes("date")) {
+                  try {
+                    const parsedDate = XLSX.SSF.parse_date_code(val);
+                    if (parsedDate) {
+                      const dd = String(parsedDate.d).padStart(2, '0');
+                      const mm = String(parsedDate.m).padStart(2, '0');
+                      const yyyy = parsedDate.y;
+                      finalVal = `${yyyy}-${mm}-${dd}`;
+                    }
+                  } catch (e) {
+                    // fallback to string if parsing fails
+                  }
+                }
+                
+                newRow[headerMap.get(key)] = String(finalVal);
               });
               return newRow;
             });
@@ -790,6 +838,83 @@ export default function DailyDispatchPage() {
             )}
           </div>
 
+          {boardData && (
+            <div className="px-6 py-2 border-b bg-muted/20 flex items-center gap-3 flex-wrap">
+              <Select value={boardOutletFilter} onValueChange={setBoardOutletFilter}>
+                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Outlets" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Outlets</SelectItem>
+                  {(() => {
+                    const outlets = new Map<string, string>();
+                    boardData.zones.forEach(z => z.outlets.forEach(o => outlets.set(o.outletId || o.outletCode, `${o.outletName} (${o.outletCode})`)));
+                    return Array.from(outlets.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
+                  })()}
+                </SelectContent>
+              </Select>
+              
+              <Select value={boardRouteFilter} onValueChange={setBoardRouteFilter}>
+                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Routes" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Routes</SelectItem>
+                  {(() => {
+                    const routes = new Map<string, string>();
+                    boardData.zones.forEach(z => { if (z.zoneId !== "unassigned") routes.set(z.zoneId, z.zoneName); });
+                    return Array.from(routes.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
+                  })()}
+                </SelectContent>
+              </Select>
+              
+              <Select value={boardDriverFilter} onValueChange={setBoardDriverFilter}>
+                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Drivers" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Drivers</SelectItem>
+                  {(() => {
+                    const driversMap = new Map<string, string>();
+                    boardData.zones.forEach(z => {
+                      z.trucks?.forEach(t => { if (t.driver) driversMap.set(t.driver.id, t.driver.name); });
+                      z.drivers?.forEach(d => { if (d) driversMap.set(d.id, d.name); });
+                    });
+                    return Array.from(driversMap.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
+                  })()}
+                </SelectContent>
+              </Select>
+              
+              <Select value={boardTruckFilter} onValueChange={setBoardTruckFilter}>
+                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Trucks" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Trucks</SelectItem>
+                  {(() => {
+                    const trucksMap = new Map<string, string>();
+                    boardData.zones.forEach(z => z.trucks?.forEach(t => { if (t.vehicle) trucksMap.set(t.vehicle.id, t.vehicle.plateNumber || t.vehicle.name); }));
+                    return Array.from(trucksMap.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
+                  })()}
+                </SelectContent>
+              </Select>
+              
+              <Select value={boardStatusFilter} onValueChange={setBoardStatusFilter}>
+                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="partial">Partial Delivered</SelectItem>
+                  <SelectItem value="delivered">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {(boardRouteFilter !== "all" || boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all") && (
+                <Button variant="ghost" size="sm" className="h-8 text-xs px-2 text-muted-foreground" onClick={() => {
+                  setBoardRouteFilter("all");
+                  setBoardOutletFilter("all");
+                  setBoardDriverFilter("all");
+                  setBoardTruckFilter("all");
+                  setBoardStatusFilter("all");
+                }}>
+                  Clear Filters
+                </Button>
+              )}
+            </div>
+          )}
+
           {!boardSheetId ? (
             <div className="flex-1 flex items-center justify-center min-h-0">
               <div className="text-center space-y-3">
@@ -809,16 +934,67 @@ export default function DailyDispatchPage() {
           ) : (
             <div className="flex-1 overflow-auto p-4 min-h-0">
               <div className="flex gap-4 min-w-max pb-4">
-                {boardData.zones
-                  .filter(z => z.outlets.length > 0 || z.zoneId === "unassigned")
-                  .map(zone => (
-                    <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId}
-                      zones={zones} isSupervisor={isSupervisor}
-                      onDeliveryUpdate={item => setDeliveryDialog(item)}
-                      onOverride={outlet => setOverrideDialog(outlet)}
-                      onOverrideItem={item => setItemOverrideDialog(item)}
-                    />
-                  ))}
+                {(() => {
+                  const filteredZones = boardData.zones.map(zone => {
+                    if (boardRouteFilter !== "all" && zone.zoneId !== boardRouteFilter) return null;
+
+                    const filteredOutlets = zone.outlets.map(outlet => {
+                      if (boardOutletFilter !== "all" && outlet.outletId !== boardOutletFilter && outlet.outletCode !== boardOutletFilter) return null;
+
+                      const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
+                      
+                      if (boardDriverFilter !== "all") {
+                        const isDriverInZone = zone.trucks?.some(t => t.driver?.id === boardDriverFilter) || zone.drivers?.some(d => d.id === boardDriverFilter);
+                        if (assignedTruck) {
+                          if (assignedTruck.driver?.id !== boardDriverFilter) return null;
+                        } else {
+                          if (!isDriverInZone) return null;
+                        }
+                      }
+
+                      if (boardTruckFilter !== "all") {
+                        const isTruckInZone = zone.trucks?.some(t => t.vehicle?.id === boardTruckFilter);
+                        if (assignedTruck) {
+                          if (assignedTruck.vehicle?.id !== boardTruckFilter) return null;
+                        } else {
+                          if (!isTruckInZone) return null;
+                        }
+                      }
+
+                      const filteredItems = outlet.items.filter(item => {
+                        const status = item.delivery?.status || "pending";
+                        if (boardStatusFilter !== "all" && status !== boardStatusFilter) return false;
+                        return true;
+                      });
+
+                      if (filteredItems.length === 0 && boardStatusFilter !== "all") return null;
+
+                      return { ...outlet, items: filteredItems };
+                    }).filter(Boolean) as OutletGroup[];
+
+                    if (filteredOutlets.length === 0 && (boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all")) {
+                      return null;
+                    }
+
+                    return { ...zone, outlets: filteredOutlets };
+                  }).filter(Boolean) as ZoneGroup[];
+                  
+                  if (filteredZones.every(z => z.outlets.length === 0 && z.zoneId !== "unassigned")) {
+                    return <div className="flex items-center justify-center w-full h-64 text-muted-foreground">No items match your filters.</div>;
+                  }
+
+                  return filteredZones
+                    .filter(z => z.outlets.length > 0 || z.zoneId === "unassigned")
+                    .map(zone => (
+                      <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId!}
+                        zones={zones} isSupervisor={isSupervisor}
+                        onDeliveryUpdate={item => setDeliveryDialog(item)}
+                        onOverride={outlet => setOverrideDialog(outlet)}
+                        onOverrideItem={item => setItemOverrideDialog(item)}
+                        selectedDate={selectedDate}
+                      />
+                    ));
+                })()}
                 {boardData.zones.every(z => z.outlets.length === 0) && (
                   <div className="flex items-center justify-center w-full h-64 text-muted-foreground">
                     No items found in this sheet.
@@ -1359,6 +1535,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   const queryClient = useQueryClient();
   const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "" });
   const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string } | null>(null);
+  const [expandedStorageTypes, setExpandedStorageTypes] = useState<Record<string, boolean>>({});
+  const [planningTab, setPlanningTab] = useState("unassigned");
 
   const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
 
@@ -1477,9 +1655,36 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
         truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId)
       );
       return { ...outlet, totalWeight, assignment };
-    }).sort((a: any, b: any) => b.totalWeight - a.totalWeight);
+    }).sort((a: any, b: any) => {
+      // Sort unassigned first, then by weight
+      if (a.assignment && !b.assignment) return 1;
+      if (!a.assignment && b.assignment) return -1;
+      return b.totalWeight - a.totalWeight;
+    });
 
     return { zone, zoneTrucks, outletRows };
+  });
+
+  const filteredZoneGroups = zoneGroups.map((g: any) => {
+    const filteredOutlets = g.outletRows.filter((outlet: any) => {
+      const hasFullAssignment = !!outlet.assignment;
+      
+      const storageTypes = Array.from(new Set(outlet.items.map((i: any) => i.storageType).filter(Boolean))) as string[];
+      const assignedStorageTypes = storageTypes.filter(st => 
+        outletAssignments.some((oa: any) => oa.outletCode === outlet.outletCode && oa.storageType === st && truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId))
+      );
+      
+      const isFullyAssigned = hasFullAssignment || (storageTypes.length > 0 && assignedStorageTypes.length === storageTypes.length);
+      const isPartiallyAssigned = assignedStorageTypes.length > 0;
+      
+      if (planningTab === "assigned") {
+        return hasFullAssignment || isPartiallyAssigned;
+      } else {
+        return !isFullyAssigned;
+      }
+    });
+
+    return { ...g, outletRows: filteredOutlets };
   }).filter((g: any) => g.zoneTrucks.length > 0 || g.outletRows.length > 0)
     .sort((a: any, b: any) => (a.zone.name || "").localeCompare(b.zone.name || ""));
 
@@ -1595,18 +1800,28 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
             </CardContent>
           </Card>
 
+          {/* ─── Tabs for Assigned / Unassigned ─── */}
+          <Tabs value={planningTab} onValueChange={setPlanningTab} className="w-full">
+            <div className="flex items-center justify-between mb-2">
+              <TabsList>
+                <TabsTrigger value="unassigned">Unassigned Outlets</TabsTrigger>
+                <TabsTrigger value="assigned">Assigned Outlets</TabsTrigger>
+              </TabsList>
+            </div>
+          </Tabs>
+
           {/* ─── Zone Cards ─── */}
-          {zoneGroups.length === 0 ? (
+          {filteredZoneGroups.length === 0 ? (
             <Card>
               <CardContent className="p-10 text-center text-muted-foreground">
                 <MapPin className="h-8 w-8 mx-auto mb-2 text-primary/30" />
-                <p className="font-medium">No trucks assigned yet</p>
-                <p className="text-sm">Add trucks to zones above to start planning.</p>
+                <p className="font-medium">No items found</p>
+                <p className="text-sm">There are no outlets matching this filter.</p>
               </CardContent>
             </Card>
           ) : (
             <div className="space-y-6">
-              {zoneGroups.map(({ zone, zoneTrucks, outletRows }: any) => (
+              {filteredZoneGroups.map(({ zone, zoneTrucks, outletRows }: any) => (
                 <Card key={zone.id} className="border-2">
                   {/* Zone Header */}
                   <CardHeader className="bg-gradient-to-r from-primary/8 to-transparent pb-3">
@@ -1630,6 +1845,19 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                           const used = parseFloat(ta.usedCapacity || "0");
                           const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
                           const isOver = used > cap && cap > 0;
+                          
+                          const taAssignments = outletAssignments.filter((oa: any) => oa.truckAssignmentId === ta.id);
+                          const taOutletCount = new Set(taAssignments.map((oa: any) => oa.outletCode)).size;
+                          const taItemCount = taAssignments.reduce((sum, oa) => {
+                            if (oa.itemIds && Array.isArray(oa.itemIds)) return sum + oa.itemIds.length;
+                            const outlet = boardData?.zones?.flatMap((z: any) => z.outlets).find((o: any) => o.outletCode === oa.outletCode);
+                            if (!outlet) return sum;
+                            if (oa.storageType) {
+                              return sum + outlet.items.filter((i: any) => i.storageType === oa.storageType).length;
+                            }
+                            return sum + outlet.items.length;
+                          }, 0);
+
                           return (
                             <div key={ta.id} className={`rounded-lg border p-2 text-xs min-w-[140px] shadow-sm ${isOver ? "border-red-400 bg-red-50/50" : "border-border bg-background"}`}>
                               <div className="flex items-center justify-between mb-1">
@@ -1666,6 +1894,14 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                               <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 mt-0.5">
                                 <User className="h-2.5 w-2.5" />{getDriverName(ta.driverId)}
                               </p>
+                              <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                                <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                  <MapPin className="h-2.5 w-2.5" /> {taOutletCount} Outlets
+                                </p>
+                                <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                  <Package className="h-2.5 w-2.5" /> {taItemCount} Items
+                                </p>
+                              </div>
                             </div>
                           );
                         })}
@@ -1774,14 +2010,15 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                         <SelectContent>
                                           {truckAssignments.map((ta: any) => {
                                             const veh = getVehicleInfo(ta.truckId);
+                                            const zoneName = getZoneName(ta.zoneId);
                                             const cap = parseFloat(veh?.capacity || "0");
                                             const used = parseFloat(ta.usedCapacity || "0");
                                             const remaining = cap > 0 ? cap - used : null;
                                             const wouldOverflow = cap > 0 && used + outletWeightT > cap;
                                             return (
                                               <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
-                                                {veh?.plateNumber || "Truck"}
-                                                {remaining !== null ? ` (${remaining.toFixed(1)}T free${wouldOverflow ? " ⚠" : ""})` : ""}
+                                                {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
+                                                {remaining !== null ? ` - ${remaining.toFixed(1)}T free${wouldOverflow ? " ⚠" : ""}` : ""}
                                               </SelectItem>
                                             );
                                           })}
@@ -1811,84 +2048,116 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     : null;
                                   const stAssignedVeh = stAssignedTruck ? getVehicleInfo(stAssignedTruck.truckId) : null;
 
+                                  const isExpanded = expandedStorageTypes[`${outlet.outletCode}-${st}`];
                                   return (
-                                    <TableRow key={st} className="bg-muted/5 border-t-0 hover:bg-muted/10">
-                                      <TableCell className="pl-12 text-xs text-muted-foreground border-t-0 py-2">
-                                        ↳ {st} Items ({stItems.length})
-                                      </TableCell>
-                                      <TableCell className="text-right text-xs font-mono text-muted-foreground border-t-0 py-2">
-                                        {stWeightT.toFixed(3)} T
-                                      </TableCell>
-                                      <TableCell className="text-right pr-4 border-t-0 py-2">
-                                        {isStCompleted ? (
-                                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5">
-                                            <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
-                                            Completed
-                                          </Badge>
-                                        ) : stAssignedTruck ? (
-                                          <div className="flex items-center justify-end gap-2">
-                                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 text-[10px] h-5">
-                                              <Truck className="h-2.5 w-2.5" />
-                                              {stAssignedVeh?.plateNumber || "Truck"}
+                                    <React.Fragment key={st}>
+                                      <TableRow 
+                                        className="bg-muted/5 border-t-0 hover:bg-muted/10 cursor-pointer"
+                                        onClick={() => setExpandedStorageTypes(prev => ({...prev, [`${outlet.outletCode}-${st}`]: !prev[`${outlet.outletCode}-${st}`]}))}
+                                      >
+                                        <TableCell className="pl-12 text-xs text-muted-foreground border-t-0 py-2 flex items-center gap-1 hover:text-foreground transition-colors">
+                                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                          ↳ {st} Items ({stItems.length})
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs font-mono text-muted-foreground border-t-0 py-2">
+                                          {stWeightT.toFixed(3)} T
+                                        </TableCell>
+                                        <TableCell className="text-right pr-4 border-t-0 py-2">
+                                          {isStCompleted ? (
+                                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5">
+                                              <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
+                                              Completed
                                             </Badge>
-                                            <Button
-                                              variant="ghost" size="sm"
-                                              className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
-                                              onClick={() => unassignOutletMutation.mutate({
-                                                outletCode: outlet.outletCode,
-                                                sheetId: boardSheetId!,
-                                                storageType: st
-                                              } as any)}
-                                            >
-                                              <X className="h-3 w-3" />
-                                            </Button>
-                                          </div>
-                                        ) : (
-                                          <Select
-                                            onValueChange={(truckAssignId) => {
-                                              if (!truckAssignId) return;
-                                              const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
-                                              const veh = getVehicleInfo(truck?.truckId);
-                                              const cap = parseFloat(veh?.capacity || "0");
-                                              const used = parseFloat(truck?.usedCapacity || "0");
-                                              if (cap > 0 && used + stWeightT > cap) {
-                                                toast({
-                                                  title: `⚠️ Capacity exceeded for ${st} items!`,
-                                                  variant: "destructive"
-                                                });
-                                                return;
-                                              }
-                                              assignOutletMutation.mutate({
-                                                outletCode: outlet.outletCode,
-                                                truckAssignmentId: truckAssignId,
-                                                outletWeight: stWeightT.toFixed(3),
-                                                sheetId: boardSheetId!,
-                                                storageType: st
-                                              } as any);
-                                            }}
-                                          >
-                                            <SelectTrigger className="h-6 text-[10px] w-32 border-dashed ml-auto bg-transparent">
-                                              <SelectValue placeholder={`Assign ${st} →`} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {truckAssignments.map((ta: any) => {
-                                                const veh = getVehicleInfo(ta.truckId);
-                                                const cap = parseFloat(veh?.capacity || "0");
-                                                const used = parseFloat(ta.usedCapacity || "0");
-                                                const remaining = cap > 0 ? cap - used : null;
-                                                const wouldOverflow = cap > 0 && used + stWeightT > cap;
-                                                return (
-                                                  <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
-                                                    {veh?.plateNumber || "Truck"}
-                                                    {remaining !== null ? ` (${remaining.toFixed(1)}T free)` : ""}
-                                                  </SelectItem>
-                                                );
-                                              })}
-                                            </SelectContent>
-                                          </Select>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
+                                          ) : stAssignedTruck ? (
+                                            <div className="flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
+                                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 text-[10px] h-5">
+                                                <Truck className="h-2.5 w-2.5" />
+                                                {stAssignedVeh?.plateNumber || "Truck"}
+                                              </Badge>
+                                              <Button
+                                                variant="ghost" size="sm"
+                                                className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  unassignOutletMutation.mutate({
+                                                    outletCode: outlet.outletCode,
+                                                    sheetId: boardSheetId!,
+                                                    storageType: st
+                                                  } as any);
+                                                }}
+                                              >
+                                                <X className="h-3 w-3" />
+                                              </Button>
+                                            </div>
+                                          ) : (
+                                            <div onClick={e => e.stopPropagation()}>
+                                              <Select
+                                                onValueChange={(truckAssignId) => {
+                                                  if (!truckAssignId) return;
+                                                  const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
+                                                  const veh = getVehicleInfo(truck?.truckId);
+                                                  const cap = parseFloat(veh?.capacity || "0");
+                                                  const used = parseFloat(truck?.usedCapacity || "0");
+                                                  if (cap > 0 && used + stWeightT > cap) {
+                                                    toast({
+                                                      title: `⚠️ Capacity exceeded for ${st} items!`,
+                                                      variant: "destructive"
+                                                    });
+                                                    return;
+                                                  }
+                                                  assignOutletMutation.mutate({
+                                                    outletCode: outlet.outletCode,
+                                                    truckAssignmentId: truckAssignId,
+                                                    outletWeight: stWeightT.toFixed(3),
+                                                    sheetId: boardSheetId!,
+                                                    storageType: st
+                                                  } as any);
+                                                }}
+                                              >
+                                                <SelectTrigger className="h-6 text-[10px] w-32 border-dashed ml-auto bg-transparent">
+                                                  <SelectValue placeholder={`Assign ${st} →`} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  {truckAssignments.map((ta: any) => {
+                                                    const veh = getVehicleInfo(ta.truckId);
+                                                    const zoneName = getZoneName(ta.zoneId);
+                                                    const cap = parseFloat(veh?.capacity || "0");
+                                                    const used = parseFloat(ta.usedCapacity || "0");
+                                                    const remaining = cap > 0 ? cap - used : null;
+                                                    const wouldOverflow = cap > 0 && used + stWeightT > cap;
+                                                    return (
+                                                      <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
+                                                        {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
+                                                        {remaining !== null ? ` - ${remaining.toFixed(1)}T free` : ""}
+                                                      </SelectItem>
+                                                    );
+                                                  })}
+                                                </SelectContent>
+                                              </Select>
+                                            </div>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                      
+                                      {isExpanded && stItems.map((item: any, itemIdx: number) => {
+                                        const iQty = parseFloat(item.quantity) || parseFloat(item.requestedQty) || 0;
+                                        const iWeight = parseFloat(item.itemWeightKg || item.weight || "0");
+                                        const totalIWeight = (iQty * iWeight) / 1000;
+                                        
+                                        return (
+                                          <TableRow key={item.id || itemIdx} className="bg-muted/10 border-t-0">
+                                            <TableCell className="pl-16 py-1.5 text-[10px] text-muted-foreground/80 border-t-0">
+                                              {item.itemCode} - {item.description}
+                                            </TableCell>
+                                            <TableCell className="text-right text-[10px] font-mono text-muted-foreground/80 border-t-0 py-1.5">
+                                              {totalIWeight.toFixed(3)} T
+                                            </TableCell>
+                                            <TableCell className="border-t-0 py-1.5">
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </React.Fragment>
                                   );
                                 })}
                               </React.Fragment>
@@ -2251,7 +2520,28 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; pods: {url: string, date: string}[] }>({ isOpen: false, title: "", pods: [] });
+  const [includeAttachments, setIncludeAttachments] = useState(true);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+
+  const revertMutation = useMutation({
+    mutationFn: async (dispatchItemId: string) => {
+      return apiRequest("PATCH", `/api/dispatch/items/${dispatchItemId}/delivery`, {
+        status: "pending",
+        deliveredQty: "0",
+        remainingQty: "0",
+        remark: "Reverted by admin",
+        podUrl: ""
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Reverted to pending successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/completed-deliveries"] });
+    },
+    onError: (err: any) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
 
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
   const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
@@ -2264,6 +2554,10 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
     }
   });
 
+  const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
+  const { data: drivers = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
+  const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
+
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center min-h-0 py-12">
@@ -2273,16 +2567,20 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   }
 
   // Build filter options
-  const allStorageTypes = new Set<string>();
+  const allStorageTypes = new Set<string>(["Ambient", "Chilled", "Frozen", "Dry"]);
   const allRoutes = new Map<string, string>();
   const allOutlets = new Map<string, string>();
   const allDrivers = new Map<string, string>();
 
+  (zones || []).forEach(z => allRoutes.set(z.id, z.name));
+  (outlets || []).forEach(o => allOutlets.set(o.id, `${o.name} (${o.code || 'No Code'})`));
+  (drivers || []).forEach(d => allDrivers.set(d.id, d.name));
+
   (deliveries || []).forEach(d => {
     if (d.storageType) allStorageTypes.add(d.storageType);
-    if (d.routeId && d.zoneName) allRoutes.set(d.routeId, d.zoneName);
-    if (d.outletId && d.outletName) allOutlets.set(d.outletId, `${d.outletName} (${d.outletCode})`);
-    if (d.driverId && d.driverName) allDrivers.set(d.driverId, d.driverName);
+    if (d.routeId && d.zoneName && !allRoutes.has(d.routeId)) allRoutes.set(d.routeId, d.zoneName);
+    if (d.outletId && d.outletName && !allOutlets.has(d.outletId)) allOutlets.set(d.outletId, `${d.outletName} (${d.outletCode})`);
+    if (d.driverId && d.driverName && !allDrivers.has(d.driverId)) allDrivers.set(d.driverId, d.driverName);
   });
 
   // Apply filters
@@ -2352,6 +2650,21 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center space-x-2 mr-2">
+              <input
+                type="checkbox"
+                id="includeAttachments"
+                checked={includeAttachments}
+                onChange={(e) => setIncludeAttachments(e.target.checked)}
+                className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+              />
+              <label
+                htmlFor="includeAttachments"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer text-slate-700"
+              >
+                Include POD Attachments in PDF
+              </label>
+            </div>
             <Button variant="outline" size="sm" onClick={handleExport}><Download className="h-4 w-4 mr-2" /> Export</Button>
             <Button variant="outline" size="sm" onClick={handlePrint} className="print:hidden"><Printer className="h-4 w-4 mr-2" /> Print</Button>
           </div>
@@ -2429,6 +2742,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                     <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Delivered</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 w-28 border-r">Status</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 w-40">Driver</th>
+                    {isAdmin && <th className="py-2 px-3 font-semibold text-slate-700 w-20 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -2437,7 +2751,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                     return (
                       <React.Fragment key={zone.zoneId}>
                         <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneId)}>
-                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={7}>
+                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={isAdmin ? 8 : 7}>
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
@@ -2450,7 +2764,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 text-slate-700 group">
-                                <td className="py-1.5 px-3 border-r bg-slate-50/50" colSpan={7}>
+                                <td className="py-1.5 px-3 border-r bg-slate-50/50" colSpan={isAdmin ? 8 : 7}>
                                   <div className="flex items-center gap-2 flex-nowrap w-full cursor-pointer" onClick={() => toggleOutlet(outletId)}>
                                     {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
                                     <span className="font-medium text-sm whitespace-nowrap">{outlet.outletName}</span>
@@ -2497,7 +2811,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                             e.stopPropagation();
                                             const firstItem = outlet.items[0];
                                             if (firstItem) {
-                                              const url = `/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}`;
+                                              const url = `/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}&includeAttachments=${includeAttachments}`;
                                               window.open(url, "_blank");
                                             }
                                           }}
@@ -2512,7 +2826,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                             e.stopPropagation();
                                             const firstItem = outlet.items[0];
                                             if (firstItem) {
-                                              const shareUrl = `${window.location.origin}/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}`;
+                                              const shareUrl = `${window.location.origin}/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}&includeAttachments=${includeAttachments}`;
                                               navigator.clipboard.writeText(shareUrl);
                                               toast({
                                                 title: "Link Copied!",
@@ -2549,6 +2863,24 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                     <td className="py-1.5 px-3 text-xs max-w-[150px] truncate" title={p.driverName}>
                                       {p.driverName}
                                     </td>
+                                    {isAdmin && (
+                                      <td className="py-1.5 px-3 text-right">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 text-[10px] px-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (confirm("Are you sure you want to revert this delivery to pending?")) {
+                                              revertMutation.mutate(p.dispatchItemId);
+                                            }
+                                          }}
+                                          disabled={revertMutation.isPending}
+                                        >
+                                          Revert
+                                        </Button>
+                                      </td>
+                                    )}
                                   </tr>
                                 );
                               })}

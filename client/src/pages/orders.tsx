@@ -352,9 +352,8 @@ export default function OrdersPage() {
     if (!e.target.files?.length) return;
     try {
       const formData = new FormData();
-      Array.from(e.target.files).forEach(file => formData.append("files", file));
-      const res = await fetch("/api/upload/multiple", { method: "POST", body: formData });
-      if (!res.ok) throw new Error("Failed to upload files");
+      Array.from(e.target.files).forEach(file => formData.append("documents", file));
+      const res = await apiRequest("POST", "/api/upload/contracts", formData);
       const data = await res.json();
       const updatedLegs = [...routeLegsState];
       const currentPods = updatedLegs[legIndex].podDocuments || [];

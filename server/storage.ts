@@ -2589,9 +2589,20 @@ export class DatabaseStorage implements IStorage {
     board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], trucks: [], outlets: {} };
 
     for (const item of items) {
+      let tAssignId = (item.outletId ? outletToTruck.get(item.outletId) : null) || outletToTruck.get(item.outletCode) || null;
+      if (item.outletId && overrideMap.has(item.outletId)) {
+         const ov = overrideMap.get(item.outletId);
+         if (ov?.overrideTruckId) {
+           tAssignId = ov.overrideTruckId;
+         }
+      }
+
       let effectiveZoneId = "unassigned";
+      const assignedTruck = tAssignId ? truckAssigns.find(t => t.id === tAssignId) : null;
       
-      if (item.overrideRouteId) {
+      if (assignedTruck && assignedTruck.zoneId) {
+        effectiveZoneId = assignedTruck.zoneId;
+      } else if (item.overrideRouteId) {
         effectiveZoneId = item.overrideRouteId;
       } else if (item.outletId && overrideMap.has(item.outletId)) {
         effectiveZoneId = overrideMap.get(item.outletId)!.overrideZoneId;
@@ -2600,7 +2611,7 @@ export class DatabaseStorage implements IStorage {
       } else if (item.routeId) {
         effectiveZoneId = item.routeId;
       }
-      const isOverridden = (item.outletId ? overrideMap.has(item.outletId) : false) || !!item.overrideRouteId;
+      const isOverridden = (item.outletId ? overrideMap.has(item.outletId) : false) || !!item.overrideRouteId || (assignedTruck && assignedTruck.zoneId !== item.routeId);
 
       if (!board[effectiveZoneId]) {
         const zone = zoneMap.get(effectiveZoneId);
@@ -2621,13 +2632,6 @@ export class DatabaseStorage implements IStorage {
       const outletKey = item.outletId || item.outletCode;
       if (!board[effectiveZoneId].outlets[outletKey]) {
         const outlet = item.outletId ? outletMap.get(item.outletId) : null;
-        let tAssignId = (item.outletId ? outletToTruck.get(item.outletId) : null) || outletToTruck.get(item.outletCode) || null;
-        if (item.outletId && overrideMap.has(item.outletId)) {
-           const ov = overrideMap.get(item.outletId);
-           if (ov?.overrideTruckId) {
-             tAssignId = ov.overrideTruckId;
-           }
-        }
 
         board[effectiveZoneId].outlets[outletKey] = {
           outletId: item.outletId,
@@ -6648,13 +6652,13 @@ export class DatabaseStorage implements IStorage {
     const conditions = [];
     
     // Filter for completed deliveries based on status or deliveredAt
-    conditions.push(sql`${dispatchDeliveries.status} = 'delivered'`);
+    conditions.push(sql`${dispatchDeliveries.status} != 'pending'`);
     
     if (startDate) {
-      conditions.push(sql`${dispatchDeliveries.deliveredAt} >= ${startDate + "T00:00:00.000Z"}`);
+      conditions.push(sql`${dispatchSheets.date} >= ${startDate}`);
     }
     if (endDate) {
-      conditions.push(sql`${dispatchDeliveries.deliveredAt} <= ${endDate + "T23:59:59.999Z"}`);
+      conditions.push(sql`${dispatchSheets.date} <= ${endDate}`);
     }
 
     const query = db.select({

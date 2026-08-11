@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db, ensureDriverTablesSchema } from "./db";
-import { eq, and, or, inArray, desc } from "drizzle-orm";
+import { eq, and, or, inArray, desc, isNull } from "drizzle-orm";
 import PDFDocument from "pdfkit";
 import * as schema from "@shared/schema";
 import { z } from "zod";
@@ -7523,13 +7523,25 @@ export async function registerRoutes(
     storage: contractStorage,
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-      const allowedTypes = ["image/jpeg", "image/png", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+      const allowedTypes = [
+        "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", 
+        "application/pdf", "application/msword", 
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ];
       if (allowedTypes.includes(file.mimetype)) cb(null, true);
       else cb(new Error("Only images, PDFs, and Word documents are allowed."));
     },
   });
 
-  app.post("/api/upload/contracts", authMiddleware, contractUpload.array("documents"), (req: AuthRequest, res) => {
+  app.post("/api/upload/contracts", authMiddleware, (req: AuthRequest, res, next) => {
+    contractUpload.array("documents")(req, res, (err) => {
+      if (err) {
+        console.error("Multer error:", err);
+        return res.status(400).json({ error: err.message });
+      }
+      next();
+    });
+  }, (req: AuthRequest, res) => {
     try {
       const files = req.files as Express.Multer.File[];
       if (!files || files.length === 0) {
@@ -9128,21 +9140,7 @@ export async function registerRoutes(
       res.setHeader("Content-Disposition", `attachment; filename="${outletName.replace(/\s+/g, '_')}_POD.pdf"`);
       doc.pipe(res);
 
-      doc.fillColor("#1E3A8A").fontSize(22).text("LOGIX LOGISTICS HUB", { align: "center" });
-      doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
-      doc.moveDown(1.5);
-
-      doc.fillColor("#1F2937").fontSize(10);
-      doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, doc.y);
-      doc.text(`Storage Type: ${storageType}`, 300, doc.y - 12);
-      doc.text(`Route: ${routeName}`, 40, doc.y + 6);
-      doc.text(`Delivery Date: ${firstRow.deliveredAt ? new Date(firstRow.deliveredAt).toLocaleDateString() : "Today"}`, 300, doc.y - 12);
-      doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, doc.y + 6);
-      doc.text(`Remarks: ${firstRow.remark || "None"}`, 40, doc.y + 12);
-      doc.moveDown(2);
-
-      doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-      doc.moveDown(1.5);
+      const includeAttachments = req.query.includeAttachments !== 'false';
 
       // Group items by TO Number
       const groupedByTo: Record<string, typeof deliveriesQuery> = {};
@@ -9154,10 +9152,33 @@ export async function registerRoutes(
         groupedByTo[toNo].push(it);
       }
 
-      doc.fillColor("#1E3A8A").fontSize(14).text("Delivered Items List", { underline: true });
-      doc.moveDown(0.8);
+      let isFirstPage = true;
 
       for (const [toNo, items] of Object.entries(groupedByTo)) {
+        if (!isFirstPage) {
+          doc.addPage();
+        }
+        isFirstPage = false;
+
+        doc.fillColor("#1E3A8A").fontSize(22).text("LOGIX LOGISTICS HUB", { align: "center" });
+        doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
+        doc.moveDown(1.5);
+
+        doc.fillColor("#1F2937").fontSize(10);
+        doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, doc.y);
+        doc.text(`Storage Type: ${storageType}`, 300, doc.y - 12);
+        doc.text(`Route: ${routeName}`, 40, doc.y + 6);
+        doc.text(`Delivery Date: ${firstRow.deliveredAt ? new Date(firstRow.deliveredAt).toLocaleDateString() : "Today"}`, 300, doc.y - 12);
+        doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, doc.y + 6);
+        doc.text(`Remarks: ${firstRow.remark || "None"}`, 40, doc.y + 12);
+        doc.moveDown(2);
+
+        doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+        doc.moveDown(1.5);
+
+        doc.fillColor("#1E3A8A").fontSize(14).text("Delivered Items List", { underline: true });
+        doc.moveDown(0.8);
+
         doc.font("Helvetica-Bold").fillColor("#1E3A8A").fontSize(11).text(`TO Number: ${toNo}`);
         doc.font("Helvetica").moveDown(0.4);
 
@@ -9186,9 +9207,8 @@ export async function registerRoutes(
         doc.moveDown(1.5);
       }
 
-      doc.moveDown(2);
-
-      if (podUrls.length > 0) {
+      if (includeAttachments && podUrls.length > 0) {
+        doc.addPage();
         doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Delivery (POD) Images", { underline: true });
         doc.moveDown(1);
 

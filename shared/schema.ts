@@ -2211,6 +2211,7 @@ export const dispatchOutletTruckAssignments = pgTable("dispatch_outlet_truck_ass
   outletCode: text("outlet_code").notNull(),
   outletId: varchar("outlet_id"),
   storageType: varchar("storage_type"),
+  itemIds: jsonb("item_ids").$type<string[]>(),
   assignedWeight: decimal("assigned_weight", { precision: 10, scale: 3 }).default("0"),
   overrideReason: text("override_reason"),
   createdAt: timestamp("created_at").defaultNow(),

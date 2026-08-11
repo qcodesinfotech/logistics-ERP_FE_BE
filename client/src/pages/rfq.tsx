@@ -222,18 +222,51 @@ export default function RfqPage() {
       const origin = locationsList?.find(l => l.id === rfq.originLocationId);
       const destination = locationsList?.find(l => l.id === rfq.destinationLocationId);
       
+      const initialCharges = [];
+      if (rfq.transportationCharges && parseFloat(String(rfq.transportationCharges)) > 0) {
+        initialCharges.push({
+          description: "Main Transportation Charge",
+          qty: 1,
+          unitRate: parseFloat(String(rfq.transportationCharges)),
+          total: parseFloat(String(rfq.transportationCharges)).toFixed(3)
+        });
+      }
+      if (rfq.extraCharges && Array.isArray(rfq.extraCharges) && rfq.extraCharges.length > 0) {
+        initialCharges.push(...rfq.extraCharges.map((c: any) => ({
+          description: c.name || "",
+          qty: 1,
+          unitRate: c.cost || 0,
+          total: parseFloat(String(c.cost || 0)).toFixed(3)
+        })));
+      }
+      
       const payload = {
         orderNumber: `ORD-${Date.now()}`,
         customerId: rfq.customerId,
         rfqId: rfq.id,
         cargoDetails: `Cargo transit from ${origin?.name || 'Origin'} to ${destination?.name || 'Destination'} (via ${rfq.transitRoute || 'direct'})`,
         weight: "0.000",
-        loadType: "FTL",
+        loadType: rfq.freightType || "FTL",
         documents: [],
         pickupLocationId: rfq.originLocationId,
         deliveryLocationId: rfq.destinationLocationId,
         status: "pending",
         zoneId: null,
+        cargoType: rfq.cargoType,
+        truckType: rfq.truckType,
+        freightType: rfq.freightType,
+        detentionChargesPerDay: rfq.detentionChargesPerDay,
+        routeLegs: rfq.origins,
+        grandTotal: rfq.totalCharges,
+        charges: initialCharges,
+        orderDate: new Date().toISOString(),
+        paymentDueDate: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+        truckOwnership: "rented",
+        truckModel: "",
+        truckPlateNumber: "",
+        chassisNumber: "",
+        driverName: "",
+        driverContact: "",
       };
       return apiRequest("POST", "/api/orders", payload);
     },
@@ -692,21 +725,53 @@ export default function RfqPage() {
                   </div>
                   {extraFields.map((field, index) => (
                     <div key={field.id} className="grid grid-cols-12 gap-3 items-end mb-3 bg-background/50 p-2 rounded-md border">
-                      <FormField control={form.control} name={`extraCharges.${index}.name`} render={({ field }) => (
-                        <FormItem className="col-span-12 sm:col-span-4">
-                          <FormLabel className="text-xs">Charge Type</FormLabel>
-                          <Select onValueChange={field.onChange} defaultValue={field.value}>
-                            <FormControl><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Type" /></SelectTrigger></FormControl>
-                            <SelectContent>
-                              <SelectItem value="Toll">Toll</SelectItem>
-                              <SelectItem value="Port">Port</SelectItem>
-                              <SelectItem value="Border Crossing">Border Crossing</SelectItem>
-                              <SelectItem value="Customs Fee">Customs Fee</SelectItem>
-                              <SelectItem value="Other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </FormItem>
-                      )} />
+                      <FormField control={form.control} name={`extraCharges.${index}.name`} render={({ field }) => {
+                        const predefined = ["Toll", "Port", "Border Crossing", "Customs Fee"];
+                        const isPredefined = predefined.includes(field.value);
+
+                        return (
+                          <FormItem className="col-span-12 sm:col-span-4">
+                            <FormLabel className="text-xs">Charge Type</FormLabel>
+                            {isPredefined || !field.value ? (
+                              <Select onValueChange={(val) => {
+                                if (val === "Other") {
+                                  field.onChange("Other charge"); // Not in predefined, so switches to input
+                                } else {
+                                  field.onChange(val);
+                                }
+                              }} value={field.value || ""}>
+                                <FormControl><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Type" /></SelectTrigger></FormControl>
+                                <SelectContent>
+                                  {predefined.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                                  <SelectItem value="Other">Other (Custom)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="flex gap-1">
+                                <FormControl>
+                                  <Input 
+                                    className="h-8 text-xs" 
+                                    {...field} 
+                                    placeholder="Enter charge name..." 
+                                    autoFocus 
+                                    onBlur={(e) => field.onChange(e.target.value.trim())} 
+                                  />
+                                </FormControl>
+                                <Button 
+                                  type="button" 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-8 w-8 text-muted-foreground shrink-0 border" 
+                                  onClick={() => field.onChange("")}
+                                  title="Select from predefined list"
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
+                          </FormItem>
+                        );
+                      }} />
                       <FormField control={form.control} name={`extraCharges.${index}.qty`} render={({ field }) => (
                         <FormItem className="col-span-4 sm:col-span-2">
                           <FormLabel className="text-xs">Qty</FormLabel>

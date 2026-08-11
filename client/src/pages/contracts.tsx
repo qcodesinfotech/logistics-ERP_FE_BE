@@ -54,6 +54,7 @@ const contractSchema = z.object({
   documents: z.array(z.object({ name: z.string(), url: z.string(), version: z.number().optional(), uploadedAt: z.string().optional() })).default([]),
   // Service Terms
   startDate: z.string().optional(),
+  contractDurationYears: z.string().optional(),
   endDate: z.string().optional(),
   includedDeliveriesPerDay: z.coerce.number().default(0),
   workingHoursPerDay: z.coerce.number().default(10),
@@ -75,6 +76,7 @@ type ContractFormData = z.infer<typeof contractSchema>;
 export default function ContractsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewingContract, setViewingContract] = useState<Contract | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; url: string; version?: number; uploadedAt?: string }[]>([]);
   const [showServiceTerms, setShowServiceTerms] = useState(false);
@@ -86,7 +88,7 @@ export default function ContractsPage() {
     defaultValues: {
       customerId: "", name: "", type: "lease", monthlyRate: "0", numVehicles: 0,
       otCharges: "0", holidayCharges: "0", status: "active", documents: [],
-      startDate: "", endDate: "", includedDeliveriesPerDay: 0, workingHoursPerDay: 10,
+      startDate: "", contractDurationYears: "", endDate: "", includedDeliveriesPerDay: 0, workingHoursPerDay: 10,
       graceHours: "0", otStartsAfterHours: "10",
       extraTruckCharge: "0", emergencyDeliveryCharge: "0", redeliveryCharge: "0",
       outsourcedVehicleCharge: "0", breakdownCharge: "0",
@@ -107,7 +109,8 @@ export default function ContractsPage() {
 
   const saveMutation = useMutation({
     mutationFn: (data: ContractFormData) => {
-      const payload = { ...data, documents: uploadedFiles };
+      const { contractDurationYears, ...rest } = data;
+      const payload = { ...rest, documents: uploadedFiles };
       if (editingId) return apiRequest("PUT", `/api/contracts/${editingId}`, payload);
       return apiRequest("POST", "/api/contracts", payload);
     },
@@ -191,6 +194,7 @@ export default function ContractsPage() {
       status: contract.status as "active" | "inactive",
       documents: (contract.documents as any[]) || [],
       startDate: contract.startDate || "",
+      contractDurationYears: "",
       endDate: contract.endDate || "",
       includedDeliveriesPerDay: contract.includedDeliveriesPerDay || 0,
       workingHoursPerDay: contract.workingHoursPerDay || 10,
@@ -309,7 +313,12 @@ export default function ContractsPage() {
                         ) : <span className="text-[10px] text-muted-foreground">No docs</span>}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(contract)}>Edit</Button>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => setViewingContract(contract)}>
+                            <Eye className="h-4 w-4 mr-1" /> View
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(contract)}>Edit</Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -485,11 +494,56 @@ export default function ContractsPage() {
                 </button>
                 {showServiceTerms && (
                   <div className="p-4 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <FormField control={form.control} name="startDate" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Contract Start Date</FormLabel>
-                          <FormControl><Input type="date" {...field} /></FormControl>
+                          <FormControl>
+                            <Input 
+                              type="date" 
+                              {...field} 
+                              onChange={(e) => {
+                                field.onChange(e);
+                                const duration = form.getValues("contractDurationYears");
+                                if (duration && e.target.value) {
+                                  const d = new Date(e.target.value);
+                                  if (!isNaN(d.getTime())) {
+                                    d.setFullYear(d.getFullYear() + parseInt(duration, 10));
+                                    d.setDate(d.getDate() - 1);
+                                    form.setValue("endDate", d.toISOString().split("T")[0]);
+                                  }
+                                }
+                              }}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="contractDurationYears" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Contract Duration</FormLabel>
+                          <Select 
+                            onValueChange={(val) => {
+                              field.onChange(val);
+                              const start = form.getValues("startDate");
+                              if (start && val) {
+                                const d = new Date(start);
+                                if (!isNaN(d.getTime())) {
+                                  d.setFullYear(d.getFullYear() + parseInt(val, 10));
+                                  d.setDate(d.getDate() - 1);
+                                  form.setValue("endDate", d.toISOString().split("T")[0]);
+                                }
+                              }
+                            }} 
+                            value={field.value}
+                          >
+                            <FormControl><SelectTrigger><SelectValue placeholder="Years" /></SelectTrigger></FormControl>
+                            <SelectContent>
+                              {Array.from({ length: 25 }, (_, i) => i + 1).map(y => (
+                                <SelectItem key={y} value={y.toString()}>{y} Year{y > 1 ? 's' : ''}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <FormMessage />
                         </FormItem>
                       )} />
@@ -624,6 +678,136 @@ export default function ContractsPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+      {/* View Dialog */}
+      <Dialog open={!!viewingContract} onOpenChange={(open) => !open && setViewingContract(null)}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Contract Details: {viewingContract?.name}</DialogTitle>
+            <DialogDescription>Customer: {viewingContract ? getClientName(viewingContract.customerId) : ""}</DialogDescription>
+          </DialogHeader>
+
+          {viewingContract && (
+            <div className="space-y-6 mt-2">
+              {/* Info Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-4 bg-muted/30 rounded-lg">
+                <div>
+                  <div className="text-xs text-muted-foreground">Type</div>
+                  <div className="font-medium capitalize">{viewingContract.type === "lease" ? "Monthly Lease" : "Daily Rate"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Status</div>
+                  <div className="mt-1"><StatusBadge status={viewingContract.status} /></div>
+                </div>
+                {viewingContract.type === "lease" && (
+                  <>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Vehicles</div>
+                      <div className="font-medium">{viewingContract.numVehicles || 0}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Monthly Rate</div>
+                      <div className="font-medium"><CurrencyDisplay amount={viewingContract.monthlyRate || "0"} /></div>
+                    </div>
+                  </>
+                )}
+                <div>
+                  <div className="text-xs text-muted-foreground">OT Rate</div>
+                  <div className="font-medium"><CurrencyDisplay amount={viewingContract.otCharges || "0"} /> <span className="text-[10px] text-muted-foreground">/ Hour</span></div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Holiday Rate</div>
+                  <div className="font-medium"><CurrencyDisplay amount={viewingContract.holidayCharges || "0"} /> <span className="text-[10px] text-muted-foreground">/ Day</span></div>
+                </div>
+              </div>
+
+              {/* Service Terms */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-muted/40 px-4 py-2 border-b text-sm font-semibold">Service Terms</div>
+                <div className="p-4 grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Term:</span>
+                    <span className="font-medium">{(viewingContract as any).startDate || "—"} to {(viewingContract as any).endDate || "Open"}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Deliveries/Day:</span>
+                    <span className="font-medium">{viewingContract.includedDeliveriesPerDay || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Working Hours:</span>
+                    <span className="font-medium">{viewingContract.workingHoursPerDay || 10} hours</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Grace Hours:</span>
+                    <span className="font-medium">{viewingContract.graceHours || 0} hours</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Additional Charges */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-muted/40 px-4 py-2 border-b text-sm font-semibold">Additional Charges</div>
+                <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Extra Truck:</span>
+                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.extraTruckCharge || "0"} /></span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Emergency:</span>
+                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.emergencyDeliveryCharge || "0"} /></span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Redelivery:</span>
+                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.redeliveryCharge || "0"} /></span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Outsourced:</span>
+                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.outsourcedVehicleCharge || "0"} /></span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs block">Breakdown:</span>
+                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.breakdownCharge || "0"} /></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Attached Documents */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-muted/40 px-4 py-2 border-b text-sm font-semibold">Attached Documents</div>
+                <div className="p-4">
+                  {viewingContract.documents && (viewingContract.documents as any[]).length > 0 ? (
+                    <div className="space-y-2">
+                      {(viewingContract.documents as any[]).map((doc, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 rounded-md bg-secondary/30 border text-sm">
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-5 w-5 text-primary" />
+                            <div>
+                              <div className="font-medium">{doc.name} {doc.version ? `(v${doc.version})` : ""}</div>
+                              {doc.uploadedAt && <div className="text-xs text-muted-foreground">Uploaded on {new Date(doc.uploadedAt).toLocaleDateString()}</div>}
+                            </div>
+                          </div>
+                          <a href={doc.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-3 py-1.5 rounded-md transition-colors font-medium text-xs">
+                            <Eye className="h-4 w-4" /> View Document
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground text-center py-4">No documents attached to this contract.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setViewingContract(null)}>Close</Button>
+            <Button onClick={() => {
+              const contractToEdit = viewingContract;
+              setViewingContract(null);
+              if (contractToEdit) openEdit(contractToEdit);
+            }}>Edit Contract</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
