@@ -2659,7 +2659,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string; toNo?: string }): Promise<any> {
+  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; potUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string; toNo?: string; deliveryStartTime?: string; deliveryEndTime?: string }): Promise<any> {
     const { toNo, ...deliveryData } = data;
     if (toNo !== undefined) {
       await db.update(dispatchItems)
@@ -2685,6 +2685,8 @@ export class DatabaseStorage implements IStorage {
     const finalDeliveryData = {
       ...deliveryData,
       outletId: resolvedOutletId,
+      deliveryStartTime: deliveryData.deliveryStartTime ? new Date(deliveryData.deliveryStartTime) : undefined,
+      deliveryEndTime: deliveryData.deliveryEndTime ? new Date(deliveryData.deliveryEndTime) : undefined,
     };
 
     const existing = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
@@ -6609,6 +6611,9 @@ export class DatabaseStorage implements IStorage {
       remark: dispatchDeliveries.remark,
       podUrl: dispatchDeliveries.podUrl,
       temperature: dispatchDeliveries.temperature,
+      potUrl: dispatchDeliveries.potUrl,
+      deliveryStartTime: dispatchDeliveries.deliveryStartTime,
+      deliveryEndTime: dispatchDeliveries.deliveryEndTime,
       status: dispatchDeliveries.status,
       deliveredAt: dispatchDeliveries.deliveredAt,
       deliveryTime: dispatchDeliveries.deliveryTime,
@@ -6673,6 +6678,9 @@ export class DatabaseStorage implements IStorage {
       remark: dispatchDeliveries.remark,
       podUrl: dispatchDeliveries.podUrl,
       temperature: dispatchDeliveries.temperature,
+      potUrl: dispatchDeliveries.potUrl,
+      deliveryStartTime: dispatchDeliveries.deliveryStartTime,
+      deliveryEndTime: dispatchDeliveries.deliveryEndTime,
       status: dispatchDeliveries.status,
       deliveredAt: dispatchDeliveries.deliveredAt,
       deliveryTime: dispatchDeliveries.deliveryTime,

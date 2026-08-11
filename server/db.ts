@@ -135,6 +135,9 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "remark" text;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "pod_url" text;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "temperature" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "pot_url" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_start_time" timestamp;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_end_time" timestamp;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'pending';
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivered_at" timestamp;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_time" text;

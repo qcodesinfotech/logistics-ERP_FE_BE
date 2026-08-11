@@ -8295,6 +8295,16 @@ export async function registerRoutes(
         return res.status(400).json({ error: "openingKm must be a valid non-negative number" });
       }
 
+      const records = await storage.getDriverAttendance(req.user?.id);
+      const existing = records.find(r => r.id === attendanceId);
+      if (!existing) {
+        return res.status(404).json({ error: "Attendance record not found" });
+      }
+      if (existing.closingKm !== null && existing.closingKm !== undefined) {
+        return res.status(400).json({ error: "Cannot edit opening KM after duty has ended" });
+      }
+
+      const isUpdate = existing.openingKm !== null && existing.openingKm !== undefined;
       const updated = await storage.updateDriverAttendance(attendanceId, {
         truckId: truckId || null,
         openingKm: kmVal,
@@ -8305,7 +8315,9 @@ export async function registerRoutes(
       await storage.createDriverActivity({
         driverId: req.user?.id || updated.driverId,
         kmBefore: kmVal,
-        notes: `Duty started. Truck Opening KM: ${kmVal}`,
+        notes: isUpdate
+          ? `Truck Opening KM updated to: ${kmVal}`
+          : `Duty started. Truck Opening KM: ${kmVal}`,
       });
 
       res.json(updated);
@@ -9096,6 +9108,10 @@ export async function registerRoutes(
         remainingQty: schema.dispatchDeliveries.remainingQty,
         remark: schema.dispatchDeliveries.remark,
         podUrl: schema.dispatchDeliveries.podUrl,
+        temperature: schema.dispatchDeliveries.temperature,
+        potUrl: schema.dispatchDeliveries.potUrl,
+        deliveryStartTime: schema.dispatchDeliveries.deliveryStartTime,
+        deliveryEndTime: schema.dispatchDeliveries.deliveryEndTime,
         status: schema.dispatchDeliveries.status,
         deliveredAt: schema.dispatchDeliveries.deliveredAt,
         deliveryTime: schema.dispatchDeliveries.deliveryTime,
@@ -9164,14 +9180,34 @@ export async function registerRoutes(
         doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
         doc.moveDown(1.5);
 
+        const requiresTemp = ["frozen", "chilled", "assorted"].includes(storageType.toLowerCase());
+
         doc.fillColor("#1F2937").fontSize(10);
-        doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, doc.y);
-        doc.text(`Storage Type: ${storageType}`, 300, doc.y - 12);
-        doc.text(`Route: ${routeName}`, 40, doc.y + 6);
-        doc.text(`Delivery Date: ${firstRow.deliveredAt ? new Date(firstRow.deliveredAt).toLocaleDateString() : "Today"}`, 300, doc.y - 12);
-        doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, doc.y + 6);
-        doc.text(`Remarks: ${firstRow.remark || "None"}`, 40, doc.y + 12);
-        doc.moveDown(2);
+        let currentY = doc.y;
+        doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, currentY);
+        doc.text(`Storage Type: ${storageType}`, 300, currentY);
+        
+        currentY += 15;
+        doc.text(`Route: ${routeName}`, 40, currentY);
+        doc.text(`Delivery Date: ${firstRow.deliveredAt ? new Date(firstRow.deliveredAt).toLocaleDateString() : "Today"}`, 300, currentY);
+        
+        currentY += 15;
+        doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, currentY);
+        if (requiresTemp) {
+          doc.text(`Temperature: ${firstRow.temperature || "N/A"}`, 300, currentY);
+          
+          currentY += 15;
+          const startTimeStr = firstRow.deliveryStartTime ? new Date(firstRow.deliveryStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
+          const endTimeStr = firstRow.deliveryEndTime ? new Date(firstRow.deliveryEndTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
+          doc.text(`Delivery Start Time: ${startTimeStr}`, 40, currentY);
+          doc.text(`Delivery End Time: ${endTimeStr}`, 300, currentY);
+        }
+        
+        currentY += 15;
+        doc.text(`Remarks: ${firstRow.remark || "None"}`, 40, currentY);
+        
+        doc.y = currentY + 15;
+        doc.moveDown(1);
 
         doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
         doc.moveDown(1.5);
@@ -9243,6 +9279,52 @@ export async function registerRoutes(
             }
           } catch (err: any) {
             doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POD Image: ${err.message}]`, imgX, imgY);
+            imgX += 200;
+            if (imgX > 450) {
+              imgX = 40;
+              imgY += 200;
+            }
+          }
+        }
+      }
+
+      const potUrls = firstRow.potUrl ? firstRow.potUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
+      if (includeAttachments && potUrls.length > 0) {
+        doc.addPage();
+        doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Temperature (POT) Images", { underline: true });
+        doc.moveDown(1);
+
+        let imgX = 40;
+        let imgY = doc.y;
+
+        for (const url of potUrls) {
+          try {
+            if (url.startsWith("/uploads/")) {
+              const localPath = path.join(process.cwd(), url);
+              if (fs.existsSync(localPath)) {
+                doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
+                imgX += 200;
+                if (imgX > 450) {
+                  imgX = 40;
+                  imgY += 200;
+                }
+              } else {
+                doc.fillColor("#EF4444").text(`[Image missing on disk: ${url}]`, imgX, imgY);
+                imgX += 200;
+              }
+            } else if (url.startsWith("http")) {
+              const response = await fetch(url);
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+              doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
+              imgX += 200;
+              if (imgX > 450) {
+                imgX = 40;
+                imgY += 200;
+              }
+            }
+          } catch (err: any) {
+            doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POT Image: ${err.message}]`, imgX, imgY);
             imgX += 200;
             if (imgX > 450) {
               imgX = 40;
