@@ -6795,7 +6795,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertDispatchOutletTruckAssignment(data: InsertDispatchOutletTruckAssignment): Promise<DispatchOutletTruckAssignment> {
-    const [row] = await db.insert(dispatchOutletTruckAssignments).values(data).returning();
+    const [row] = await db.insert(dispatchOutletTruckAssignments).values(data as any).returning();
     return row;
   }
 
