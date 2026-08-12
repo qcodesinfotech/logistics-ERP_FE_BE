@@ -478,17 +478,6 @@ export default function DailyDispatchPage() {
     }
   }, [boardSheetId]);
 
-  // Sync boardSheetId with sheets matching the selectedDate automatically
-  useEffect(() => {
-    if (sheets && sheets.length > 0) {
-      const sheet = sheets.find(s => s.date === selectedDate);
-      if (sheet) {
-        setBoardSheetId(sheet.id);
-      } else {
-        setBoardSheetId(null);
-      }
-    }
-  }, [selectedDate, sheets]);
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -509,6 +498,18 @@ export default function DailyDispatchPage() {
   const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
   const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
+
+  // Sync boardSheetId with sheets matching the selectedDate automatically
+  useEffect(() => {
+    if (sheets && sheets.length > 0) {
+      const sheet = sheets.find(s => s.date === selectedDate);
+      if (sheet) {
+        setBoardSheetId(sheet.id);
+      } else {
+        setBoardSheetId(null);
+      }
+    }
+  }, [selectedDate, sheets]);
 
   const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
