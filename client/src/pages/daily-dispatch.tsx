@@ -70,6 +70,8 @@ function parseCSV(text: string): Record<string, string>[] {
     if (h.includes("item") && h.includes("code")) return "item_code";
     if (h.includes("desc") && !h.includes("sub_desc")) return "description";
     if (h.includes("name") && (h.includes("item") || h.includes("product"))) return "description";
+    if (h.includes("validation") && (h.includes("qty") || h.includes("quantity"))) return "weight";
+    if (h.includes("total") && (h.includes("qty") || h.includes("quantity"))) return "total_qty_col";
     if (h.includes("qty") && !h.includes("fus")) return "weight"; // Fallback for old format
     if (h === "remaining") return "remaining";
     if (h.includes("remark")) return "remark";
@@ -713,6 +715,8 @@ export default function DailyDispatchPage() {
               if (lower.includes("item") && lower.includes("code")) return "item_code";
               if (lower.includes("desc") && !lower.includes("sub_desc")) return "description";
               if (lower.includes("name") && (lower.includes("item") || lower.includes("product"))) return "description";
+              if (lower.includes("validation") && (lower.includes("qty") || lower.includes("quantity"))) return "weight";
+              if (lower.includes("total") && (lower.includes("qty") || lower.includes("quantity"))) return "total_qty_col";
               if (lower.includes("qty") && !lower.includes("fus")) return "weight";
               if (lower === "remaining") return "remaining";
               if (lower.includes("remark")) return "remark";
@@ -755,10 +759,27 @@ export default function DailyDispatchPage() {
         parsed = allParsed;
       }
 
+      // Filter out total/summary rows and invalid lines
+      const filteredParsed = parsed.filter(row => {
+        const outletCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
+        const itemCode = row.item_number || row.item_code || row.itemCode || "";
+        
+        if (!outletCode.trim() || !itemCode.trim()) return false;
+        
+        const lowerOutletCode = outletCode.toLowerCase();
+        if (lowerOutletCode.includes("total") || lowerOutletCode.includes("summary") || lowerOutletCode.includes("count")) return false;
+
+        const qtyVal = row.fus_requested_qty || row.weight || row.requestedQty || row.qty || "0";
+        const parsedQty = parseFloat(qtyVal);
+        if (isNaN(parsedQty) || parsedQty <= 0) return false;
+
+        return true;
+      });
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const hasPastDate = parsed.some(row => {
+      const hasPastDate = filteredParsed.some(row => {
         if (!row.requested_delivery_date) return false;
 
         let dateStr = row.requested_delivery_date;
@@ -797,7 +818,7 @@ export default function DailyDispatchPage() {
         return;
       }
 
-      setCsvPreview(parsed);
+      setCsvPreview(filteredParsed);
     } catch (e) {
       toast({ title: "Failed to parse file", variant: "destructive" });
     }

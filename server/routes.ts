@@ -7345,30 +7345,43 @@ export async function registerRoutes(
         }
       });
 
-      const resolvedItems = items.map((row: any) => {
-        const rowCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
-        const outlet = outletCodeMap.get(normalizeOutletCode(rowCode));
-        return {
-          sheetId: sheet.id,
-          outletCode: String(rowCode),
-          outletId: outlet?.id || null,
-          routeId: outlet?.routeId || null,
-          itemCode: String(row.item_number || row.item_code || row.itemCode || ""),
-          description: row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || row.to_sub_desc || null,
-          toNo: row.to_no || null,
-          lineNumber: row.line_number || null,
-          requestedDeliveryDate: row.requested_delivery_date ? new Date(row.requested_delivery_date.split('-').reverse().join('-')) : null, // Assuming DD-MM-YYYY
-          storageType: row.storage_type || null,
-          uom: row.uom || null,
-          fromOrg: row.from_org || null,
-          requestedQty: row.fus_requested_qty ? parseFloat(row.fus_requested_qty) : null,
-          weight: row.weight ? parseFloat(row.weight) : null,
-          totalDelivered: row.total_delivered || row.totalDelivered || null,
-          remaining: row.remaining || null,
-          remark: row.remark || null,
-          grnNumber: row.grn_number || row.grnNumber || null,
-        };
-      });
+      const resolvedItems = items
+        .map((row: any) => {
+          const rowCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
+          const outlet = outletCodeMap.get(normalizeOutletCode(rowCode));
+          return {
+            sheetId: sheet.id,
+            outletCode: String(rowCode),
+            outletId: outlet?.id || null,
+            routeId: outlet?.routeId || null,
+            itemCode: String(row.item_number || row.item_code || row.itemCode || ""),
+            description: row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || row.to_sub_desc || null,
+            toNo: row.to_no || null,
+            lineNumber: row.line_number || null,
+            requestedDeliveryDate: row.requested_delivery_date ? new Date(row.requested_delivery_date.split('-').reverse().join('-')) : null, // Assuming DD-MM-YYYY
+            storageType: row.storage_type || null,
+            uom: row.uom || null,
+            fromOrg: row.from_org || null,
+            requestedQty: row.fus_requested_qty ? parseFloat(row.fus_requested_qty) : null,
+            weight: row.weight ? parseFloat(row.weight) : null,
+            totalDelivered: row.total_delivered || row.totalDelivered || null,
+            remaining: row.remaining || null,
+            remark: row.remark || null,
+            grnNumber: row.grn_number || row.grnNumber || null,
+          };
+        })
+        .filter((item: any) => {
+          if (!item.outletCode || !item.outletCode.trim()) return false;
+          if (!item.itemCode || !item.itemCode.trim()) return false;
+
+          const lowerCode = item.outletCode.toLowerCase();
+          if (lowerCode.includes("total") || lowerCode.includes("summary") || lowerCode.includes("count")) return false;
+
+          const qty = item.requestedQty || item.weight || 0;
+          if (qty <= 0) return false;
+
+          return true;
+        });
 
       if (mergeStrategy === "skip" || mergeStrategy === "replace") {
         const existingItems = await storage.getDispatchItemsForSheet(sheet.id);
