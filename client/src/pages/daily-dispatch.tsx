@@ -847,7 +847,12 @@ export default function DailyDispatchPage() {
                   <SelectItem value="all">All Outlets</SelectItem>
                   {(() => {
                     const outlets = new Map<string, string>();
-                    boardData.zones.forEach(z => z.outlets.forEach(o => outlets.set(o.outletId || o.outletCode, `${o.outletName} (${o.outletCode})`)));
+                    boardData.zones.forEach(z => z.outlets.forEach(o => {
+                      const id = o.outletId || o.outletCode;
+                      if (id) {
+                        outlets.set(id, `${o.outletName || "Unnamed"} (${o.outletCode || "No Code"})`);
+                      }
+                    }));
                     return Array.from(outlets.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
                   })()}
                 </SelectContent>
