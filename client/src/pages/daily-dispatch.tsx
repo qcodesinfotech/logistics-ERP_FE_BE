@@ -26,7 +26,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Truck, Upload, FileText, Calendar, MapPin, User, Package,
+  Truck, Upload, FileText, Calendar, MapPin, User, Package, Store,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2,
@@ -517,6 +517,50 @@ export default function DailyDispatchPage() {
     refetchInterval: 5000,
   });
 
+  const stats = useMemo(() => {
+    if (!boardData) return { totalRoutes: 0, totalOutlets: 0, totalQty: 0, pendingQty: 0, completedQty: 0, completionRate: 0 };
+    let totalRoutes = 0;
+    let totalOutlets = 0;
+    let totalQty = 0;
+    let pendingQty = 0;
+    let completedQty = 0;
+
+    boardData.zones.forEach(z => {
+      if (z.zoneId !== "unassigned" && z.outlets.length > 0) {
+        totalRoutes++;
+      }
+      z.outlets.forEach(o => {
+        totalOutlets++;
+        o.items.forEach(item => {
+          const req = parseFloat(item.requestedQty || item.weight || "0");
+          const del = parseFloat(item.delivery?.deliveredQty || "0");
+          totalQty += req;
+          completedQty += del;
+          
+          const status = item.delivery?.status || "pending";
+          if (status !== "delivered") {
+            let rem = parseFloat(item.delivery?.remainingQty || "0");
+            if (rem === 0 && status === "pending") {
+              rem = req - del;
+            }
+            pendingQty += rem;
+          }
+        });
+      });
+    });
+
+    const completionRate = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
+
+    return {
+      totalRoutes,
+      totalOutlets,
+      totalQty,
+      pendingQty,
+      completedQty,
+      completionRate
+    };
+  }, [boardData]);
+
   const { data: reportData, isLoading: reportLoading } = useQuery<{ items: any[]; routeMap: Record<string, string> }>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`],
     enabled: !!boardSheetId && activeTab === "item-summary",
@@ -854,7 +898,76 @@ export default function DailyDispatchPage() {
           </div>
 
           {boardData && (
-            <div className="px-6 py-2 border-b bg-muted/20 flex items-center gap-3 flex-wrap">
+            <>
+              {/* Supervisor Stats Bar */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 px-6 py-4 bg-slate-50 border-b">
+                <Card className="bg-white border shadow-sm">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                      <MapPin className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Total Routes</p>
+                      <p className="text-lg font-bold">{stats.totalRoutes}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border shadow-sm">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                      <Store className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Total Outlets</p>
+                      <p className="text-lg font-bold">{stats.totalOutlets}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border shadow-sm">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                      <Package className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Total Qty</p>
+                      <p className="text-lg font-bold">{stats.totalQty % 1 === 0 ? stats.totalQty.toFixed(0) : stats.totalQty.toFixed(1)}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border shadow-sm">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                      <Clock className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Pending Qty</p>
+                      <p className="text-lg font-bold text-amber-600">{stats.pendingQty % 1 === 0 ? stats.pendingQty.toFixed(0) : stats.pendingQty.toFixed(1)}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border shadow-sm col-span-2 md:col-span-1">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center flex-shrink-0">
+                      <CheckCircle2 className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Completion</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-lg font-bold text-emerald-600">{stats.completionRate}%</p>
+                        <div className="flex-1 bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                          <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${stats.completionRate}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="px-6 py-2 border-b bg-muted/20 flex items-center gap-3 flex-wrap">
               <Select value={boardOutletFilter} onValueChange={setBoardOutletFilter}>
                 <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Outlets" /></SelectTrigger>
                 <SelectContent>
@@ -933,6 +1046,7 @@ export default function DailyDispatchPage() {
                 </Button>
               )}
             </div>
+            </>
           )}
 
           {!boardSheetId ? (
@@ -2456,7 +2570,16 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
                         {isRouteExpanded && zone.outlets.map(outlet => {
                           const outletId = `${zone.zoneName}-${outlet.outletCode}`;
-                          const isOutletExpanded = expandedOutlets[outletId] !== false;
+                          const isOutletExpanded = !!expandedOutlets[outletId];
+
+                          const totalQty = outlet.items.reduce((sum: number, p: any) => {
+                            const reqQty = parseFloat(p.requestedQty || p.weight || "0");
+                            const delQty = parseFloat(p.deliveredQty || p.totalDelivered || "0");
+                            let remQty = parseFloat(p.remainingQty || p.remaining || "0");
+                            if (remQty === 0 && !p.remainingQty && !p.remaining) remQty = reqQty - delQty;
+                            return sum + remQty;
+                          }, 0);
+                          const formattedQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
 
                           return (
                             <React.Fragment key={outletId}>
@@ -2465,7 +2588,9 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                                   {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                                   {outlet.outletName}
                                   <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
-                                  <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{outlet.items.length} Items</Badge>
+                                  <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
+                                    {outlet.items.length} Items (Qty: {formattedQty})
+                                  </Badge>
                                 </td>
                               </tr>
 
@@ -2631,7 +2756,14 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
     const outletGroup = routeGroup.outlets.get(outletId)!;
     outletGroup.items.push(d);
     
-    if (d.podUrl) outletGroup.pods.set(d.podUrl, d.deliveredAt);
+    if (d.podUrl) {
+      d.podUrl.split(",").forEach((p: string) => {
+        const trimmed = p.trim();
+        if (trimmed) {
+          outletGroup.pods.set(trimmed, d.deliveredAt);
+        }
+      });
+    }
   });
 
   const groupedData = Array.from(groupedMap.values()).map(r => ({ ...r, outlets: Array.from(r.outlets.values()) }));
@@ -2780,7 +2912,13 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                         </tr>
                         {isRouteExpanded && zone.outlets.map(outlet => {
                           const outletId = `${zone.zoneId}-${outlet.outletCode}`;
-                          const isOutletExpanded = expandedOutlets[outletId] !== false;
+                          const isOutletExpanded = !!expandedOutlets[outletId];
+
+                          const totalReqQty = outlet.items.reduce((sum: number, p: any) => sum + parseFloat(p.requestedQty || p.weight || "0"), 0);
+                          const totalDelQty = outlet.items.reduce((sum: number, p: any) => sum + parseFloat(p.deliveredQty || "0"), 0);
+                          const formattedDelQty = totalDelQty % 1 === 0 ? totalDelQty.toFixed(0) : totalDelQty.toFixed(1);
+                          const formattedReqQty = totalReqQty % 1 === 0 ? totalReqQty.toFixed(0) : totalReqQty.toFixed(1);
+
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 text-slate-700 group">
@@ -2789,7 +2927,9 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                     {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
                                     <span className="font-medium text-sm whitespace-nowrap">{outlet.outletName}</span>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">({outlet.outletCode})</span>
-                                    <Badge variant="outline" className="bg-white text-[10px] h-4 whitespace-nowrap flex-shrink-0">{outlet.items.length} Items</Badge>
+                                    <Badge variant="outline" className="bg-white text-[10px] h-4 whitespace-nowrap flex-shrink-0">
+                                      {outlet.items.length} Items (Qty: {formattedDelQty} / {formattedReqQty})
+                                    </Badge>
                                     {outlet.pods.size > 0 && (() => {
                                       const uniqueDates = Array.from(new Set(
                                         Array.from(outlet.pods.values())
