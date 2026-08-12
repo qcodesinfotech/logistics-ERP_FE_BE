@@ -78,6 +78,8 @@ function PrivateRouter() {
 
       {/* Logistics ERP Routes */}
       <Route path="/logistics/routes" component={RoutesPage} />
+      <Route path="/logistics/brands" component={RoutesPage} />
+      <Route path="/logistics/outlets" component={RoutesPage} />
       <Route path="/logistics/zones" component={ZonesPage} />
       <Route path="/logistics/contracts" component={ContractsPage} />
       <Route path="/logistics/fleet" component={FleetPage} />

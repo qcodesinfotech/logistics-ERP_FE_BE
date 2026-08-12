@@ -2682,11 +2682,19 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
+    const zonesList = Object.values(board).map(z => ({
+      ...z,
+      outlets: Object.values(z.outlets),
+    }));
+
+    zonesList.sort((a, b) => {
+      if (a.zoneId === "unassigned") return -1;
+      if (b.zoneId === "unassigned") return 1;
+      return (a.zoneName || "").localeCompare(b.zoneName || "", undefined, { numeric: true, sensitivity: 'base' });
+    });
+
     return {
-      zones: Object.values(board).map(z => ({
-        ...z,
-        outlets: Object.values(z.outlets),
-      })),
+      zones: zonesList,
       overrides,
     };
   }

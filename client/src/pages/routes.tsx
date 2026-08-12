@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import {
   Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon
 } from "lucide-react";
@@ -145,7 +146,17 @@ function ZoneMultiSelect({
 // ===================== Main Page =====================
 export default function RoutesPage() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"routes" | "brands" | "outlets">("routes");
+  const [location, setLocation] = useLocation();
+
+  const activeTab = location === "/logistics/brands"
+    ? "brands"
+    : location === "/logistics/outlets"
+      ? "outlets"
+      : "routes";
+
+  const setActiveTab = (tab: "routes" | "brands" | "outlets") => {
+    setLocation(`/logistics/${tab}`);
+  };
 
   // Brand state
   const [brandDialog, setBrandDialog] = useState<{ open: boolean; editing?: Brand }>({ open: false });

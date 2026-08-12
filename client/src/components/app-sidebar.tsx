@@ -24,7 +24,9 @@ import {
   Settings,
   Receipt,
   FileCheck,
-  Route
+  Route,
+  Globe,
+  Store
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { usePermissions } from "@/contexts/permissions-context";
@@ -75,7 +77,9 @@ const menuGroups: MenuGroup[] = [
   {
     label: "Config Menu",
     items: [
-      { title: "Routes & Outlets", url: "/logistics/routes", icon: Route, menuKey: "routes" },
+      { title: "Routes", url: "/logistics/routes", icon: Route, menuKey: "routes" },
+      { title: "Brands", url: "/logistics/brands", icon: Globe, menuKey: "routes" },
+      { title: "Outlets", url: "/logistics/outlets", icon: Store, menuKey: "routes" },
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
       { title: "Fleet & Assets", url: "/logistics/fleet", icon: Truck },
       { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },
