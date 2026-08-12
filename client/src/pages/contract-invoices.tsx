@@ -62,7 +62,11 @@ export default function ContractInvoicesPage() {
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
 
-  const [genForm, setGenForm] = useState({ contractId: "", periodStart: "", periodEnd: "" });
+  const [genForm, setGenForm] = useState({ 
+    contractId: "", periodStart: "", periodEnd: "",
+    otAmount: "", holidayAmount: "", extraTruckAmount: "",
+    emergencyAmount: "", redeliveryAmount: "", outsourcedAmount: ""
+  });
   const [usageForm, setUsageForm] = useState({
     otHours: "0", holidayDays: "0", extraTruckTrips: "0",
     emergencyTrips: "0", redeliveryTrips: "0", outsourcedTrips: "0",
@@ -89,9 +93,13 @@ export default function ContractInvoicesPage() {
     mutationFn: () => apiRequest("POST", "/api/contract-invoices/generate", genForm),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/contract-invoices"] });
-      toast({ title: "Invoice generated as Draft!" });
+      toast({ title: "Invoice Generated", description: "Successfully generated contract invoice." });
       setGenerateDialog(false);
-      setGenForm({ contractId: "", periodStart: "", periodEnd: "" });
+      setGenForm({ 
+        contractId: "", periodStart: "", periodEnd: "",
+        otAmount: "", holidayAmount: "", extraTruckAmount: "",
+        emergencyAmount: "", redeliveryAmount: "", outsourcedAmount: ""
+      });
     },
     onError: (e: unknown) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
@@ -358,9 +366,39 @@ export default function ContractInvoicesPage() {
             <div className="bg-muted/40 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
               <p>The invoice will automatically include:</p>
               <p>• Base monthly contract amount</p>
-              <p>• OT hours × OT rate from monthly usage log</p>
-              <p>• Holiday days × holiday rate</p>
-              <p>• Extra truck / emergency / redelivery / outsourced trips</p>
+              <p>• Extra charges (calculated from monthly usage log OR overridden below)</p>
+            </div>
+            
+            <div className="space-y-3 pt-2 border-t">
+              <Label className="text-sm font-semibold">Additional Charges (Optional Overrides)</Label>
+              <p className="text-xs text-muted-foreground">Enter amounts to override auto-calculated charges. Leave blank to use defaults.</p>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">OT Amount (BD)</Label>
+                  <Input type="number" step="0.001" placeholder="Auto" value={genForm.otAmount} onChange={e => setGenForm(f => ({ ...f, otAmount: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Holiday Amount (BD)</Label>
+                  <Input type="number" step="0.001" placeholder="Auto" value={genForm.holidayAmount} onChange={e => setGenForm(f => ({ ...f, holidayAmount: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Extra Truck (BD)</Label>
+                  <Input type="number" step="0.001" placeholder="Auto" value={genForm.extraTruckAmount} onChange={e => setGenForm(f => ({ ...f, extraTruckAmount: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Emergency (BD)</Label>
+                  <Input type="number" step="0.001" placeholder="Auto" value={genForm.emergencyAmount} onChange={e => setGenForm(f => ({ ...f, emergencyAmount: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Redelivery (BD)</Label>
+                  <Input type="number" step="0.001" placeholder="Auto" value={genForm.redeliveryAmount} onChange={e => setGenForm(f => ({ ...f, redeliveryAmount: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Outsourced (BD)</Label>
+                  <Input type="number" step="0.001" placeholder="Auto" value={genForm.outsourcedAmount} onChange={e => setGenForm(f => ({ ...f, outsourcedAmount: e.target.value }))} />
+                </div>
+              </div>
             </div>
           </div>
           <DialogFooter>

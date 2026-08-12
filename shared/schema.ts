@@ -66,6 +66,7 @@ export const brands = pgTable("brands", {
   website: text("website"),
   address: text("address"),
   status: text("status").notNull().default("active"),
+  billingCycle: text("billing_cycle").default("manual"), // "manual", "monthly"
   companyId: varchar("company_id"),
   branchId: varchar("branch_id"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -692,6 +693,7 @@ export const outlets = pgTable("outlets", {
   phone: text("phone"),
   email: text("email"),
   address: text("address"),
+  billingCycle: text("billing_cycle").default("manual"), // "manual", "monthly"
   latitude: text("latitude"),
   longitude: text("longitude"),
   contactPerson: text("contact_person"),
@@ -1664,7 +1666,9 @@ export const supervisorZones = pgTable("supervisor_zones", {
 
 export const contracts = pgTable("contracts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  customerId: varchar("customer_id").notNull(), // points to clients.id
+  customerId: varchar("customer_id"), // points to clients.id (optional if outlet contract)
+  brandId: varchar("brand_id"), // points to brands.id
+  outletId: varchar("outlet_id"), // points to outlets.id
   name: text("name").notNull(),
   type: text("type").notNull(), // "daily" or "lease"
   monthlyRate: decimal("monthly_rate", { precision: 12, scale: 3 }).default("0.000"),
@@ -1685,8 +1689,7 @@ export const contracts = pgTable("contracts", {
   extraTruckCharge: decimal("extra_truck_charge", { precision: 12, scale: 3 }).default("0"),
   emergencyDeliveryCharge: decimal("emergency_delivery_charge", { precision: 12, scale: 3 }).default("0"),
   redeliveryCharge: decimal("redelivery_charge", { precision: 12, scale: 3 }).default("0"),
-  outsourcedVehicleCharge: decimal("outsourced_vehicle_charge", { precision: 12, scale: 3 }).default("0"),
-  breakdownCharge: decimal("breakdown_charge", { precision: 12, scale: 3 }).default("0"),
+  additionalLabourCharges: decimal("additional_labour_charges", { precision: 12, scale: 3 }).default("0"),
   // Multi-Mode Billing & Automation
   invoiceGenerationType: text("invoice_generation_type").default("brand"), // "brand" or "outlet"
   linkedOutlets: jsonb("linked_outlets").$type<string[]>().default([]),
@@ -1857,7 +1860,7 @@ export const deliveries = pgTable("deliveries", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const deliveryAttachments = pgTable("delivery_attachments", {
+export const deliveryAttachments = pgTable("delivery_docs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   deliveryId: varchar("delivery_id").notNull(), // points to deliveries.id
   orderId: varchar("order_id").notNull(),
@@ -2296,6 +2299,38 @@ export const contractMonthlyUsage = pgTable("contract_monthly_usage", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// ==================== BRAND/OUTLET DELIVERY INVOICES ====================
+export const brandInvoices = pgTable("brand_invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  brandId: varchar("brand_id").notNull(),
+  outletId: varchar("outlet_id"), // if null, it's a consolidated brand invoice
+  generationLevel: text("generation_level").notNull().default("brand"), // "brand" or "outlet"
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  
+  // Financials
+  baseDeliveryAmount: decimal("base_delivery_amount", { precision: 12, scale: 3 }).default("0"),
+  extraLabourAmount: decimal("extra_labour_amount", { precision: 12, scale: 3 }).default("0"),
+  emergencyDeliveryAmount: decimal("emergency_delivery_amount", { precision: 12, scale: 3 }).default("0"),
+  redeliveryAmount: decimal("redelivery_amount", { precision: 12, scale: 3 }).default("0"),
+  otherChargesAmount: decimal("other_charges_amount", { precision: 12, scale: 3 }).default("0"),
+  
+  subtotal: decimal("subtotal", { precision: 12, scale: 3 }).default("0"),
+  discount: decimal("discount", { precision: 12, scale: 3 }).default("0"),
+  vatAmount: decimal("vat_amount", { precision: 12, scale: 3 }).default("0"),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 3 }).default("0"),
+  
+  paidAmount: decimal("paid_amount", { precision: 12, scale: 3 }).default("0"),
+  paymentStatus: text("payment_status").notNull().default("unpaid"), // unpaid, partial, paid
+  status: text("status").notNull().default("draft"), // draft, approved, sent, paid, overdue
+  
+  notes: text("notes"),
+  deliveryCount: integer("delivery_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas & types
 export const insertDispatchTruckAssignmentSchema = createInsertSchema(dispatchTruckAssignments).omit({ id: true, createdAt: true });
 export type DispatchTruckAssignment = typeof dispatchTruckAssignments.$inferSelect;
@@ -2381,6 +2416,10 @@ export type InsertTruckTransfer = z.infer<typeof insertTruckTransferSchema>;
 export const insertContractInvoiceSchema = createInsertSchema(contractInvoices).omit({ id: true, createdAt: true, updatedAt: true });
 export type ContractInvoice = typeof contractInvoices.$inferSelect;
 export type InsertContractInvoice = z.infer<typeof insertContractInvoiceSchema>;
+
+export const insertBrandInvoiceSchema = createInsertSchema(brandInvoices).omit({ id: true, createdAt: true, updatedAt: true });
+export type BrandInvoice = typeof brandInvoices.$inferSelect;
+export type InsertBrandInvoice = z.infer<typeof insertBrandInvoiceSchema>;
 
 export const insertContractMonthlyUsageSchema = createInsertSchema(contractMonthlyUsage).omit({ id: true, createdAt: true });
 export type ContractMonthlyUsage = typeof contractMonthlyUsage.$inferSelect;

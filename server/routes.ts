@@ -8780,12 +8780,12 @@ export async function registerRoutes(
       if (contract.invoiceGenerationType === "outlet" && contract.linkedOutlets && Array.isArray(contract.linkedOutlets) && contract.linkedOutlets.length > 0) {
         for (const outletId of contract.linkedOutlets as string[]) {
           await storage.calculateContractUsage(contract.id, periodStart, periodEnd, outletId);
-          const inv = await storage.generateContractInvoice(contract.id, periodStart, periodEnd, outletId);
+          const inv = await storage.generateContractInvoice(contract.id, periodStart, periodEnd, outletId, req.body);
           generatedInvoices.push(inv);
         }
       } else {
         await storage.calculateContractUsage(contract.id, periodStart, periodEnd);
-        const inv = await storage.generateContractInvoice(contractId, periodStart, periodEnd);
+        const inv = await storage.generateContractInvoice(contractId, periodStart, periodEnd, undefined, req.body);
         generatedInvoices.push(inv);
       }
       
@@ -8834,6 +8834,64 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Get contract invoice deliveries error:", error);
       res.status(500).json({ error: "Failed to fetch deliveries: " + error.message });
+    }
+  });
+
+  // ==================== BRAND/OUTLET INVOICE ROUTES ====================
+  app.get("/api/brand-invoices", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const brandId = req.query.brandId as string | undefined;
+      const outletId = req.query.outletId as string | undefined;
+      const invoices = await storage.getBrandInvoices(brandId, outletId);
+      res.json(invoices);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch brand invoices" });
+    }
+  });
+
+  app.get("/api/brand-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.getBrandInvoice(req.params.id);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.post("/api/brand-invoices/generate", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { brandId, periodStart, periodEnd, generationLevel } = req.body;
+      if (!brandId || !periodStart || !periodEnd || !generationLevel) {
+        return res.status(400).json({ error: "brandId, periodStart, periodEnd, and generationLevel are required" });
+      }
+
+      const generatedInvoices = await storage.generateBrandInvoices(brandId, periodStart, periodEnd, generationLevel);
+      res.status(201).json(generatedInvoices.length === 1 ? generatedInvoices[0] : generatedInvoices);
+    } catch (error) {
+      console.error("Generate brand invoice error:", error);
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.put("/api/brand-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.updateBrandInvoice(req.params.id, req.body);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice" });
+    }
+  });
+
+  app.patch("/api/brand-invoices/:id/status", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { status } = req.body;
+      const invoice = await storage.updateBrandInvoice(req.params.id, { status });
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice status" });
     }
   });
 

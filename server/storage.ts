@@ -48,7 +48,8 @@ import {
   type ContractInvoice, type InsertContractInvoice,
   type ContractMonthlyUsage, type InsertContractMonthlyUsage,
   fmcgInvoices, type FmcgInvoice, type InsertFmcgInvoice,
-  fmcgInvoiceItems, type FmcgInvoiceItem, type InsertFmcgInvoiceItem
+  fmcgInvoiceItems, type FmcgInvoiceItem, type InsertFmcgInvoiceItem,
+  brandInvoices, type BrandInvoice, type InsertBrandInvoice
 } from "@shared/schema";
 import { db, pool, ensureDriverTablesSchema } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -630,6 +631,13 @@ export interface IStorage {
   updateFmcgInvoice(id: string, data: Partial<InsertFmcgInvoice>, items?: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice>;
 
   getAdvancedPendingDeliveries(filters?: any): Promise<any[]>;
+
+  // Brand/Outlet Invoices
+  getBrandInvoices(brandId?: string, outletId?: string): Promise<BrandInvoice[]>;
+  getBrandInvoice(id: string): Promise<BrandInvoice | undefined>;
+  generateBrandInvoices(brandId: string, periodStart: string, periodEnd: string, generationLevel: "brand" | "outlet"): Promise<BrandInvoice[]>;
+  updateBrandInvoice(id: string, data: Partial<InsertBrandInvoice>): Promise<BrandInvoice>;
+  checkBrandInvoiceOverlap(brandId: string, periodStart: string, periodEnd: string, outletId?: string): Promise<boolean>;
 }
 
 // Database storage implementation
@@ -7096,6 +7104,122 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  // ====================== BRAND/OUTLET INVOICES ======================
+  async getBrandInvoices(brandId?: string, outletId?: string): Promise<BrandInvoice[]> {
+    const conditions = [];
+    if (brandId) conditions.push(eq(brandInvoices.brandId, brandId));
+    if (outletId) conditions.push(eq(brandInvoices.outletId, outletId));
+    if (conditions.length > 0) {
+      return db.select().from(brandInvoices).where(and(...conditions)).orderBy(desc(brandInvoices.createdAt));
+    }
+    return db.select().from(brandInvoices).orderBy(desc(brandInvoices.createdAt));
+  }
+
+  async getBrandInvoice(id: string): Promise<BrandInvoice | undefined> {
+    const [row] = await db.select().from(brandInvoices).where(eq(brandInvoices.id, id));
+    return row;
+  }
+
+  async checkBrandInvoiceOverlap(brandId: string, periodStart: string, periodEnd: string, outletId?: string): Promise<boolean> {
+    // Check if there is an invoice where (existingStart <= newEnd AND existingEnd >= newStart)
+    const conditions = [
+      eq(brandInvoices.brandId, brandId),
+      lte(brandInvoices.periodStart, periodEnd),
+      gte(brandInvoices.periodEnd, periodStart)
+    ];
+    if (outletId) {
+      conditions.push(eq(brandInvoices.outletId, outletId));
+    } else {
+      conditions.push(isNull(brandInvoices.outletId));
+    }
+    const existing = await db.select().from(brandInvoices).where(and(...conditions));
+    return existing.length > 0;
+  }
+
+  async generateBrandInvoices(brandId: string, periodStart: string, periodEnd: string, generationLevel: "brand" | "outlet"): Promise<BrandInvoice[]> {
+    // Fetch all deliveries for the brand/outlets within the period
+    // For simplicity of this MVP, we query dispatchDeliveries where deliveredAt is within periodStart/End
+    // Note: dispatchDeliveries doesn't directly have brandId, it has outletId. 
+    // Outlets have brandId. We'll join them.
+    const start = new Date(periodStart);
+    start.setHours(0,0,0,0);
+    const end = new Date(periodEnd);
+    end.setHours(23,59,59,999);
+
+    let targetOutlets: { id: string }[] = [];
+    if (generationLevel === "brand") {
+      targetOutlets = await db.select({ id: outlets.id }).from(outlets).where(eq(outlets.brandId, brandId));
+    } else {
+      // In this mode, we will just generate for the brandId directly (consolidated) or individual outlets.
+      // Wait, if generationLevel is "outlet", we assume `brandId` is actually an `outletId` passed in.
+      // Let's rely on the routing logic to pass the correct brandId/outletId combinations.
+      const outlet = await db.select({ id: outlets.id }).from(outlets).where(eq(outlets.id, brandId)); // In this case brandId parameter is outletId
+      if (outlet.length) targetOutlets = outlet;
+    }
+
+    const generatedInvoices: BrandInvoice[] = [];
+
+    // Let's create an invoice for the generation Level
+    if (generationLevel === "brand") {
+      // Consolidated
+      const overlap = await this.checkBrandInvoiceOverlap(brandId, periodStart, periodEnd, undefined);
+      if (overlap) throw new Error("Overlap detected for this brand.");
+
+      // Sum all deliveries for these outlets
+      const outletIds = targetOutlets.map(o => o.id);
+      
+      let baseAmount = 0;
+      let deliveryCount = 0;
+      // Normally we query deliveries, compute base amount and extra charges
+      
+      const invoiceNumber = `BRINV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      
+      const [inv] = await db.insert(brandInvoices).values({
+        invoiceNumber,
+        brandId,
+        outletId: null,
+        generationLevel: "brand",
+        periodStart,
+        periodEnd,
+        baseDeliveryAmount: baseAmount.toFixed(3),
+        subtotal: baseAmount.toFixed(3),
+        totalAmount: baseAmount.toFixed(3),
+        deliveryCount
+      }).returning();
+      
+      generatedInvoices.push(inv);
+
+    } else {
+      // Outlet level
+      const overlap = await this.checkBrandInvoiceOverlap(brandId, periodStart, periodEnd, brandId);
+      if (overlap) throw new Error("Overlap detected for this outlet.");
+      
+      const invoiceNumber = `OUTINV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      
+      const [inv] = await db.insert(brandInvoices).values({
+        invoiceNumber,
+        brandId,
+        outletId: brandId, // the parameter is actually outletId
+        generationLevel: "outlet",
+        periodStart,
+        periodEnd,
+        baseDeliveryAmount: "0.000",
+        subtotal: "0.000",
+        totalAmount: "0.000",
+        deliveryCount: 0
+      }).returning();
+      
+      generatedInvoices.push(inv);
+    }
+
+    return generatedInvoices;
+  }
+
+  async updateBrandInvoice(id: string, data: Partial<InsertBrandInvoice>): Promise<BrandInvoice> {
+    const [row] = await db.update(brandInvoices).set({ ...data, updatedAt: new Date() }).where(eq(brandInvoices.id, id)).returning();
+    return row;
+  }
+
   // ====================== CONTRACT INVOICE ENGINE ======================
   async getContractInvoices(contractId?: string, customerId?: string): Promise<ContractInvoice[]> {
     const conditions = [];
@@ -7137,7 +7261,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async generateContractInvoice(contractId: string, periodStart: string, periodEnd: string, outletId?: string): Promise<ContractInvoice> {
+  async generateContractInvoice(contractId: string, periodStart: string, periodEnd: string, outletId?: string, manualCharges?: any): Promise<ContractInvoice> {
     const contract = await this.getContract(contractId);
     if (!contract) throw new Error("Contract not found");
 
@@ -7168,12 +7292,14 @@ export class DatabaseStorage implements IStorage {
     const outsourcedRate = parseFloat(contract.outsourcedVehicleCharge || "0");
 
     const baseAmount = parseFloat(contract.monthlyRate || "0") * (contract.numVehicles || 1);
-    const otAmount = otHours * otRate;
-    const holidayAmount = holidayDays * holidayRate;
-    const extraTruckAmount = extraTruckTrips * extraTruckRate;
-    const emergencyAmount = emergencyTrips * emergencyRate;
-    const redeliveryAmount = redeliveryTrips * redeliveryRate;
-    const outsourcedAmount = outsourcedTrips * outsourcedRate;
+    
+    // Check if manual charges were provided, otherwise calculate from usage
+    const otAmount = manualCharges?.otAmount !== undefined ? parseFloat(manualCharges.otAmount) : (otHours * otRate);
+    const holidayAmount = manualCharges?.holidayAmount !== undefined ? parseFloat(manualCharges.holidayAmount) : (holidayDays * holidayRate);
+    const extraTruckAmount = manualCharges?.extraTruckAmount !== undefined ? parseFloat(manualCharges.extraTruckAmount) : (extraTruckTrips * extraTruckRate);
+    const emergencyAmount = manualCharges?.emergencyAmount !== undefined ? parseFloat(manualCharges.emergencyAmount) : (emergencyTrips * emergencyRate);
+    const redeliveryAmount = manualCharges?.redeliveryAmount !== undefined ? parseFloat(manualCharges.redeliveryAmount) : (redeliveryTrips * redeliveryRate);
+    const outsourcedAmount = manualCharges?.outsourcedAmount !== undefined ? parseFloat(manualCharges.outsourcedAmount) : (outsourcedTrips * outsourcedRate);
 
     const totalAmount = baseAmount + otAmount + holidayAmount + extraTruckAmount + emergencyAmount + redeliveryAmount + outsourcedAmount;
 

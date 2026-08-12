@@ -26,6 +26,16 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
@@ -1714,6 +1724,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string } | null>(null);
   const [expandedStorageTypes, setExpandedStorageTypes] = useState<Record<string, boolean>>({});
   const [planningTab, setPlanningTab] = useState("unassigned");
+  const [pendingAssignment, setPendingAssignment] = useState<{ title: string; description: string; payload: any } | null>(null);
 
   const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
 
@@ -1871,6 +1882,18 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   // Drivers already assigned in this sheet
   const assignedDriversInSheet = new Set(truckAssignments.map((ta: any) => ta.driverId).filter(Boolean));
 
+  // Helper to compute assigned items for a truck assignment
+  const getTruckAssignedItemsCount = (truckAssignmentId: string) => {
+    const taAssignments = outletAssignments.filter((oa: any) => oa.truckAssignmentId === truckAssignmentId);
+    return taAssignments.reduce((sum, oa) => {
+      if (oa.itemIds && Array.isArray(oa.itemIds)) return sum + oa.itemIds.length;
+      const outlet = boardData?.zones?.flatMap((z: any) => z.outlets).find((o: any) => o.outletCode === oa.outletCode);
+      if (!outlet) return sum;
+      if (oa.storageType) return sum + outlet.items.filter((i: any) => i.storageType === oa.storageType).length;
+      return sum + outlet.items.length;
+    }, 0);
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {!boardSheetId ? (
@@ -2019,30 +2042,26 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                         {zoneTrucks.map((ta: any) => {
                           const veh = getVehicleInfo(ta.truckId);
                           const cap = parseFloat(veh?.capacity || "0");
+                          const capCarton = parseInt(veh?.cartonCapacity || "0");
                           const used = parseFloat(ta.usedCapacity || "0");
-                          const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
-                          const isOver = used > cap && cap > 0;
                           
                           const taAssignments = outletAssignments.filter((oa: any) => oa.truckAssignmentId === ta.id);
                           const taOutletCount = new Set(taAssignments.map((oa: any) => oa.outletCode)).size;
-                          const taItemCount = taAssignments.reduce((sum, oa) => {
-                            if (oa.itemIds && Array.isArray(oa.itemIds)) return sum + oa.itemIds.length;
-                            const outlet = boardData?.zones?.flatMap((z: any) => z.outlets).find((o: any) => o.outletCode === oa.outletCode);
-                            if (!outlet) return sum;
-                            if (oa.storageType) {
-                              return sum + outlet.items.filter((i: any) => i.storageType === oa.storageType).length;
-                            }
-                            return sum + outlet.items.length;
-                          }, 0);
+                          const taItemCount = getTruckAssignedItemsCount(ta.id);
+
+                          const displayCap = capCarton > 0 ? capCarton : cap;
+                          const displayUsed = capCarton > 0 ? taItemCount : used;
+                          const pct = displayCap > 0 ? Math.min(100, (displayUsed / displayCap) * 100) : 0;
+                          const isOver = displayUsed > displayCap && displayCap > 0;
 
                           return (
-                            <div key={ta.id} className={`rounded-lg border p-2 text-xs min-w-[140px] shadow-sm ${isOver ? "border-red-400 bg-red-50/50" : "border-border bg-background"}`}>
+                            <div key={ta.id} className={`rounded-lg border p-2 text-xs w-[180px] shadow-sm flex flex-col ${isOver ? "border-red-400 bg-red-50/50" : "border-border bg-background"}`}>
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-1 font-semibold">
-                                  <Truck className="h-3 w-3 text-primary" />
+                                  <Truck className="h-3 w-3 text-primary shrink-0" />
                                   <span className="truncate max-w-[80px]" title={veh?.plateNumber}>{veh?.plateNumber || "Truck"}</span>
                                 </div>
-                                <div className="flex items-center">
+                                <div className="flex items-center shrink-0">
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
                                     onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "" })}>
                                     <Edit2 className="h-3 w-3" />
@@ -2053,23 +2072,31 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                   </Button>
                                 </div>
                               </div>
-                              {cap > 0 && (
-                                <>
+                              {displayCap > 0 && (
+                                <div className="mb-1">
                                   <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-1">
                                     <div
                                       className={`h-full rounded-full transition-all ${isOver ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`}
                                       style={{ width: `${pct}%` }}
                                     />
                                   </div>
-                                  <p className={`text-[10px] flex items-center gap-1 mt-1 ${isOver ? "text-red-600 font-bold" : "text-muted-foreground"}`}>
-                                    {isOver && <AlertTriangle className="h-3 w-3" />}
-                                    {used.toFixed(2)}T / {cap.toFixed(0)}T ({pct.toFixed(0)}%)
-                                    {isOver && " — Warning: Overweight"}
+                                  <p className={`text-[10px] flex items-center gap-1 mt-1 truncate ${isOver ? "text-red-600 font-bold" : "text-muted-foreground"}`}>
+                                    {isOver && <AlertTriangle className="h-3 w-3 shrink-0" />}
+                                    {capCarton > 0 ? (
+                                      `${taItemCount} / ${capCarton} Boxes (${pct.toFixed(0)}%)`
+                                    ) : (
+                                      `${used.toFixed(2)}T / ${cap.toFixed(0)}T (${pct.toFixed(0)}%)`
+                                    )}
                                   </p>
-                                </>
+                                </div>
                               )}
-                              <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 mt-0.5">
-                                <User className="h-2.5 w-2.5" />{getDriverName(ta.driverId)}
+                              <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 mt-0.5" title={getDriverName(ta.driverId)}>
+                                <User className="h-2.5 w-2.5 shrink-0" />
+                                <span className="truncate">
+                                  {getDriverName(ta.driverId).length > 20 
+                                    ? getDriverName(ta.driverId).substring(0, 20) + "..." 
+                                    : getDriverName(ta.driverId)}
+                                </span>
                               </p>
                               <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
                                 <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
@@ -2165,14 +2192,36 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                           const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
                                           const veh = getVehicleInfo(truck?.truckId);
                                           const cap = parseFloat(veh?.capacity || "0");
+                                          const capCarton = parseInt(veh?.cartonCapacity || "0");
                                           const used = parseFloat(truck?.usedCapacity || "0");
-                                          if (cap > 0 && used + outletWeightT > cap) {
-                                            toast({
-                                              title: `⚠️ Capacity exceeded! Adding ${outlet.outletCode} (${outletWeightT.toFixed(2)}T) would exceed ${veh?.plateNumber}'s limit of ${cap}T. Current load: ${used.toFixed(2)}T.`,
-                                              variant: "destructive"
+                                          const taItemCount = getTruckAssignedItemsCount(truck?.id);
+
+                                          if (capCarton > 0 && taItemCount + outlet.items.length > capCarton) {
+                                            setPendingAssignment({
+                                              title: "Capacity Exceeded!",
+                                              description: `Adding ${outlet.outletCode} (${outlet.items.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`,
+                                              payload: {
+                                                outletCode: outlet.outletCode,
+                                                truckAssignmentId: truckAssignId,
+                                                outletWeight: outletWeightT.toFixed(3),
+                                                sheetId: boardSheetId!,
+                                              }
+                                            });
+                                            return;
+                                          } else if (capCarton === 0 && cap > 0 && used + outletWeightT > cap) {
+                                            setPendingAssignment({
+                                              title: "Capacity Exceeded!",
+                                              description: `Adding ${outlet.outletCode} (${outletWeightT.toFixed(2)}T) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}T.\nCurrent load: ${used.toFixed(2)}T.\n\nDo you want to proceed anyway?`,
+                                              payload: {
+                                                outletCode: outlet.outletCode,
+                                                truckAssignmentId: truckAssignId,
+                                                outletWeight: outletWeightT.toFixed(3),
+                                                sheetId: boardSheetId!,
+                                              }
                                             });
                                             return;
                                           }
+                                          
                                           assignOutletMutation.mutate({
                                             outletCode: outlet.outletCode,
                                             truckAssignmentId: truckAssignId,
@@ -2189,13 +2238,21 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                             const veh = getVehicleInfo(ta.truckId);
                                             const zoneName = getZoneName(ta.zoneId);
                                             const cap = parseFloat(veh?.capacity || "0");
+                                            const capCarton = parseInt(veh?.cartonCapacity || "0");
                                             const used = parseFloat(ta.usedCapacity || "0");
-                                            const remaining = cap > 0 ? cap - used : null;
-                                            const wouldOverflow = cap > 0 && used + outletWeightT > cap;
+                                            const taItemCount = getTruckAssignedItemsCount(ta.id);
+                                            
+                                            const remainingTons = cap > 0 ? cap - used : null;
+                                            const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
+                                            const wouldOverflow = capCarton > 0 
+                                              ? (taItemCount + outlet.items.length > capCarton)
+                                              : (cap > 0 && used + outletWeightT > cap);
+
                                             return (
                                               <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
                                                 {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
-                                                {remaining !== null ? ` - ${remaining.toFixed(1)}T free${wouldOverflow ? " ⚠" : ""}` : ""}
+                                                {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingTons !== null ? ` - ${remainingTons.toFixed(1)}T free` : ""}
+                                                {wouldOverflow ? " ⚠" : ""}
                                               </SelectItem>
                                             );
                                           })}
@@ -2274,14 +2331,38 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                                   const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
                                                   const veh = getVehicleInfo(truck?.truckId);
                                                   const cap = parseFloat(veh?.capacity || "0");
+                                                  const capCarton = parseInt(veh?.cartonCapacity || "0");
                                                   const used = parseFloat(truck?.usedCapacity || "0");
-                                                  if (cap > 0 && used + stWeightT > cap) {
-                                                    toast({
-                                                      title: `⚠️ Capacity exceeded for ${st} items!`,
-                                                      variant: "destructive"
+                                                  const taItemCount = getTruckAssignedItemsCount(truck?.id);
+                                                  
+                                                  if (capCarton > 0 && taItemCount + stItems.length > capCarton) {
+                                                    setPendingAssignment({
+                                                      title: `Capacity Exceeded for ${st} items!`,
+                                                      description: `Adding this (${stItems.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`,
+                                                      payload: {
+                                                        outletCode: outlet.outletCode,
+                                                        truckAssignmentId: truckAssignId,
+                                                        outletWeight: stWeightT.toFixed(3),
+                                                        sheetId: boardSheetId!,
+                                                        storageType: st
+                                                      }
+                                                    });
+                                                    return;
+                                                  } else if (capCarton === 0 && cap > 0 && used + stWeightT > cap) {
+                                                    setPendingAssignment({
+                                                      title: `Capacity Exceeded for ${st} items!`,
+                                                      description: `Adding this (${stWeightT.toFixed(2)}T) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}T.\nCurrent load: ${used.toFixed(2)}T.\n\nDo you want to proceed anyway?`,
+                                                      payload: {
+                                                        outletCode: outlet.outletCode,
+                                                        truckAssignmentId: truckAssignId,
+                                                        outletWeight: stWeightT.toFixed(3),
+                                                        sheetId: boardSheetId!,
+                                                        storageType: st
+                                                      }
                                                     });
                                                     return;
                                                   }
+                                                  
                                                   assignOutletMutation.mutate({
                                                     outletCode: outlet.outletCode,
                                                     truckAssignmentId: truckAssignId,
@@ -2299,13 +2380,21 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                                     const veh = getVehicleInfo(ta.truckId);
                                                     const zoneName = getZoneName(ta.zoneId);
                                                     const cap = parseFloat(veh?.capacity || "0");
+                                                    const capCarton = parseInt(veh?.cartonCapacity || "0");
                                                     const used = parseFloat(ta.usedCapacity || "0");
-                                                    const remaining = cap > 0 ? cap - used : null;
-                                                    const wouldOverflow = cap > 0 && used + stWeightT > cap;
+                                                    const taItemCount = getTruckAssignedItemsCount(ta.id);
+                                                    
+                                                    const remainingTons = cap > 0 ? cap - used : null;
+                                                    const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
+                                                    const wouldOverflow = capCarton > 0 
+                                                      ? (taItemCount + stItems.length > capCarton)
+                                                      : (cap > 0 && used + stWeightT > cap);
+
                                                     return (
                                                       <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
                                                         {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
-                                                        {remaining !== null ? ` - ${remaining.toFixed(1)}T free` : ""}
+                                                        {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingTons !== null ? ` - ${remainingTons.toFixed(1)}T free` : ""}
+                                                        {wouldOverflow ? " ⚠" : ""}
                                                       </SelectItem>
                                                     );
                                                   })}
@@ -2350,6 +2439,35 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
           )}
         </>
       )}
+
+      {/* ─── Capacity Warning Dialog ─── */}
+      <AlertDialog open={!!pendingAssignment} onOpenChange={(open) => !open && setPendingAssignment(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              {pendingAssignment?.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">
+              {pendingAssignment?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-primary"
+              onClick={() => {
+                if (pendingAssignment?.payload) {
+                  assignOutletMutation.mutate(pendingAssignment.payload as any);
+                }
+                setPendingAssignment(null);
+              }}
+            >
+              Proceed Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* ─── Edit Truck Assignment Dialog ─── */}
       <Dialog open={editAssignment?.open} onOpenChange={(open) => !open && setEditAssignment(null)}>

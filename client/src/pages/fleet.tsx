@@ -180,10 +180,50 @@ export default function FleetPage() {
     setUploading(true);
     try {
       const promises = files.map((file) => {
-        return new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
+        return new Promise<string>((resolve, reject) => {
+          if (file.type.startsWith("image/")) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement("canvas");
+                let width = img.width;
+                let height = img.height;
+                const MAX_DIMENSION = 800;
+                
+                if (width > height) {
+                  if (width > MAX_DIMENSION) {
+                    height = Math.round((height *= MAX_DIMENSION / width));
+                    width = MAX_DIMENSION;
+                  }
+                } else {
+                  if (height > MAX_DIMENSION) {
+                    width = Math.round((width *= MAX_DIMENSION / height));
+                    height = MAX_DIMENSION;
+                  }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0, width, height);
+                  resolve(canvas.toDataURL("image/jpeg", 0.6));
+                } else {
+                  resolve(event.target?.result as string);
+                }
+              };
+              img.onerror = () => resolve(event.target?.result as string);
+              img.src = event.target?.result as string;
+            };
+            reader.onerror = () => reject(new Error("Failed to read file"));
+            reader.readAsDataURL(file);
+          } else {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error("Failed to read file"));
+            reader.readAsDataURL(file);
+          }
         });
       });
       const base64Files = await Promise.all(promises);
@@ -191,6 +231,7 @@ export default function FleetPage() {
       setUploading(false);
     } catch {
       setUploading(false);
+      toast({ title: "Failed to process one or more files", variant: "destructive" });
     }
   };
 

@@ -46,6 +46,7 @@ import ZonesPage from "@/pages/zones";
 import ContractsPage from "@/pages/contracts";
 import FleetPage from "@/pages/fleet";
 import ContractInvoicesPage from "@/pages/contract-invoices";
+import BrandInvoicesPage from "@/pages/brand-invoices";
 import DeliveryInvoicesPage from "@/pages/delivery-invoices";
 import RfqPage from "@/pages/rfq";
 import OrdersPage from "@/pages/orders";
@@ -90,6 +91,7 @@ function PrivateRouter() {
       <Route path="/logistics/driver-allocation" component={DriverAllocationPage} />
       <Route path="/logistics/finance" component={FinanceExpandedPage} />
       <Route path="/logistics/contract-invoices" component={ContractInvoicesPage} />
+      <Route path="/logistics/brand-invoices" component={BrandInvoicesPage} />
       <Route path="/logistics/delivery-invoices" component={DeliveryInvoicesPage} />
       <Route path="/settings" component={SettingsPage} />
 

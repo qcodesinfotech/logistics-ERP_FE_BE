@@ -43,7 +43,9 @@ import { MetricCard } from "@/components/metric-card";
 import type { Contract, Client } from "@shared/schema";
 
 const contractSchema = z.object({
-  customerId: z.string().min(1, "Customer is required"),
+  customerId: z.string().optional(),
+  brandId: z.string().optional(),
+  outletId: z.string().optional(),
   name: z.string().min(1, "Contract Name/Ref is required"),
   type: z.enum(["daily", "lease"]),
   monthlyRate: z.string().default("0"),
@@ -64,8 +66,7 @@ const contractSchema = z.object({
   extraTruckCharge: z.string().default("0"),
   emergencyDeliveryCharge: z.string().default("0"),
   redeliveryCharge: z.string().default("0"),
-  outsourcedVehicleCharge: z.string().default("0"),
-  breakdownCharge: z.string().default("0"),
+  additionalLabourCharges: z.string().default("0"),
   // Multi-Mode Billing & Automation
   invoiceGenerationType: z.enum(["brand", "outlet"]).default("brand"),
   linkedOutlets: z.array(z.string()).default([]),
@@ -74,6 +75,7 @@ const contractSchema = z.object({
 type ContractFormData = z.infer<typeof contractSchema>;
 
 export default function ContractsPage() {
+  const { user, accessToken } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingContract, setViewingContract] = useState<Contract | null>(null);
@@ -81,6 +83,7 @@ export default function ContractsPage() {
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; url: string; version?: number; uploadedAt?: string }[]>([]);
   const [showServiceTerms, setShowServiceTerms] = useState(false);
   const [showAdditionalCharges, setShowAdditionalCharges] = useState(false);
+  const [selectedOutletForConfig, setSelectedOutletForConfig] = useState<any | null>(null);
   const { toast } = useToast();
 
   const form = useForm<ContractFormData>({
@@ -91,8 +94,9 @@ export default function ContractsPage() {
       startDate: "", contractDurationYears: "", endDate: "", includedDeliveriesPerDay: 0, workingHoursPerDay: 10,
       graceHours: "0", otStartsAfterHours: "10",
       extraTruckCharge: "0", emergencyDeliveryCharge: "0", redeliveryCharge: "0",
-      outsourcedVehicleCharge: "0", breakdownCharge: "0",
+      additionalLabourCharges: "0",
       invoiceGenerationType: "brand", linkedOutlets: [],
+      brandId: "", outletId: "",
     },
   });
 
@@ -104,7 +108,7 @@ export default function ContractsPage() {
 
   const { data: contractsList, isLoading } = useQuery<Contract[]>({ queryKey: ["/api/contracts"] });
   const { data: clientsList } = useQuery<Client[]>({ queryKey: ["/api/clients"] });
-  // Add outlets query (using any type if Outlet is not imported)
+  const { data: brandsList } = useQuery<any[]>({ queryKey: ["/api/brands"] });
   const { data: outletsList } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
   const saveMutation = useMutation({
@@ -137,10 +141,13 @@ export default function ContractsPage() {
     try {
       const res = await fetch("/api/upload/contracts", {
         method: "POST",
-        headers: { "Authorization": `Bearer ${localStorage.getItem("accessToken") || ""}` },
+        headers: { "Authorization": `Bearer ${accessToken || ""}` },
         body: formData,
       });
-      if (!res.ok) throw new Error("Upload failed");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || "Upload failed");
+      }
       const result = await res.json();
       const newDocs = result.documents.map((d: any) => ({
         ...d,
@@ -149,8 +156,9 @@ export default function ContractsPage() {
       }));
       setUploadedFiles(prev => [...prev, ...newDocs]);
       toast({ title: `Uploaded ${result.documents.length} document(s)` });
-    } catch {
-      toast({ title: "Document upload failed", variant: "destructive" });
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      toast({ title: "Document upload failed", description: error?.message || "Unknown error", variant: "destructive" });
     } finally {
       setIsUploading(false);
     }
@@ -178,6 +186,7 @@ export default function ContractsPage() {
     setUploadedFiles([]);
     setShowServiceTerms(false);
     setShowAdditionalCharges(false);
+    setSelectedOutletForConfig(null);
     setIsDialogOpen(true);
   };
 
@@ -203,16 +212,33 @@ export default function ContractsPage() {
       extraTruckCharge: contract.extraTruckCharge || "0",
       emergencyDeliveryCharge: contract.emergencyDeliveryCharge || "0",
       redeliveryCharge: contract.redeliveryCharge || "0",
-      outsourcedVehicleCharge: contract.outsourcedVehicleCharge || "0",
-      breakdownCharge: contract.breakdownCharge || "0",
+      additionalLabourCharges: contract.additionalLabourCharges || "0",
       invoiceGenerationType: contract.invoiceGenerationType as "brand" | "outlet" || "brand",
       linkedOutlets: contract.linkedOutlets || [],
+      brandId: contract.brandId || "",
+      outletId: contract.outletId || "",
     });
     setUploadedFiles((contract.documents as any[]) || []);
+    if (contract.outletId) {
+       setSelectedOutletForConfig(outletsList?.find(o => o.id === contract.outletId) || { id: contract.outletId, name: "Outlet" });
+    } else {
+       setSelectedOutletForConfig(null);
+    }
     setIsDialogOpen(true);
   };
 
-  const getClientName = (id: string) => clientsList?.find(c => c.id === id)?.name || "Unknown Customer";
+  const getClientName = (id: string | null) => {
+    if (!id) return "";
+    return clientsList?.find(c => c.id === id)?.name || "Unknown Customer";
+  };
+  const getOutletName = (id: string | null) => {
+    if (!id) return "";
+    return outletsList?.find(o => o.id === id)?.name || "Unknown Outlet";
+  };
+  const getBrandName = (id: string | null) => {
+    if (!id) return "";
+    return brandsList?.find(b => b.id === id)?.name || "Unknown Brand";
+  };
 
   const activeContractsCount = contractsList?.filter(c => c.status === "active").length || 0;
   const totalContractMonthlyVal = contractsList?.reduce((sum, c) => {
@@ -276,7 +302,16 @@ export default function ContractsPage() {
                   {contractsList.map((contract) => (
                     <TableRow key={contract.id} className="hover:bg-accent/40 transition-colors">
                       <TableCell className="font-semibold text-foreground">{contract.name}</TableCell>
-                      <TableCell>{getClientName(contract.customerId)}</TableCell>
+                      <TableCell>
+                        {contract.brandId ? (
+                          <div className="flex flex-col">
+                            <span className="font-medium">{getOutletName(contract.outletId)}</span>
+                            <span className="text-xs text-muted-foreground">{getBrandName(contract.brandId)}</span>
+                          </div>
+                        ) : (
+                          getClientName(contract.customerId)
+                        )}
+                      </TableCell>
                       <TableCell className="capitalize text-xs font-medium text-muted-foreground">
                         {contract.type === "lease" ? "Monthly Lease" : "Daily Rate"}
                       </TableCell>
@@ -342,39 +377,107 @@ export default function ContractsPage() {
 
               {/* ── BASIC INFO ── */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField control={form.control} name="customerId" render={({ field }) => (
+                <FormField control={form.control} name="brandId" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Client / Customer *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger></FormControl>
-                      <SelectContent>{clientsList?.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="name" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Contract Reference *</FormLabel>
-                    <FormControl><Input placeholder="e.g. C-2026-KFC-01" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <FormField control={form.control} name="type" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Billing Cycle</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger></FormControl>
+                    <FormLabel>Brand (Optional)</FormLabel>
+                    <Select onValueChange={(val) => {
+                      field.onChange(val);
+                      if (val) form.setValue("customerId", "");
+                      setSelectedOutletForConfig(null);
+                    }} value={field.value}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Select brand" /></SelectTrigger></FormControl>
                       <SelectContent>
-                        <SelectItem value="daily">Daily Variable</SelectItem>
-                        <SelectItem value="lease">Monthly Lease</SelectItem>
+                        <SelectItem value="none">No Brand</SelectItem>
+                        {brandsList?.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <FormMessage />
                   </FormItem>
                 )} />
+
+                {(!form.watch("brandId") || form.watch("brandId") === "none") && (
+                  <FormField control={form.control} name="customerId" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Client / Customer *</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger></FormControl>
+                        <SelectContent>{clientsList?.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                )}
+              </div>
+
+              {form.watch("brandId") && form.watch("brandId") !== "none" && !selectedOutletForConfig ? (
+                <div className="space-y-4 pt-4 border-t mt-4">
+                  <h3 className="text-sm font-medium">Select an Outlet to Configure Contract</h3>
+                  <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2">
+                    {outletsList?.filter(o => o.brandId === form.watch("brandId")).length === 0 ? (
+                      <div className="text-sm text-muted-foreground p-4 text-center">No outlets found for this brand.</div>
+                    ) : (
+                      outletsList?.filter(o => o.brandId === form.watch("brandId")).map(outlet => {
+                        const hasContract = contractsList?.some(c => c.outletId === outlet.id);
+                        return (
+                          <div key={outlet.id} className="flex items-center justify-between p-3 border rounded-md hover:bg-muted/30 transition-colors">
+                            <div>
+                              <div className="font-medium">{outlet.name}</div>
+                              <div className="text-xs text-muted-foreground">{hasContract ? "Contract Configured" : "No Contract"}</div>
+                            </div>
+                            <Button type="button" size="sm" variant={hasContract ? "outline" : "default"} onClick={() => {
+                               const existing = contractsList?.find(c => c.outletId === outlet.id);
+                               if (existing) {
+                                 openEdit(existing);
+                               } else {
+                                 form.reset({
+                                   ...form.getValues(),
+                                   name: `Contract - ${outlet.name}`, type: "lease", monthlyRate: "0", numVehicles: 0,
+                                   customerId: "", brandId: form.watch("brandId"), outletId: outlet.id,
+                                 });
+                                 setSelectedOutletForConfig(outlet);
+                               }
+                            }}>
+                              {hasContract ? "Edit Contract" : "Configure Contract"}
+                            </Button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 mt-4">
+                  {selectedOutletForConfig && (
+                    <div className="flex items-center justify-between bg-primary/5 p-3 rounded-lg border border-primary/20">
+                       <span className="text-sm font-semibold text-primary">Configuring Contract for Outlet: {selectedOutletForConfig.name}</span>
+                       <Button type="button" variant="outline" size="sm" onClick={() => setSelectedOutletForConfig(null)}>Cancel</Button>
+                    </div>
+                  )}
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="name" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Contract Reference *</FormLabel>
+                        <FormControl><Input placeholder="e.g. C-2026-KFC-01" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <FormField control={form.control} name="type" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Billing Cycle</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="daily">Daily Variable</SelectItem>
+                            <SelectItem value="lease">Monthly Lease</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
                 <FormField control={form.control} name="numVehicles" render={({ field }) => (
                   <FormItem>
                     <FormLabel>No. of Leased Trucks</FormLabel>
@@ -622,16 +725,9 @@ export default function ContractsPage() {
                         <FormMessage />
                       </FormItem>
                     )} />
-                    <FormField control={form.control} name="outsourcedVehicleCharge" render={({ field }) => (
+                    <FormField control={form.control} name="additionalLabourCharges" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Outsourced Vehicle Charge (BD/Trip)</FormLabel>
-                        <FormControl><Input placeholder="0.000" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="breakdownCharge" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Breakdown Replacement Charge (BD)</FormLabel>
+                        <FormLabel>Additional Labour charges per hour (BD)</FormLabel>
                         <FormControl><Input placeholder="0.000" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
@@ -676,6 +772,8 @@ export default function ContractsPage() {
                   {saveMutation.isPending ? "Saving..." : editingId ? "Update Contract" : "Save Contract"}
                 </Button>
               </DialogFooter>
+            </div>
+            )}
             </form>
           </Form>
         </DialogContent>
@@ -762,12 +860,8 @@ export default function ContractsPage() {
                     <span className="font-medium"><CurrencyDisplay amount={viewingContract.redeliveryCharge || "0"} /></span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground text-xs block">Outsourced:</span>
-                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.outsourcedVehicleCharge || "0"} /></span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground text-xs block">Breakdown:</span>
-                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.breakdownCharge || "0"} /></span>
+                    <span className="text-muted-foreground text-xs block">Add. Labour/Hr:</span>
+                    <span className="font-medium"><CurrencyDisplay amount={viewingContract.additionalLabourCharges || "0"} /></span>
                   </div>
                 </div>
               </div>
