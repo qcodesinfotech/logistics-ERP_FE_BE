@@ -2444,14 +2444,24 @@ export class DatabaseStorage implements IStorage {
     return sheet;
   }
 
-  async createDispatchSheet(data: { date: string; uploadedBy?: string; fileName?: string }): Promise<any> {
-    // Delete existing sheet for same date (replace strategy)
+  async createDispatchSheet(data: { date: string; uploadedBy?: string; fileName?: string }, mergeStrategy?: "skip" | "replace" | "overwrite"): Promise<any> {
     const existing = await this.getDispatchSheetByDate(data.date);
     if (existing) {
-      await this.deleteDispatchSheet(existing.id);
+      if (mergeStrategy === "overwrite" || !mergeStrategy) {
+        await this.deleteDispatchSheet(existing.id);
+        const [sheet] = await db.insert(dispatchSheets).values(data).returning();
+        return sheet;
+      } else {
+        const [updatedSheet] = await db.update(dispatchSheets)
+          .set({ fileName: data.fileName, uploadedBy: data.uploadedBy })
+          .where(eq(dispatchSheets.id, existing.id))
+          .returning();
+        return updatedSheet;
+      }
+    } else {
+      const [sheet] = await db.insert(dispatchSheets).values(data).returning();
+      return sheet;
     }
-    const [sheet] = await db.insert(dispatchSheets).values(data).returning();
-    return sheet;
   }
 
   async deleteDispatchSheet(id: string): Promise<void> {

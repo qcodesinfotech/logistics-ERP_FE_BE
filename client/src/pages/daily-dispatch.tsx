@@ -486,6 +486,7 @@ export default function DailyDispatchPage() {
   const [overrideDialog, setOverrideDialog] = useState<OutletGroup | null>(null);
   const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
   const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
+  const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
 
   const [boardRouteFilter, setBoardRouteFilter] = useState("all");
   const [boardOutletFilter, setBoardOutletFilter] = useState("all");
@@ -568,7 +569,7 @@ export default function DailyDispatchPage() {
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: (data: { date: string; fileName: string; items: any[] }) =>
+    mutationFn: (data: { date: string; fileName: string; items: any[]; mergeStrategy?: "skip" | "replace" | "overwrite" }) =>
       apiRequest("POST", "/api/dispatch/sheets", data),
     onSuccess: async (res) => {
       const result = await res.json();
@@ -784,7 +785,14 @@ export default function DailyDispatchPage() {
 
   const handleUpload = () => {
     if (!csvPreview || csvPreview.length === 0) return;
-    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview });
+    
+    const existingSheet = sheets.find(s => s.date === uploadDate);
+    if (existingSheet) {
+      setMergeConfirmOpen(true);
+      return;
+    }
+
+    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview, mergeStrategy: "overwrite" });
   };
 
   // Find sheet for selected date on board
@@ -1540,6 +1548,41 @@ export default function DailyDispatchPage() {
           <TruckTransfersTab zones={zones} vehicles={[]} />
         </TabsContent>
       </Tabs>
+
+      {/* Merge Confirm Dialog */}
+      <Dialog open={mergeConfirmOpen} onOpenChange={setMergeConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sheet Already Exists</DialogTitle>
+            <DialogDescription>
+              A dispatch sheet for {format(parseISO(uploadDate), "dd MMM yyyy")} already exists. How would you like to handle duplicates?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 mt-2">
+            <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip" });
+              setMergeConfirmOpen(false);
+            }}>
+              <p className="font-medium text-sm text-primary">Skip Duplicates</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Ignore items that are already in the system. Only add new items.</p>
+            </div>
+            <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace" });
+              setMergeConfirmOpen(false);
+            }}>
+              <p className="font-medium text-sm text-primary">Replace Duplicates</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Update quantities for existing items, and add new items.</p>
+            </div>
+            <div className="border rounded-lg p-3 cursor-pointer hover:border-destructive hover:bg-destructive/10 transition-colors" onClick={() => {
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite" });
+              setMergeConfirmOpen(false);
+            }}>
+              <p className="font-medium text-sm text-destructive">Overwrite Entire Sheet</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Delete ALL existing assignments and deliveries for this date, and start fresh.</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Delivery Dialog */}
       {deliveryDialog && (

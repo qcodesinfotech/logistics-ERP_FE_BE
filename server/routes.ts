@@ -7324,10 +7324,11 @@ export async function registerRoutes(
   // Upload CSV and create dispatch sheet
   app.post("/api/dispatch/sheets", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { date, fileName, items } = req.body; // items: parsed CSV rows from frontend
+      const { date, fileName, items, mergeStrategy } = req.body; // mergeStrategy: "skip" | "replace" | "overwrite"
       const uploadedBy = req.user?.id;
 
-      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName });
+      // Note: createDispatchSheet now takes mergeStrategy. It deletes the sheet if "overwrite" or if not provided.
+      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName }, mergeStrategy);
 
       // Resolve outlet codes to outlet IDs and route IDs
       const allOutlets = await storage.getOutlets();
@@ -7352,7 +7353,7 @@ export async function registerRoutes(
           outletCode: String(rowCode),
           outletId: outlet?.id || null,
           routeId: outlet?.routeId || null,
-          itemCode: row.item_number || row.item_code || row.itemCode || "",
+          itemCode: String(row.item_number || row.item_code || row.itemCode || ""),
           description: row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || row.to_sub_desc || null,
           toNo: row.to_no || null,
           lineNumber: row.line_number || null,
@@ -7361,7 +7362,7 @@ export async function registerRoutes(
           uom: row.uom || null,
           fromOrg: row.from_org || null,
           requestedQty: row.fus_requested_qty ? parseFloat(row.fus_requested_qty) : null,
-          weight: row.weight || null,
+          weight: row.weight ? parseFloat(row.weight) : null,
           totalDelivered: row.total_delivered || row.totalDelivered || null,
           remaining: row.remaining || null,
           remark: row.remark || null,
@@ -7369,14 +7370,46 @@ export async function registerRoutes(
         };
       });
 
-      await storage.createDispatchItems(resolvedItems);
+      if (mergeStrategy === "skip" || mergeStrategy === "replace") {
+        const existingItems = await storage.getDispatchItemsForSheet(sheet.id);
+        const existingMap = new Map();
+        existingItems.forEach((i: any) => {
+          existingMap.set(`${i.outletCode}_${i.itemCode}`, i);
+        });
 
+        const newItemsToInsert = [];
+        for (const item of resolvedItems) {
+          const key = `${item.outletCode}_${item.itemCode}`;
+          const existing = existingMap.get(key);
 
-      // Dispatch Engine Automation is NOT triggered automatically on upload anymore
-      // Users will trigger allocation manually from the UI
-
-
-      res.status(201).json({ sheet, itemCount: resolvedItems.length });
+          if (!existing) {
+            newItemsToInsert.push(item);
+          } else {
+            if (mergeStrategy === "replace") {
+              const reqQtyStr = existing.requestedQty?.toString() || "0";
+              const newReqQtyStr = item.requestedQty?.toString() || "0";
+              if (reqQtyStr !== newReqQtyStr || existing.weight !== item.weight || existing.toNo !== item.toNo || existing.remark !== item.remark) {
+                await db.update(schema.dispatchItems)
+                  .set({
+                    requestedQty: item.requestedQty,
+                    weight: item.weight ? String(item.weight) : null,
+                    toNo: item.toNo,
+                    remark: item.remark,
+                    description: item.description,
+                  })
+                  .where(eq(schema.dispatchItems.id, existing.id));
+              }
+            }
+          }
+        }
+        if (newItemsToInsert.length > 0) {
+          await storage.createDispatchItems(newItemsToInsert);
+        }
+        res.status(201).json({ sheet, itemCount: newItemsToInsert.length, updated: true });
+      } else {
+        await storage.createDispatchItems(resolvedItems);
+        res.status(201).json({ sheet, itemCount: resolvedItems.length });
+      }
     } catch (e) {
       console.error("Create dispatch sheet error:", e);
       res.status(500).json({ error: "Failed to create dispatch sheet", details: e instanceof Error ? e.message : String(e) });
