@@ -40,6 +40,7 @@ interface DispatchItem {
   weight: string | null; requestedQty?: string | null; uom?: string | null;
   totalDelivered: string | null; remaining: string | null;
   remark: string | null; grnNumber: string | null;
+  storageType?: string | null;
   delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; damagedQty?: string | null; damageReason?: string | null; } | null;
 }
 interface OutletGroup {
