@@ -85,7 +85,7 @@ export default function FinanceExpandedPage() {
             <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Invoicing & Billing</CardTitle>
-                <CardDescription>Auto-generated delivery invoices and contract billing.</CardDescription>
+                <CardDescription>Auto-generated invoices and contract billing.</CardDescription>
               </div>
               <Button variant="outline" className="gap-2">
                 <FileText className="h-4 w-4" /> Generate Invoice
