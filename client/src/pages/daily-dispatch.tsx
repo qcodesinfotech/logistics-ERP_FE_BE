@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -36,7 +37,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Truck, Upload, FileText, Calendar, MapPin, User, Package, Store,
+  Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2,
@@ -79,6 +80,8 @@ function parseCSV(text: string): Record<string, string>[] {
     if (h.includes("item") && h.includes("code")) return "item_code";
     if (h.includes("desc") && !h.includes("sub_desc")) return "description";
     if (h.includes("name") && (h.includes("item") || h.includes("product"))) return "description";
+    if (h.includes("validation") && (h.includes("qty") || h.includes("quantity"))) return "weight";
+    if (h.includes("total") && (h.includes("qty") || h.includes("quantity"))) return "total_qty_col";
     if (h.includes("qty") && !h.includes("fus")) return "weight"; // Fallback for old format
     if (h === "remaining") return "remaining";
     if (h.includes("remark")) return "remark";
@@ -374,6 +377,7 @@ function ZoneColumn({
 }) {
   const totalItems = zone.outlets.reduce((s, o) => s + o.items.length, 0);
   const deliveredItems = zone.outlets.reduce((s, o) => s + o.items.filter(i => i.delivery?.status === "delivered").length, 0);
+  const completionPercentage = totalItems > 0 ? Math.round((deliveredItems / totalItems) * 100) : 0;
   const isUnassigned = zone.zoneId === "unassigned";
 
   return (
@@ -391,9 +395,18 @@ function ZoneColumn({
             </div>
           </div>
           <Badge className={`${deliveredItems === totalItems && totalItems > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
-            {deliveredItems}/{totalItems}
+            {deliveredItems}/{totalItems} ({completionPercentage}%)
           </Badge>
         </div>
+        {totalItems > 0 && (
+          <div className="mb-3 space-y-1">
+            <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+              <span>Delivery Completion</span>
+              <span className="font-semibold text-primary">{completionPercentage}%</span>
+            </div>
+            <Progress value={completionPercentage} className="h-1.5 bg-slate-100 dark:bg-slate-800" />
+          </div>
+        )}
         {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
           !isUnassigned && <p className="text-xs text-muted-foreground mt-2 italic flex items-center gap-1"><AlertTriangle className="h-3 w-3" />No trucks or drivers assigned</p>
         ) : (
@@ -529,46 +542,62 @@ export default function DailyDispatchPage() {
   });
 
   const stats = useMemo(() => {
-    if (!boardData) return { totalRoutes: 0, totalOutlets: 0, totalQty: 0, pendingQty: 0, completedQty: 0, completionRate: 0 };
-    let totalRoutes = 0;
-    let totalOutlets = 0;
-    let totalQty = 0;
-    let pendingQty = 0;
+    if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0 };
+    
+    let totalOutletsSet = new Set<string>();
+    let pendingOutletsSet = new Set<string>();
+    let partialOutletsSet = new Set<string>();
+    
+    let totalQtyAssigned = 0;
     let completedQty = 0;
+    let pendingQty = 0;
 
     boardData.zones.forEach(z => {
-      if (z.zoneId !== "unassigned" && z.outlets.length > 0) {
-        totalRoutes++;
-      }
       z.outlets.forEach(o => {
-        totalOutlets++;
+        const outletKey = o.outletId || o.outletCode;
+        totalOutletsSet.add(outletKey);
+
+        let hasPending = false;
+        let hasPartial = false;
+
         o.items.forEach(item => {
           const req = parseFloat(item.requestedQty || item.weight || "0");
           const del = parseFloat(item.delivery?.deliveredQty || "0");
-          totalQty += req;
-          completedQty += del;
-          
           const status = item.delivery?.status || "pending";
-          if (status !== "delivered") {
-            let rem = parseFloat(item.delivery?.remainingQty || "0");
-            if (rem === 0 && status === "pending") {
-              rem = req - del;
-            }
-            pendingQty += rem;
+
+          totalQtyAssigned += req;
+          completedQty += del;
+
+          if (status === "pending") {
+            hasPending = true;
+          } else if (status === "partial" || status === "damaged") {
+            hasPartial = true;
           }
+
+          // Calculate remaining quantity
+          let rem = parseFloat(item.delivery?.remainingQty || "0");
+          if (rem === 0 && status === "pending") {
+            rem = req - del;
+          }
+          pendingQty += rem;
         });
+
+        if (hasPending) {
+          pendingOutletsSet.add(outletKey);
+        }
+        if (hasPartial) {
+          partialOutletsSet.add(outletKey);
+        }
       });
     });
 
-    const completionRate = totalQty > 0 ? Math.round((completedQty / totalQty) * 100) : 0;
-
     return {
-      totalRoutes,
-      totalOutlets,
-      totalQty,
-      pendingQty,
+      totalOutlets: totalOutletsSet.size,
+      pendingOutlets: pendingOutletsSet.size,
+      partiallyDelivered: partialOutletsSet.size,
+      totalQtyAssigned,
       completedQty,
-      completionRate
+      pendingQty
     };
   }, [boardData]);
 
@@ -696,6 +725,8 @@ export default function DailyDispatchPage() {
               if (lower.includes("item") && lower.includes("code")) return "item_code";
               if (lower.includes("desc") && !lower.includes("sub_desc")) return "description";
               if (lower.includes("name") && (lower.includes("item") || lower.includes("product"))) return "description";
+              if (lower.includes("validation") && (lower.includes("qty") || lower.includes("quantity"))) return "weight";
+              if (lower.includes("total") && (lower.includes("qty") || lower.includes("quantity"))) return "total_qty_col";
               if (lower.includes("qty") && !lower.includes("fus")) return "weight";
               if (lower === "remaining") return "remaining";
               if (lower.includes("remark")) return "remark";
@@ -738,10 +769,27 @@ export default function DailyDispatchPage() {
         parsed = allParsed;
       }
 
+      // Filter out total/summary rows and invalid lines
+      const filteredParsed = parsed.filter(row => {
+        const outletCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
+        const itemCode = row.item_number || row.item_code || row.itemCode || "";
+        
+        if (!outletCode.trim() || !itemCode.trim()) return false;
+        
+        const lowerOutletCode = outletCode.toLowerCase();
+        if (lowerOutletCode.includes("total") || lowerOutletCode.includes("summary") || lowerOutletCode.includes("count")) return false;
+
+        const qtyVal = row.fus_requested_qty || row.weight || row.requestedQty || row.qty || "0";
+        const parsedQty = parseFloat(qtyVal);
+        if (isNaN(parsedQty) || parsedQty <= 0) return false;
+
+        return true;
+      });
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const hasPastDate = parsed.some(row => {
+      const hasPastDate = filteredParsed.some(row => {
         if (!row.requested_delivery_date) return false;
 
         let dateStr = row.requested_delivery_date;
@@ -780,7 +828,7 @@ export default function DailyDispatchPage() {
         return;
       }
 
-      setCsvPreview(parsed);
+      setCsvPreview(filteredParsed);
     } catch (e) {
       toast({ title: "Failed to parse file", variant: "destructive" });
     }
@@ -918,68 +966,87 @@ export default function DailyDispatchPage() {
           {boardData && (
             <>
               {/* Supervisor Stats Bar */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 px-6 py-4 bg-slate-50 border-b">
-                <Card className="bg-white border shadow-sm">
-                  <CardContent className="p-4 flex items-center gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 px-6 py-4 bg-slate-50 border-b">
+                <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
+                  onClick={() => setBoardStatusFilter("all")}>
+                  <CardContent className="p-4 flex flex-col gap-3">
                     <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                      <MapPin className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Total Routes</p>
-                      <p className="text-lg font-bold">{stats.totalRoutes}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-white border shadow-sm">
-                  <CardContent className="p-4 flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
                       <Store className="h-5 w-5" />
                     </div>
-                    <div>
-                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Total Outlets</p>
-                      <p className="text-lg font-bold">{stats.totalOutlets}</p>
+                    <div className="mt-1">
+                      <p className="text-2xl font-bold tracking-tight text-slate-900">{stats.totalOutlets}</p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Total Outlets</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white border shadow-sm">
-                  <CardContent className="p-4 flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                      <Package className="h-5 w-5" />
+                <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-amber-500/30 border-amber-500' : ''}`}
+                  onClick={() => setBoardStatusFilter("pending")}>
+                  <CardContent className="p-4 flex flex-col gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center flex-shrink-0">
+                      <Hourglass className="h-5 w-5" />
                     </div>
-                    <div>
-                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Total Qty</p>
-                      <p className="text-lg font-bold">{stats.totalQty % 1 === 0 ? stats.totalQty.toFixed(0) : stats.totalQty.toFixed(1)}</p>
+                    <div className="mt-1">
+                      <p className="text-2xl font-bold tracking-tight text-slate-900">{stats.pendingOutlets}</p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Pending Outlets</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white border shadow-sm">
-                  <CardContent className="p-4 flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <Card className={`bg-white border shadow-sm border-t-2 border-t-blue-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'partial' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
+                  onClick={() => setBoardStatusFilter("partial")}>
+                  <CardContent className="p-4 flex flex-col gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0">
                       <Clock className="h-5 w-5" />
                     </div>
-                    <div>
-                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Pending Qty</p>
-                      <p className="text-lg font-bold text-amber-600">{stats.pendingQty % 1 === 0 ? stats.pendingQty.toFixed(0) : stats.pendingQty.toFixed(1)}</p>
+                    <div className="mt-1">
+                      <p className="text-2xl font-bold tracking-tight text-slate-900">{stats.partiallyDelivered}</p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Partially Delivered</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white border shadow-sm col-span-2 md:col-span-1">
-                  <CardContent className="p-4 flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center flex-shrink-0">
+                <Card className={`bg-white border shadow-sm border-t-2 border-t-indigo-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-indigo-500/30 border-indigo-500' : ''}`}
+                  onClick={() => setBoardStatusFilter("all")}>
+                  <CardContent className="p-4 flex flex-col gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                      <Package className="h-5 w-5" />
+                    </div>
+                    <div className="mt-1">
+                      <p className="text-2xl font-bold tracking-tight text-slate-900">
+                        {stats.totalQtyAssigned % 1 === 0 ? stats.totalQtyAssigned.toFixed(0) : stats.totalQtyAssigned.toFixed(1)}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Total Qty Assigned</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className={`bg-white border shadow-sm border-t-2 border-t-emerald-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'delivered' ? 'ring-2 ring-emerald-500/30 border-emerald-500' : ''}`}
+                  onClick={() => setBoardStatusFilter("delivered")}>
+                  <CardContent className="p-4 flex flex-col gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
                       <CheckCircle2 className="h-5 w-5" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Completion</p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-lg font-bold text-emerald-600">{stats.completionRate}%</p>
-                        <div className="flex-1 bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${stats.completionRate}%` }} />
-                        </div>
-                      </div>
+                    <div className="mt-1">
+                      <p className="text-2xl font-bold tracking-tight text-slate-900">
+                        {stats.completedQty % 1 === 0 ? stats.completedQty.toFixed(0) : stats.completedQty.toFixed(1)}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Completed Qty</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className={`bg-white border shadow-sm border-t-2 border-t-red-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-red-500/30 border-red-500' : ''}`}
+                  onClick={() => setBoardStatusFilter("pending")}>
+                  <CardContent className="p-4 flex flex-col gap-3">
+                    <div className="h-9 w-9 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
+                      <AlertCircle className="h-5 w-5" />
+                    </div>
+                    <div className="mt-1">
+                      <p className="text-2xl font-bold tracking-tight text-slate-900 text-red-600">
+                        {stats.pendingQty % 1 === 0 ? stats.pendingQty.toFixed(0) : stats.pendingQty.toFixed(1)}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">Pending Qty</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -1131,12 +1198,12 @@ export default function DailyDispatchPage() {
                     return { ...zone, outlets: filteredOutlets };
                   }).filter(Boolean) as ZoneGroup[];
                   
-                  if (filteredZones.every(z => z.outlets.length === 0 && z.zoneId !== "unassigned")) {
+                  if (filteredZones.every(z => z.outlets.length === 0)) {
                     return <div className="flex items-center justify-center w-full h-64 text-muted-foreground">No items match your filters.</div>;
                   }
 
                   return filteredZones
-                    .filter(z => z.outlets.length > 0 || z.zoneId === "unassigned")
+                    .filter(z => z.outlets.length > 0)
                     .map(zone => (
                       <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId!}
                         zones={zones} isSupervisor={isSupervisor}
