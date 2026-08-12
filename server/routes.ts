@@ -7411,6 +7411,19 @@ export async function registerRoutes(
   // Update delivery status for a dispatch item
   app.patch("/api/dispatch/items/:id/delivery", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const [dispatchItem] = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, req.params.id));
+      if (!dispatchItem) {
+        return res.status(404).json({ error: "Dispatch item not found" });
+      }
+
+      const [dispatchSheet] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, dispatchItem.sheetId));
+      if (dispatchSheet) {
+        const todayStr = new Date().toLocaleDateString("en-CA");
+        if (dispatchSheet.date > todayStr) {
+          return res.status(400).json({ error: "Cannot record deliveries for a future date" });
+        }
+      }
+
       const result = await storage.updateDispatchDelivery(req.params.id, { ...req.body, driverId: req.user?.id });
       
       // Auto-generate fmcg invoice logic

@@ -252,6 +252,7 @@ function OutletCard({
   const { user } = useAuth();
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
   const isToday = selectedDate === format(new Date(), "yyyy-MM-dd");
+  const isFuture = selectedDate > format(new Date(), "yyyy-MM-dd");
   const [expanded, setExpanded] = useState(true);
   const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
   const total = outlet.items.length;
@@ -335,8 +336,8 @@ function OutletCard({
                   )}
                   {status === "pending" && (
                     <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
-                      disabled={isDriver && !isToday}
-                      title={(isDriver && !isToday) ? "Drivers can only update deliveries for today's date." : ""}
+                      disabled={isFuture || (isDriver && !isToday)}
+                      title={isFuture ? "Cannot update deliveries for a future date." : (isDriver && !isToday) ? "Drivers can only update deliveries for today's date." : ""}
                       onClick={() => onDeliveryUpdate(item)}>
                       <Eye className="h-3 w-3 mr-1" />Update
                     </Button>
@@ -476,6 +477,18 @@ export default function DailyDispatchPage() {
       localStorage.removeItem("dispatchBoardSheetId");
     }
   }, [boardSheetId]);
+
+  // Sync boardSheetId with sheets matching the selectedDate automatically
+  useEffect(() => {
+    if (sheets && sheets.length > 0) {
+      const sheet = sheets.find(s => s.date === selectedDate);
+      if (sheet) {
+        setBoardSheetId(sheet.id);
+      } else {
+        setBoardSheetId(null);
+      }
+    }
+  }, [selectedDate, sheets]);
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));

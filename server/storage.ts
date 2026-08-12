@@ -2458,16 +2458,38 @@ export class DatabaseStorage implements IStorage {
     const existingItems = await db.select({ id: dispatchItems.id })
       .from(dispatchItems)
       .where(eq(dispatchItems.sheetId, id));
-    
     const itemIds = existingItems.map(item => item.id);
-    
+
+    const existingTruckAssignments = await db.select({ id: dispatchTruckAssignments.id })
+      .from(dispatchTruckAssignments)
+      .where(eq(dispatchTruckAssignments.sheetId, id));
+    const truckAssignmentIds = existingTruckAssignments.map(ta => ta.id);
+
+    // Delete dispatch deliveries
     if (itemIds.length > 0) {
       await db.delete(dispatchDeliveries)
         .where(inArray(dispatchDeliveries.dispatchItemId, itemIds));
     }
-    
+
+    // Delete dispatch outlet truck assignments
+    if (truckAssignmentIds.length > 0) {
+      await db.delete(dispatchOutletTruckAssignments)
+        .where(inArray(dispatchOutletTruckAssignments.truckAssignmentId, truckAssignmentIds));
+    }
+
+    // Delete dispatch truck assignments
+    await db.delete(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, id));
+
+    // Delete dispatch pending quantities
+    await db.delete(dispatchPendingQuantities).where(eq(dispatchPendingQuantities.sourceSheetId, id));
+
+    // Delete dispatch overrides
     await db.delete(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, id));
+
+    // Delete dispatch items
     await db.delete(dispatchItems).where(eq(dispatchItems.sheetId, id));
+
+    // Delete dispatch sheet
     await db.delete(dispatchSheets).where(eq(dispatchSheets.id, id));
   }
 
