@@ -40,7 +40,7 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
-  Share2,
+  Share2, MoreHorizontal,
 } from "lucide-react";
 
 // ===== Types =====
@@ -438,14 +438,6 @@ function ZoneColumn({
                 </div>
               );
             })}
-            {zone.drivers && zone.drivers.map(d => (
-              <div key={`driver-${d.id}`} className="bg-background rounded-md p-2 text-xs border shadow-sm">
-                <div className="flex items-center gap-1.5 text-muted-foreground">
-                  <User className="h-3.5 w-3.5 text-primary" />
-                  <span className="truncate font-medium">{d.name} <span className="font-normal">(Zone Driver)</span></span>
-                </div>
-              </div>
-            ))}
           </div>
         )}
       </div>
@@ -1790,6 +1782,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "" });
   const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string } | null>(null);
   const [expandedStorageTypes, setExpandedStorageTypes] = useState<Record<string, boolean>>({});
+  const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [planningTab, setPlanningTab] = useState("unassigned");
   const [pendingAssignment, setPendingAssignment] = useState<{ title: string; description: string; payload: any } | null>(null);
 
@@ -1961,6 +1954,53 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     }, 0);
   };
 
+  const handleAssign = (outlet: any, weightT: number, truckAssignId: string, storageType?: string) => {
+    const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
+    const veh = getVehicleInfo(truck?.truckId);
+    const cap = parseFloat(veh?.capacity || "0");
+    const capCarton = parseInt(veh?.cartonCapacity || "0");
+    const used = parseFloat(truck?.usedCapacity || "0");
+    const taItemCount = getTruckAssignedItemsCount(truck?.id);
+    
+    const itemsToAdd = storageType ? outlet.items.filter((i:any) => i.storageType === storageType) : outlet.items;
+
+    if (capCarton > 0 && taItemCount + itemsToAdd.length > capCarton) {
+      setPendingAssignment({
+        title: "Capacity Exceeded!",
+        description: `Adding ${outlet.outletCode} (${itemsToAdd.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`,
+        payload: {
+          outletCode: outlet.outletCode,
+          truckAssignmentId: truckAssignId,
+          outletWeight: weightT.toFixed(3),
+          sheetId: boardSheetId!,
+          storageType
+        }
+      });
+      return;
+    } else if (capCarton === 0 && cap > 0 && used + weightT > cap) {
+      setPendingAssignment({
+        title: "Capacity Exceeded!",
+        description: `Adding ${outlet.outletCode} (${weightT.toFixed(2)}T) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}T.\nCurrent load: ${used.toFixed(2)}T.\n\nDo you want to proceed anyway?`,
+        payload: {
+          outletCode: outlet.outletCode,
+          truckAssignmentId: truckAssignId,
+          outletWeight: weightT.toFixed(3),
+          sheetId: boardSheetId!,
+          storageType
+        }
+      });
+      return;
+    }
+    
+    assignOutletMutation.mutate({
+      outletCode: outlet.outletCode,
+      truckAssignmentId: truckAssignId,
+      outletWeight: weightT.toFixed(3),
+      sheetId: boardSheetId!,
+      storageType
+    } as any);
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {!boardSheetId ? (
@@ -2091,11 +2131,14 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
               {filteredZoneGroups.map(({ zone, zoneTrucks, outletRows }: any) => (
                 <Card key={zone.id} className="border-2">
                   {/* Zone Header */}
-                  <CardHeader className="bg-gradient-to-r from-primary/8 to-transparent pb-3">
+                  <CardHeader 
+                    className="bg-gradient-to-r from-primary/8 to-transparent pb-3 cursor-pointer hover:bg-muted/10 transition-colors"
+                    onClick={() => setExpandedRoutes(prev => ({ ...prev, [zone.id]: !prev[zone.id] }))}
+                  >
                     <div className="flex items-center justify-between flex-wrap gap-3">
                       <div className="flex items-center gap-3">
                         <div className="h-10 w-10 rounded-xl bg-primary/15 flex items-center justify-center">
-                          <MapPin className="h-5 w-5 text-primary" />
+                          {expandedRoutes[zone.id] ? <ChevronDown className="h-5 w-5 text-primary" /> : <ChevronRight className="h-5 w-5 text-primary" />}
                         </div>
                         <div>
                           <h3 className="font-bold text-base">{zone.name}</h3>
@@ -2181,7 +2224,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   </CardHeader>
 
                   {/* Outlets Table */}
-                  <CardContent className="p-0">
+                  {expandedRoutes[zone.id] && (
+                    <CardContent className="p-0">
                     {outletRows.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-6">No outlets in this zone's dispatch sheet.</p>
                     ) : (
@@ -2253,78 +2297,52 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                         </Button>
                                       </div>
                                     ) : (
-                                      <Select
-                                        onValueChange={(truckAssignId) => {
-                                          if (!truckAssignId) return;
-                                          const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
-                                          const veh = getVehicleInfo(truck?.truckId);
-                                          const cap = parseFloat(veh?.capacity || "0");
-                                          const capCarton = parseInt(veh?.cartonCapacity || "0");
-                                          const used = parseFloat(truck?.usedCapacity || "0");
-                                          const taItemCount = getTruckAssignedItemsCount(truck?.id);
+                                      <div className="flex items-center justify-end gap-1">
+                                        {zoneTrucks.map((ta: any) => {
+                                          const veh = getVehicleInfo(ta.truckId);
+                                          return (
+                                            <Button 
+                                              key={ta.id} 
+                                              variant="outline" 
+                                              size="sm" 
+                                              className="h-7 px-2 text-[10px] border-dashed hover:border-primary hover:text-primary"
+                                              onClick={() => handleAssign(outlet, outletWeightT, ta.id)}
+                                            >
+                                              <Truck className="h-3 w-3 mr-1" />
+                                              {veh?.plateNumber || "Truck"}
+                                            </Button>
+                                          );
+                                        })}
+                                        <Select onValueChange={(truckAssignId) => handleAssign(outlet, outletWeightT, truckAssignId)}>
+                                          <SelectTrigger className="h-7 w-8 px-0 flex justify-center items-center border-dashed bg-transparent text-muted-foreground hover:text-primary">
+                                            <MoreHorizontal className="h-3 w-3" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {truckAssignments.map((ta: any) => {
+                                              const veh = getVehicleInfo(ta.truckId);
+                                              const zoneName = getZoneName(ta.zoneId);
+                                              const cap = parseFloat(veh?.capacity || "0");
+                                              const capCarton = parseInt(veh?.cartonCapacity || "0");
+                                              const used = parseFloat(ta.usedCapacity || "0");
+                                              const taItemCount = getTruckAssignedItemsCount(ta.id);
+                                              
+                                              const remainingTons = cap > 0 ? cap - used : null;
+                                              const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
+                                              const wouldOverflow = capCarton > 0 
+                                                ? (taItemCount + outlet.items.length > capCarton)
+                                                : (cap > 0 && used + outletWeightT > cap);
 
-                                          if (capCarton > 0 && taItemCount + outlet.items.length > capCarton) {
-                                            setPendingAssignment({
-                                              title: "Capacity Exceeded!",
-                                              description: `Adding ${outlet.outletCode} (${outlet.items.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`,
-                                              payload: {
-                                                outletCode: outlet.outletCode,
-                                                truckAssignmentId: truckAssignId,
-                                                outletWeight: outletWeightT.toFixed(3),
-                                                sheetId: boardSheetId!,
-                                              }
-                                            });
-                                            return;
-                                          } else if (capCarton === 0 && cap > 0 && used + outletWeightT > cap) {
-                                            setPendingAssignment({
-                                              title: "Capacity Exceeded!",
-                                              description: `Adding ${outlet.outletCode} (${outletWeightT.toFixed(2)}T) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}T.\nCurrent load: ${used.toFixed(2)}T.\n\nDo you want to proceed anyway?`,
-                                              payload: {
-                                                outletCode: outlet.outletCode,
-                                                truckAssignmentId: truckAssignId,
-                                                outletWeight: outletWeightT.toFixed(3),
-                                                sheetId: boardSheetId!,
-                                              }
-                                            });
-                                            return;
-                                          }
-                                          
-                                          assignOutletMutation.mutate({
-                                            outletCode: outlet.outletCode,
-                                            truckAssignmentId: truckAssignId,
-                                            outletWeight: outletWeightT.toFixed(3),
-                                            sheetId: boardSheetId!,
-                                          } as any);
-                                        }}
-                                      >
-                                        <SelectTrigger className="h-7 text-xs w-36 border-dashed">
-                                          <SelectValue placeholder="Assign all →" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {truckAssignments.map((ta: any) => {
-                                            const veh = getVehicleInfo(ta.truckId);
-                                            const zoneName = getZoneName(ta.zoneId);
-                                            const cap = parseFloat(veh?.capacity || "0");
-                                            const capCarton = parseInt(veh?.cartonCapacity || "0");
-                                            const used = parseFloat(ta.usedCapacity || "0");
-                                            const taItemCount = getTruckAssignedItemsCount(ta.id);
-                                            
-                                            const remainingTons = cap > 0 ? cap - used : null;
-                                            const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
-                                            const wouldOverflow = capCarton > 0 
-                                              ? (taItemCount + outlet.items.length > capCarton)
-                                              : (cap > 0 && used + outletWeightT > cap);
-
-                                            return (
-                                              <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
-                                                {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
-                                                {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingTons !== null ? ` - ${remainingTons.toFixed(1)}T free` : ""}
-                                                {wouldOverflow ? " ⚠" : ""}
-                                              </SelectItem>
-                                            );
-                                          })}
-                                        </SelectContent>
-                                      </Select>
+                                              return (
+                                                <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
+                                                  {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
+                                                  {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingTons !== null ? ` - ${remainingTons.toFixed(1)}T free` : ""}
+                                                  {wouldOverflow ? " ⚠" : ""}
+                                                </SelectItem>
+                                              );
+                                            })}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
                                     )}
                                   </TableCell>
                                 </TableRow>
@@ -2391,56 +2409,25 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                               </Button>
                                             </div>
                                           ) : (
-                                            <div onClick={e => e.stopPropagation()}>
-                                              <Select
-                                                onValueChange={(truckAssignId) => {
-                                                  if (!truckAssignId) return;
-                                                  const truck = truckAssignments.find((t: any) => t.id === truckAssignId);
-                                                  const veh = getVehicleInfo(truck?.truckId);
-                                                  const cap = parseFloat(veh?.capacity || "0");
-                                                  const capCarton = parseInt(veh?.cartonCapacity || "0");
-                                                  const used = parseFloat(truck?.usedCapacity || "0");
-                                                  const taItemCount = getTruckAssignedItemsCount(truck?.id);
-                                                  
-                                                  if (capCarton > 0 && taItemCount + stItems.length > capCarton) {
-                                                    setPendingAssignment({
-                                                      title: `Capacity Exceeded for ${st} items!`,
-                                                      description: `Adding this (${stItems.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`,
-                                                      payload: {
-                                                        outletCode: outlet.outletCode,
-                                                        truckAssignmentId: truckAssignId,
-                                                        outletWeight: stWeightT.toFixed(3),
-                                                        sheetId: boardSheetId!,
-                                                        storageType: st
-                                                      }
-                                                    });
-                                                    return;
-                                                  } else if (capCarton === 0 && cap > 0 && used + stWeightT > cap) {
-                                                    setPendingAssignment({
-                                                      title: `Capacity Exceeded for ${st} items!`,
-                                                      description: `Adding this (${stWeightT.toFixed(2)}T) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}T.\nCurrent load: ${used.toFixed(2)}T.\n\nDo you want to proceed anyway?`,
-                                                      payload: {
-                                                        outletCode: outlet.outletCode,
-                                                        truckAssignmentId: truckAssignId,
-                                                        outletWeight: stWeightT.toFixed(3),
-                                                        sheetId: boardSheetId!,
-                                                        storageType: st
-                                                      }
-                                                    });
-                                                    return;
-                                                  }
-                                                  
-                                                  assignOutletMutation.mutate({
-                                                    outletCode: outlet.outletCode,
-                                                    truckAssignmentId: truckAssignId,
-                                                    outletWeight: stWeightT.toFixed(3),
-                                                    sheetId: boardSheetId!,
-                                                    storageType: st
-                                                  } as any);
-                                                }}
-                                              >
-                                                <SelectTrigger className="h-6 text-[10px] w-32 border-dashed ml-auto bg-transparent">
-                                                  <SelectValue placeholder={`Assign ${st} →`} />
+                                            <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                                              {zoneTrucks.map((ta: any) => {
+                                                const veh = getVehicleInfo(ta.truckId);
+                                                return (
+                                                  <Button 
+                                                    key={ta.id} 
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    className="h-6 px-1.5 text-[10px] border-dashed hover:border-primary hover:text-primary"
+                                                    onClick={() => handleAssign(outlet, stWeightT, ta.id, st)}
+                                                  >
+                                                    <Truck className="h-2.5 w-2.5 mr-1" />
+                                                    {veh?.plateNumber || "Truck"}
+                                                  </Button>
+                                                );
+                                              })}
+                                              <Select onValueChange={(truckAssignId) => handleAssign(outlet, stWeightT, truckAssignId, st)}>
+                                                <SelectTrigger className="h-6 w-6 px-0 flex justify-center items-center border-dashed bg-transparent text-muted-foreground hover:text-primary ml-1">
+                                                  <MoreHorizontal className="h-2.5 w-2.5" />
                                                 </SelectTrigger>
                                                 <SelectContent>
                                                   {truckAssignments.map((ta: any) => {
@@ -2499,7 +2486,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                         </TableBody>
                       </Table>
                     )}
-                  </CardContent>
+                    </CardContent>
+                  )}
                 </Card>
               ))}
             </div>
