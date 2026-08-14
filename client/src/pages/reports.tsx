@@ -1454,8 +1454,11 @@ export default function Reports() {
     const csvData = driverAttendanceReport.map(item => ({
       Date: item.checkInTime ? format(new Date(item.checkInTime), "yyyy-MM-dd") : "-",
       Driver: item.driverName,
+      "Crew Member": item.crewMemberName || "-",
       "Check In": item.checkInTime ? format(new Date(item.checkInTime), "hh:mm a") : "-",
       "Check Out": item.checkOutTime ? format(new Date(item.checkOutTime), "hh:mm a") : "-",
+      "Crew Check In": item.crewCheckInTime ? format(new Date(item.crewCheckInTime), "hh:mm a") : "-",
+      "Crew Check Out": item.crewCheckOutTime ? format(new Date(item.crewCheckOutTime), "hh:mm a") : "-",
       "Opening KM": item.openingKm ?? "-",
       "Closing KM": item.closingKm ?? "-",
       "Shift Type": item.shiftType || "-",
@@ -1529,8 +1532,11 @@ export default function Reports() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Driver Name</TableHead>
+                  <TableHead>Crew Member</TableHead>
                   <TableHead>Check-in</TableHead>
                   <TableHead>Check-out</TableHead>
+                  <TableHead>Crew Check-in</TableHead>
+                  <TableHead>Crew Check-out</TableHead>
                   <TableHead className="text-right">Opening KM</TableHead>
                   <TableHead className="text-right">Closing KM</TableHead>
                   <TableHead className="text-right">Hours</TableHead>
@@ -1546,11 +1552,18 @@ export default function Reports() {
                       {row.checkInTime ? format(new Date(row.checkInTime), "yyyy-MM-dd") : "-"}
                     </TableCell>
                     <TableCell>{row.driverName}</TableCell>
+                    <TableCell className="font-semibold text-primary/80">{row.crewMemberName || "-"}</TableCell>
                     <TableCell className="font-mono text-xs">
                       {row.checkInTime ? format(new Date(row.checkInTime), "hh:mm a") : "-"}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {row.checkOutTime ? format(new Date(row.checkOutTime), "hh:mm a") : "-"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {row.crewCheckInTime ? format(new Date(row.crewCheckInTime), "hh:mm a") : "-"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {row.crewCheckOutTime ? format(new Date(row.crewCheckOutTime), "hh:mm a") : "-"}
                     </TableCell>
                     <TableCell className="text-right font-mono">{row.openingKm ?? "-"}</TableCell>
                     <TableCell className="text-right font-mono">{row.closingKm ?? "-"}</TableCell>

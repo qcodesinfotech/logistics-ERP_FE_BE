@@ -19,6 +19,7 @@ export async function ensureDriverTablesSchema() {
   if (schemaCheckDone) return;
   try {
     await db.execute(`
+      ALTER TABLE "drivers" ADD COLUMN IF NOT EXISTS "default_crew_member_id" varchar;
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "end_latitude" numeric(10, 6);
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "end_longitude" numeric(10, 6);
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "truck_id" varchar;
@@ -32,6 +33,9 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "shift_type" text DEFAULT 'regular';
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "shift_hours" numeric(5, 2) DEFAULT '0.00';
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "overtime_hours" numeric(5, 2) DEFAULT '0.00';
+      ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "crew_member_id" varchar;
+      ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "crew_check_in_time" timestamp;
+      ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "crew_check_out_time" timestamp;
 
       CREATE TABLE IF NOT EXISTS "vehicle_maintenance" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),

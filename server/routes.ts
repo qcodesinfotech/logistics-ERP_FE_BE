@@ -8253,7 +8253,7 @@ export async function registerRoutes(
   app.post("/api/drivers/attendance", authMiddleware, async (req: AuthRequest, res) => {
     try {
       await ensureDriverTablesSchema();
-      const { driverId, latitude, longitude, deviceToken } = req.body;
+      const { driverId, latitude, longitude, deviceToken, crewMemberId } = req.body;
       const effectiveDriverId = driverId || req.user?.employeeId || req.user?.id;
       if (!effectiveDriverId) {
         return res.status(400).json({ error: "driverId is required" });
@@ -8296,10 +8296,21 @@ export async function registerRoutes(
         longitude: !isNaN(lonNum) ? lonNum.toString() : null,
         isAuthorizedDevice,
         status: "present",
+        crewMemberId: crewMemberId || null,
+        crewCheckInTime: crewMemberId ? new Date() : null,
       } as any);
 
+      // Enrich with employee names for mobile front-end state usage
+      const employeesList = await storage.getEmployees();
+      const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
+      const attendanceWithNames = {
+        ...attendance,
+        driverName: employeeMap.get(attendance.driverId) || "Unknown Driver",
+        crewMemberName: attendance.crewMemberId ? (employeeMap.get(attendance.crewMemberId) || "Unknown Crew Member") : null
+      };
+
       res.status(201).json({
-        attendance,
+        attendance: attendanceWithNames,
         geofenceValid: isWithinRange,
         distanceToNearest: nearestLoc && minDistance !== Infinity ? `${minDistance.toFixed(1)}m from ${nearestLoc.name}` : "outside geofence",
         isAuthorizedDevice
@@ -8357,7 +8368,7 @@ export async function registerRoutes(
 
   app.post("/api/drivers/closing-km", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { attendanceId, closingKm, latitude, longitude } = req.body;
+      const { attendanceId, closingKm, latitude, longitude, crewCheckOutTime } = req.body;
       if (!attendanceId || closingKm === undefined || closingKm === null) {
         return res.status(400).json({ error: "attendanceId and closingKm are required" });
       }
@@ -8407,6 +8418,9 @@ export async function registerRoutes(
         endLongitude: longitude ? longitude.toString() : null,
         shiftHours,
         overtimeHours,
+        ...(!record.crewCheckOutTime && record.crewMemberId ? {
+          crewCheckOutTime: crewCheckOutTime ? new Date(crewCheckOutTime) : checkOutTime
+        } : {})
       });
 
       // Record driver activity log
@@ -8424,6 +8438,45 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Record closing KM error:", error);
       res.status(500).json({ error: "Failed to record Closing KM" });
+    }
+  });
+
+  app.post("/api/drivers/attendance/crew-checkout", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { attendanceId, crewCheckOutTime } = req.body;
+      if (!attendanceId) {
+        return res.status(400).json({ error: "attendanceId is required" });
+      }
+      
+      const checkOutDate = crewCheckOutTime ? new Date(crewCheckOutTime) : new Date();
+      const updated = await storage.updateDriverAttendance(attendanceId, {
+        crewCheckOutTime: checkOutDate,
+      });
+
+      // Enrich with names
+      const employeesList = await storage.getEmployees();
+      const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
+      const attendanceWithNames = {
+        ...updated,
+        driverName: employeeMap.get(updated.driverId) || "Unknown Driver",
+        crewMemberName: updated.crewMemberId ? (employeeMap.get(updated.crewMemberId) || "Unknown Crew Member") : null
+      };
+
+      res.json(attendanceWithNames);
+    } catch (error: any) {
+      console.error("Record crew checkout error:", error);
+      res.status(500).json({ error: error.message || "Failed to record crew checkout" });
+    }
+  });
+
+  app.patch("/api/drivers/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const updated = await storage.updateDriver(id, req.body);
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Update driver profile error:", error);
+      res.status(500).json({ error: error.message || "Failed to update driver profile" });
     }
   });
 

@@ -25,6 +25,31 @@ export default function DriverManagementPage() {
     queryKey: ["/api/drivers"],
   });
 
+  const { data: employees = [] } = useQuery<any[]>({
+    queryKey: ["/api/employees/minimal"],
+  });
+
+  const assignCrewMutation = useMutation({
+    mutationFn: async ({ driverId, crewMemberId }: { driverId: string; crewMemberId: string | null }) => {
+      const res = await apiRequest("PATCH", `/api/drivers/${driverId}`, { defaultCrewMemberId: crewMemberId });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+      toast({
+        title: "Crew Member Assigned",
+        description: "The default crew member assignment has been successfully updated.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to Assign Crew Member",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    }
+  });
+
   const addDriverMutation = useMutation({
     mutationFn: async (driverData: any) => {
       const res = await apiRequest("POST", "/api/drivers", driverData);
@@ -182,6 +207,7 @@ export default function DriverManagementPage() {
                     <TableHead>Package Type</TableHead>
                     <TableHead>Base Salary</TableHead>
                     <TableHead>Holiday Pay Rate</TableHead>
+                    <TableHead>Default Crew Member</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -192,6 +218,29 @@ export default function DriverManagementPage() {
                       <TableCell className="capitalize text-xs font-mono">{driver.packageType}</TableCell>
                       <TableCell className="text-right"><CurrencyDisplay amount={driver.baseSalary} /></TableCell>
                       <TableCell className="font-mono text-xs">{driver.holidayPayRate}</TableCell>
+                      <TableCell>
+                        <Select
+                          value={driver.defaultCrewMemberId || "unassigned"}
+                          onValueChange={(val) => {
+                            assignCrewMutation.mutate({
+                              driverId: driver.id,
+                              crewMemberId: val === "unassigned" ? null : val,
+                            });
+                          }}
+                        >
+                          <SelectTrigger className="w-[180px] h-8 text-xs">
+                            <SelectValue placeholder="Select crew..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unassigned" className="text-muted-foreground italic text-xs">None (Unassigned)</SelectItem>
+                            {employees.map((emp: any) => (
+                              <SelectItem key={emp.id} value={emp.id} className="text-xs">
+                                {emp.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
                       <TableCell><StatusBadge status={driver.status} /></TableCell>
                     </TableRow>
                   ))}

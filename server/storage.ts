@@ -593,11 +593,12 @@ export interface IStorage {
   // Logistics Driver Management
   getDrivers(): Promise<Driver[]>;
   createDriver(data: InsertDriver): Promise<Driver>;
+  updateDriver(id: string, data: Partial<Driver>): Promise<Driver>;
 
   // Logistics Driver activities & attendance
   getDriverActivities(driverId?: string, tripId?: string): Promise<DriverActivity[]>;
   createDriverActivity(data: InsertDriverActivity): Promise<DriverActivity>;
-  getDriverAttendance(driverId?: string, date?: string): Promise<DriverAttendance[]>;
+  getDriverAttendance(driverId?: string, date?: string): Promise<any[]>;
   createDriverAttendance(data: InsertDriverAttendance): Promise<DriverAttendance>;
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
   getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
@@ -6544,14 +6545,20 @@ export class DatabaseStorage implements IStorage {
     try {
       const legacyDrivers = await db.select().from(drivers);
       for (const d of legacyDrivers) {
-        if (!driverMap.has(d.id)) {
+        const existing = driverMap.get(d.id);
+        if (existing) {
+          existing.defaultCrewMemberId = d.defaultCrewMemberId || null;
+          existing.holidayPayRate = d.holidayPayRate;
+        } else {
           driverMap.set(d.id, {
             id: d.id,
             name: d.name,
             packageType: d.packageType || "standard",
             baseSalary: d.baseSalary || "0.000",
+            holidayPayRate: d.holidayPayRate || "1.5x",
             status: d.status || "active",
             createdAt: d.createdAt || new Date(),
+            defaultCrewMemberId: d.defaultCrewMemberId || null,
           });
         }
       }
@@ -6564,6 +6571,11 @@ export class DatabaseStorage implements IStorage {
 
   async createDriver(data: InsertDriver): Promise<Driver> {
     const [driver] = await db.insert(drivers).values(data).returning();
+    return driver;
+  }
+
+  async updateDriver(id: string, data: Partial<Driver>): Promise<Driver> {
+    const [driver] = await db.update(drivers).set(data).where(eq(drivers.id, id)).returning();
     return driver;
   }
 
@@ -6583,7 +6595,7 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async getDriverAttendance(driverId?: string, date?: string): Promise<DriverAttendance[]> {
+  async getDriverAttendance(driverId?: string, date?: string): Promise<any[]> {
     const conditions = [];
     if (driverId) conditions.push(eq(driverAttendance.driverId, driverId));
     if (date) {
@@ -6596,10 +6608,18 @@ export class DatabaseStorage implements IStorage {
         sql`check_in_time <= ${endOfDay.toISOString()}`
       ));
     }
-    if (conditions.length > 0) {
-      return db.select().from(driverAttendance).where(and(...conditions));
-    }
-    return db.select().from(driverAttendance);
+    const list = conditions.length > 0
+      ? await db.select().from(driverAttendance).where(and(...conditions))
+      : await db.select().from(driverAttendance);
+
+    const employeesList = await this.getEmployees();
+    const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
+
+    return list.map(item => ({
+      ...item,
+      driverName: employeeMap.get(item.driverId) || "Unknown Driver",
+      crewMemberName: item.crewMemberId ? (employeeMap.get(item.crewMemberId) || "Unknown Crew Member") : null
+    }));
   }
 
   async createDriverAttendance(data: InsertDriverAttendance): Promise<DriverAttendance> {
@@ -6628,12 +6648,13 @@ export class DatabaseStorage implements IStorage {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(driverAttendance.checkInTime));
 
-    const driversList = await this.getDrivers();
-    const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+    const employeesList = await this.getEmployees();
+    const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
     
     return list.map(item => ({
       ...item,
-      driverName: driverMap.get(item.driverId) || "Unknown Driver"
+      driverName: employeeMap.get(item.driverId) || "Unknown Driver",
+      crewMemberName: item.crewMemberId ? (employeeMap.get(item.crewMemberId) || "Unknown Crew Member") : null
     }));
   }
 

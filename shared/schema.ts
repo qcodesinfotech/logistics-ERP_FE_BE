@@ -1904,6 +1904,9 @@ export const driverAttendance = pgTable("driver_attendance", {
   shiftHours: decimal("shift_hours", { precision: 5, scale: 2 }).default("0.00"),
   overtimeHours: decimal("overtime_hours", { precision: 5, scale: 2 }).default("0.00"),
   status: text("status").notNull().default("present"), // "present", "absent"
+  crewMemberId: varchar("crew_member_id"),
+  crewCheckInTime: timestamp("crew_check_in_time"),
+  crewCheckOutTime: timestamp("crew_check_out_time"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1959,6 +1962,7 @@ export const drivers = pgTable("drivers", {
   baseSalary: decimal("base_salary", { precision: 12, scale: 3 }).default("0.000"),
   holidayPayRate: text("holiday_pay_rate").notNull().default("1.5x"),
   status: text("status").notNull().default("active"),
+  defaultCrewMemberId: varchar("default_crew_member_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
