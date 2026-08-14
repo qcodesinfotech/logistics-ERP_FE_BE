@@ -266,50 +266,69 @@ function OutletCard({
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
   const isToday = selectedDate === format(new Date(), "yyyy-MM-dd");
   const isFuture = selectedDate > format(new Date(), "yyyy-MM-dd");
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
   const total = outlet.items.length;
   const allDone = delivered === total && total > 0;
   const anyPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
   const isOutletComplete = total > 0 && outlet.items.every(i => (i.delivery?.status || "pending") !== "pending");
 
+  const totalQty = outlet.items.reduce((sum, item) => sum + parseFloat(item.requestedQty || item.weight || "0"), 0);
+  const formattedQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
+
   return (
     <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
-      <div className="flex items-center justify-between p-3 cursor-pointer" onClick={() => setExpanded(e => !e)}>
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${allDone ? "bg-emerald-100" : "bg-primary/10"}`}>
-            <MapPin className={`h-4 w-4 ${allDone ? "text-emerald-600" : "text-primary"}`} />
-          </div>
-          <div className="min-w-0">
-            <p className="font-semibold text-sm truncate flex items-center gap-2">
-              {outlet.outletName}
-              {assignedTruck && (
-                <span className="text-[10px] font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded-md flex items-center gap-1 border border-primary/20 shadow-sm">
-                  <Truck className="h-3 w-3" />
-                  {assignedTruck.vehicle?.plateNumber || assignedTruck.vehicle?.name || "Truck"}
-                </span>
-              )}
-            </p>
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <p className="text-xs text-muted-foreground">{outlet.outletCode}</p>
-              {Array.from(new Set(outlet.items.map((i: any) => i.storageType).filter(Boolean))).map((st: any) => (
-                <Badge key={st} variant="outline" className="text-[9px] h-4 px-1 bg-slate-50">{st}</Badge>
-              ))}
+      <div className="p-3 cursor-pointer space-y-2.5" onClick={() => setExpanded(e => !e)}>
+        {/* Row 1: Icon + Name + Chevron */}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 ${allDone ? "bg-emerald-100" : "bg-primary/10"}`}>
+              <MapPin className={`h-4 w-4 ${allDone ? "text-emerald-600" : "text-primary"}`} />
             </div>
+            <p className="font-semibold text-sm break-words whitespace-normal text-slate-800 dark:text-slate-200">
+              {outlet.outletName}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {outlet.isOverridden && (
-            <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-xs">Override</Badge>
+
+        {/* Row 2: Code, Storage Types, Assigned Truck */}
+        <div className="flex flex-wrap items-center gap-1.5 pl-9 text-xs text-muted-foreground">
+          <span>{outlet.outletCode}</span>
+          {Array.from(new Set(outlet.items.map((i: any) => i.storageType).filter(Boolean))).map((st: any) => (
+            <Badge key={st} variant="outline" className="text-[9px] h-4 px-1 bg-slate-50 font-normal">{st}</Badge>
+          ))}
+          {assignedTruck && (
+            <Badge variant="outline" className="text-[9px] h-4 px-1 bg-primary/5 text-primary border-primary/20 font-medium">
+              <Truck className="h-2.5 w-2.5 mr-0.5" />
+              {assignedTruck.vehicle?.plateNumber || assignedTruck.vehicle?.name || "Truck"}
+            </Badge>
           )}
-          <Badge variant="outline" className="text-xs">{delivered}/{total}</Badge>
+        </div>
+
+        {/* Row 3: Metrics (Qty, Progress, Override, Move) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pl-9 pt-1.5 border-t border-slate-100/50 mt-1.5">
+          <div className="flex items-center gap-1.5">
+            {outlet.isOverridden && (
+              <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-[10px] h-4 px-1 font-normal">Override</Badge>
+            )}
+            <Badge variant="outline" className="text-[10px] h-5 bg-primary/5 text-primary border-primary/20 font-semibold">Qty: {formattedQty}</Badge>
+            <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">{delivered}/{total}</Badge>
+          </div>
+          
           {isSupervisor && !isOutletComplete && (
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-              onClick={e => { e.stopPropagation(); onOverride(outlet); }}>
-              <ArrowRight className="h-3 w-3 mr-1" />Move
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-0.5"
+              onClick={e => { e.stopPropagation(); onOverride(outlet); }}
+            >
+              <ArrowRight className="h-3 w-3" />
+              Move
             </Button>
           )}
-          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
         </div>
       </div>
       {expanded && (
@@ -375,9 +394,27 @@ function ZoneColumn({
   onOverrideItem: (item: DispatchItem) => void;
   selectedDate: string;
 }) {
+  const parseNumber = (val: any) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? 0 : num;
+  };
+
   const totalItems = zone.outlets.reduce((s, o) => s + o.items.length, 0);
-  const deliveredItems = zone.outlets.reduce((s, o) => s + o.items.filter(i => i.delivery?.status === "delivered").length, 0);
-  const completionPercentage = totalItems > 0 ? Math.round((deliveredItems / totalItems) * 100) : 0;
+  const totalQty = zone.outlets.reduce((sumOutlet, o) => {
+    return sumOutlet + o.items.reduce((sumItem, i) => sumItem + parseNumber(i.requestedQty || i.weight), 0);
+  }, 0);
+  const deliveredQty = zone.outlets.reduce((sumOutlet, o) => {
+    return sumOutlet + o.items.reduce((sumItem, i) => {
+      if (i.delivery?.status === "delivered") {
+        return sumItem + parseNumber(i.delivery.deliveredQty || i.requestedQty || i.weight);
+      }
+      return sumItem;
+    }, 0);
+  }, 0);
+
+  const formattedTotalQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
+  const formattedDeliveredQty = deliveredQty % 1 === 0 ? deliveredQty.toFixed(0) : deliveredQty.toFixed(1);
+  const completionPercentage = totalQty > 0 ? Math.round((deliveredQty / totalQty) * 100) : 0;
   const isUnassigned = zone.zoneId === "unassigned";
 
   return (
@@ -391,14 +428,14 @@ function ZoneColumn({
             </div>
             <div>
               <h3 className="font-bold text-sm">{zone.zoneName}</h3>
-              <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · {totalItems} items</p>
+              <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · Qty: {formattedTotalQty}</p>
             </div>
           </div>
-          <Badge className={`${deliveredItems === totalItems && totalItems > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
-            {deliveredItems}/{totalItems} ({completionPercentage}%)
+          <Badge className={`${deliveredQty === totalQty && totalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
+            {formattedDeliveredQty}/{formattedTotalQty} ({completionPercentage}%)
           </Badge>
         </div>
-        {totalItems > 0 && (
+        {totalQty > 0 && (
           <div className="mb-3 space-y-1">
             <div className="flex justify-between items-center text-[10px] text-muted-foreground">
               <span>Delivery Completion</span>
@@ -1665,7 +1702,7 @@ export default function DailyDispatchPage() {
       {overrideDialog && overrideDialog.outletId && (
         <MoveOverrideDialog
           title="Move Outlet"
-          targetName={overrideDialog.outletCode}
+          targetName={overrideDialog.outletName || overrideDialog.outletCode}
           zones={zones}
           boardZones={boardData?.zones || []}
           onClose={() => setOverrideDialog(null)}

@@ -546,6 +546,35 @@ export const registerAuthRoutes = (app: any) => {
 
   app.post("/api/auth/refresh", async (req: Request, res: Response) => {
     try {
+      // 1. Mobile body-based refresh token support
+      const bodyRefreshToken = req.body?.refreshToken;
+      if (bodyRefreshToken) {
+        let decoded: any;
+        try {
+          decoded = jwt.verify(bodyRefreshToken, JWT_SECRET);
+        } catch (e) {
+          return res.status(401).json({ message: "Invalid or expired refresh token" });
+        }
+
+        if (decoded.type !== "refresh") {
+          return res.status(401).json({ message: "Invalid refresh token" });
+        }
+
+        const user = await storage.getUser(decoded.userId);
+        if (!user || user.status !== "active") {
+          return res.status(401).json({ message: "User not found or inactive" });
+        }
+
+        const token = jwt.sign(
+          { id: user.id, username: user.username, role: user.role, name: user.name, companyId: user.companyId, shopId: user.shopId, branchId: user.branchId },
+          JWT_SECRET,
+          { expiresIn: ACCESS_TOKEN_EXPIRY }
+        );
+
+        return res.json({ token });
+      }
+
+      // 2. Web cookie-based refresh token support
       const refreshToken = req.cookies?.refreshToken;
 
       if (!refreshToken) {
@@ -586,7 +615,7 @@ export const registerAuthRoutes = (app: any) => {
 
       setRefreshTokenCookie(res, newRefreshToken);
 
-      res.json({
+      return res.json({
         user: authUser,
         accessToken: newAccessToken,
         canChangeScope: canChangeScope(user.role),

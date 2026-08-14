@@ -2558,10 +2558,11 @@ export class DatabaseStorage implements IStorage {
     const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));
     const overrideMap = new Map(overrides.map(o => [o.outletId, o]));
 
-    // Get all outlets involved
-    const outletIds = Array.from(new Set(items.map(i => i.outletId).filter(Boolean))) as string[];
-    const allOutlets = outletIds.length > 0 ? await db.select().from(outlets).where(inArray(outlets.id, outletIds)) : [];
+    // Get all outlets and build lookup maps
+    const allOutlets = await db.select().from(outlets);
     const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+    const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+    const outletCodeMap = new Map(allOutlets.map(o => [normalizeCode(o.code || ""), o]));
 
     // Get zone assignments for all outlets (using routeId directly)
     const outletToZone = new Map<string, string>();
@@ -2672,11 +2673,13 @@ export class DatabaseStorage implements IStorage {
       const outletKey = item.outletId || item.outletCode;
       if (!board[effectiveZoneId].outlets[outletKey]) {
         const outlet = item.outletId ? outletMap.get(item.outletId) : null;
+        const fallbackOutlet = outletCodeMap.get(normalizeCode(item.outletCode));
+        const resolvedName = outlet?.name || fallbackOutlet?.name || item.outletCode;
 
         board[effectiveZoneId].outlets[outletKey] = {
-          outletId: item.outletId,
+          outletId: item.outletId || fallbackOutlet?.id || null,
           outletCode: item.outletCode,
-          outletName: outlet?.name || item.outletCode,
+          outletName: resolvedName,
           isOverridden,
           overrideZoneId: isOverridden ? (item.overrideRouteId || (item.outletId ? overrideMap.get(item.outletId)?.overrideZoneId : null) || null) : null,
           truckAssignmentId: tAssignId,

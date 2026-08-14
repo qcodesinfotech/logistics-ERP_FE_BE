@@ -6533,39 +6533,7 @@ export async function registerRoutes(
     }
   });
 
-  // Mobile Token Refresh
-  app.post("/api/auth/refresh", async (req, res) => {
-    try {
-      const { refreshToken } = req.body;
 
-      if (!refreshToken) {
-        return res.status(400).json({ message: "Refresh token required" });
-      }
-
-      const jwtLib = await import("jsonwebtoken");
-      const jwtSecret = process.env.JWT_SECRET || "tt-erp-jwt-secret-key-2024";
-
-      const decoded = jwtLib.default.verify(refreshToken, jwtSecret) as any;
-      if (decoded.type !== "refresh") {
-        return res.status(401).json({ message: "Invalid refresh token" });
-      }
-
-      const user = await storage.getUser(decoded.userId);
-      if (!user || user.status !== "active") {
-        return res.status(401).json({ message: "User not found or inactive" });
-      }
-
-      const token = jwtLib.default.sign(
-        { id: user.id, username: user.username, role: user.role, name: user.name, companyId: user.companyId, shopId: user.shopId, branchId: user.branchId },
-        jwtSecret,
-        { expiresIn: "7d" }
-      );
-
-      res.json({ token });
-    } catch (error) {
-      res.status(401).json({ message: "Invalid or expired refresh token" });
-    }
-  });
 
   // Mobile: Get tasks for current user (employees see assigned tasks, managers see scoped tasks)
   app.get("/api/mobile/tasks", authMiddleware, async (req: AuthRequest, res) => {
@@ -8354,7 +8322,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "openingKm must be a valid non-negative number" });
       }
 
-      const records = await storage.getDriverAttendance(req.user?.id);
+      const effectiveDriverId = req.user?.employeeId || req.user?.id;
+      const records = await storage.getDriverAttendance(effectiveDriverId);
       const existing = records.find(r => r.id === attendanceId);
       if (!existing) {
         return res.status(404).json({ error: "Attendance record not found" });
@@ -8372,7 +8341,7 @@ export async function registerRoutes(
 
       // Record driver activity log
       await storage.createDriverActivity({
-        driverId: req.user?.id || updated.driverId,
+        driverId: effectiveDriverId || updated.driverId,
         kmBefore: kmVal,
         notes: isUpdate
           ? `Truck Opening KM updated to: ${kmVal}`
@@ -8399,8 +8368,13 @@ export async function registerRoutes(
       }
 
       // Fetch attendance record to validate closing KM >= opening KM
-      const [record] = await storage.getDriverAttendance(req.user?.id);
-      const openingKmVal = record?.openingKm ?? 0;
+      const effectiveDriverId = req.user?.employeeId || req.user?.id;
+      const records = await storage.getDriverAttendance(effectiveDriverId);
+      const record = records.find(r => r.id === attendanceId);
+      if (!record) {
+        return res.status(404).json({ error: "Attendance record not found" });
+      }
+      const openingKmVal = record.openingKm ?? 0;
 
       if (closeKmVal < openingKmVal) {
         return res.status(400).json({
@@ -8437,7 +8411,7 @@ export async function registerRoutes(
 
       // Record driver activity log
       await storage.createDriverActivity({
-        driverId: req.user?.id || updated.driverId,
+        driverId: effectiveDriverId || updated.driverId,
         kmBefore: openingKmVal,
         kmAfter: closeKmVal,
         notes: `Duty ended. Closing KM: ${closeKmVal}. Total KM: ${closeKmVal - openingKmVal}`,
