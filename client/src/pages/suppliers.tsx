@@ -505,7 +505,7 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
       date: new Date(p.purchaseDate || p.date || Date.now()),
       type: "Purchase Invoice",
       refNo: p.purchaseNumber,
-      credit: parseFloat(p.grandTotal || p.subtotal || "0"),
+      credit: parseFloat(p.grandTotal || p.total || p.subtotal || "0"),
       status: p.paymentStatus || "pending",
     });
   });
