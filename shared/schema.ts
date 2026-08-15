@@ -670,6 +670,50 @@ export const clients = pgTable("clients", {
   branchId: varchar("branch_id"),
   status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow(),
+  
+  // Customer Master new fields
+  customerCode: varchar("customer_code"),
+  tradeName: text("trade_name"),
+  customerType: text("customer_type").default("company"), // "company" | "individual"
+  customerCategory: text("customer_category").default("both"), // "trucking" | "delivery" | "both"
+  crNumber: text("cr_number"),
+  vatNumber: text("vat_number"),
+  designation: text("designation"),
+  whatsappNumber: text("whatsapp_number"),
+  alternativeContact: text("alternative_contact"),
+  accountsContactName: text("accounts_contact_name"),
+  accountsEmail: text("accounts_email"),
+  accountsContactNumber: text("accounts_contact_number"),
+  billingAddress: text("billing_address"),
+  deliveryAddress: text("delivery_address"),
+  buildingNo: text("building_no"),
+  roadStreet: text("road_street"),
+  area: text("area"),
+  city: text("city"),
+  country: text("country"),
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  currency: text("currency").default("BHD"),
+  paymentTerms: text("payment_terms").default("Immediate"),
+  creditLimit: decimal("credit_limit", { precision: 12, scale: 3 }),
+  openingBalance: decimal("opening_balance", { precision: 12, scale: 3 }).default("0.000"),
+  currentOutstanding: decimal("current_outstanding", { precision: 12, scale: 3 }).default("0.000"),
+  bankName: text("bank_name"),
+  iban: text("iban"),
+  documents: jsonb("documents").$type<{
+    crCertificate?: { name: string; url: string; uploadedAt?: string };
+    vatCertificate?: { name: string; url: string; uploadedAt?: string };
+    customerAgreement?: { name: string; url: string; uploadedAt?: string };
+    otherDocuments?: { name: string; url: string; uploadedAt?: string }[];
+  }>().default({}),
+  contacts: jsonb("contacts").$type<{
+    name: string;
+    designation?: string;
+    phone: string;
+    whatsapp?: string;
+    email?: string;
+  }[]>().default([]),
+  isVendor: boolean("is_vendor").default(false),
 });
 
 export const routes = pgTable("routes", {
@@ -699,6 +743,7 @@ export const outlets = pgTable("outlets", {
   contactPerson: text("contact_person"),
   contactPhone: text("contact_phone"),
   status: text("status").notNull().default("active"),
+  isVendor: boolean("is_vendor").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

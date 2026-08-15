@@ -57,6 +57,7 @@ import { eq, desc, and, sql, asc, or, ne, gt, gte, lte, ilike, count, isNull, in
 import * as schema from "@shared/schema";
 import { sendLeaveRequestNotification } from "./lib/email";
 import { type ScopeParams } from "./auth";
+import { randomUUID } from "crypto";
 
 // Storage interface for all CRUD operations
 export interface IStorage {
@@ -2265,13 +2266,63 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Clients
+  async getNextCustomerCode(): Promise<string> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(clients);
+    const count = Number(result[0]?.count || 0);
+    const num = (count + 1).toString().padStart(6, "0");
+    return `CUST-${num}`;
+  }
+
+  async calculateClientOutstanding(clientId: string): Promise<number> {
+    const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+    const openingBalance = client ? parseFloat(client.openingBalance || "0") : 0;
+
+    // 1. Unpaid/Partially Paid Dispatch Orders
+    const clientOrders = await db.select().from(orders).where(eq(orders.customerId, clientId));
+    const ordersOutstanding = clientOrders.reduce((sum, order) => {
+      const total = parseFloat(order.grandTotal || "0");
+      const paid = parseFloat(order.paidAmount || "0");
+      return sum + Math.max(0, total - paid);
+    }, 0);
+
+    // 2. Unpaid/Partially Paid Contract Invoices
+    const clientContractInvoices = await db.select().from(contractInvoices).where(eq(contractInvoices.customerId, clientId));
+    const contractsOutstanding = clientContractInvoices.reduce((sum, inv) => {
+      const total = parseFloat(inv.totalAmount || "0");
+      const paid = parseFloat(inv.paidAmount || "0");
+      return sum + Math.max(0, total - paid);
+    }, 0);
+
+    // 3. Unpaid/Partially Paid FMCG Invoices
+    const clientFmcgInvoices = await db.select().from(fmcgInvoices).where(eq(fmcgInvoices.customerId, clientId));
+    const fmcgOutstanding = clientFmcgInvoices.reduce((sum, inv) => {
+      const total = parseFloat(inv.totalAmount || "0");
+      const paid = parseFloat(inv.paidAmount || "0");
+      return sum + Math.max(0, total - paid);
+    }, 0);
+
+    return openingBalance + ordersOutstanding + contractsOutstanding + fmcgOutstanding;
+  }
+
   async getClients(): Promise<Client[]> {
-    return db.select().from(clients).orderBy(clients.name);
+    const clientList = await db.select().from(clients).orderBy(clients.name);
+    return Promise.all(clientList.map(async (client) => {
+      const outstanding = await this.calculateClientOutstanding(client.id);
+      return {
+        ...client,
+        currentOutstanding: outstanding.toFixed(3),
+      };
+    }));
   }
 
   async getClient(id: string): Promise<Client | undefined> {
     const [client] = await db.select().from(clients).where(eq(clients.id, id));
-    return client || undefined;
+    if (!client) return undefined;
+    const outstanding = await this.calculateClientOutstanding(client.id);
+    return {
+      ...client,
+      currentOutstanding: outstanding.toFixed(3),
+    };
   }
 
   async createClient(data: InsertClient): Promise<Client> {
@@ -2288,16 +2339,68 @@ export class DatabaseStorage implements IStorage {
         throw new Error(`A client with email "${data.email}" already exists`);
       }
     }
-    const [client] = await db.insert(clients).values(data).returning();
-    return client;
+    const code = data.customerCode || await this.getNextCustomerCode();
+    const newId = randomUUID();
+    const [client] = await db.insert(clients).values({
+      ...data,
+      id: newId,
+      customerCode: code,
+    } as any).returning();
+    
+    // Also create a corresponding outlet to make them identical
+    await db.insert(outlets).values({
+      id: client.id,
+      clientId: client.id,
+      name: client.name,
+      code: client.customerCode,
+      phone: client.phone || "",
+      email: client.email || "",
+      address: (client as any).deliveryAddress || (client as any).billingAddress || "",
+      latitude: (client as any).latitude || "",
+      longitude: (client as any).longitude || "",
+      contactPerson: client.contactPerson || "",
+      contactPhone: client.phone || "",
+      status: client.status || "active",
+      isVendor: client.isVendor,
+    } as any);
+
+    // Return with dynamic outstanding balance (which will be openingBalance initially)
+    const outstanding = await this.calculateClientOutstanding(client.id);
+    return {
+      ...client,
+      currentOutstanding: outstanding.toFixed(3),
+    };
   }
 
   async updateClient(id: string, data: Partial<InsertClient>): Promise<Client | undefined> {
-    const [client] = await db.update(clients).set(data).where(eq(clients.id, id)).returning();
-    return client || undefined;
+    const [client] = await db.update(clients).set(data as any).where(eq(clients.id, id)).returning();
+    if (!client) return undefined;
+
+    // Update corresponding outlet
+    await db.update(outlets).set({
+      name: client.name,
+      code: client.customerCode,
+      phone: client.phone || "",
+      email: client.email || "",
+      address: (client as any).deliveryAddress || (client as any).billingAddress || "",
+      latitude: (client as any).latitude || "",
+      longitude: (client as any).longitude || "",
+      contactPerson: client.contactPerson || "",
+      contactPhone: client.phone || "",
+      status: client.status || "active",
+      isVendor: client.isVendor,
+    } as any).where(eq(outlets.id, client.id));
+
+    const outstanding = await this.calculateClientOutstanding(client.id);
+    return {
+      ...client,
+      currentOutstanding: outstanding.toFixed(3),
+    };
   }
 
   async deleteClient(id: string): Promise<void> {
+    await db.delete(outletZones).where(eq(outletZones.outletId, id));
+    await db.delete(outlets).where(eq(outlets.id, id));
     await db.delete(clients).where(eq(clients.id, id));
   }
 
@@ -2344,18 +2447,67 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createOutlet(data: InsertOutlet): Promise<Outlet> {
-    const [outlet] = await db.insert(outlets).values(data).returning();
+    const newId = randomUUID();
+    const outletCode = data.code || `CUST-${newId.substring(0, 8).toUpperCase()}`;
+
+    // Also create matching client record to keep them in lockstep
+    await db.insert(clients).values({
+      id: newId,
+      name: data.name,
+      tradeName: data.name,
+      customerCode: outletCode,
+      phone: data.phone || "",
+      email: data.email || "",
+      contactPerson: data.contactPerson || "",
+      billingAddress: data.address || "",
+      deliveryAddress: data.address || "",
+      area: "Default Area",
+      city: "Default City",
+      country: "Bahrain",
+      status: data.status || "active",
+      isVendor: data.isVendor || false,
+      currency: "BHD",
+      paymentTerms: "30 Days",
+      openingBalance: "0.000",
+      currentOutstanding: "0.000",
+      documents: {},
+    } as any);
+
+    const [outlet] = await db.insert(outlets).values({
+      ...data,
+      id: newId,
+      clientId: newId,
+      code: outletCode,
+    } as any).returning();
+    
     return outlet;
   }
 
   async updateOutlet(id: string, data: Partial<InsertOutlet>): Promise<Outlet | undefined> {
-    const [outlet] = await db.update(outlets).set(data).where(eq(outlets.id, id)).returning();
-    return outlet || undefined;
+    const [outlet] = await db.update(outlets).set(data as any).where(eq(outlets.id, id)).returning();
+    if (!outlet) return undefined;
+
+    // Update corresponding client
+    await db.update(clients).set({
+      name: outlet.name,
+      tradeName: outlet.name,
+      customerCode: outlet.code,
+      phone: outlet.phone || "",
+      email: outlet.email || "",
+      contactPerson: outlet.contactPerson || "",
+      billingAddress: outlet.address || "",
+      deliveryAddress: outlet.address || "",
+      status: outlet.status,
+      isVendor: outlet.isVendor,
+    } as any).where(eq(clients.id, outlet.id));
+
+    return outlet;
   }
 
   async deleteOutlet(id: string): Promise<void> {
     await db.delete(outletZones).where(eq(outletZones.outletId, id));
     await db.delete(outlets).where(eq(outlets.id, id));
+    await db.delete(clients).where(eq(clients.id, id));
   }
 
   async getOutletZones(outletId: string): Promise<Zone[]> {

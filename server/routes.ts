@@ -3268,7 +3268,7 @@ export async function registerRoutes(
   });
 
   // Clients - RBAC protected
-  app.get("/api/clients", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+  app.get("/api/clients", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const clients = await storage.getClients();
       res.json(clients);
@@ -3278,28 +3278,33 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/clients/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+  app.get("/api/clients/:id", authMiddleware, permissionMiddleware("customers"), async (req: AuthRequest, res) => {
     const client = await storage.getClient(req.params.id);
     if (!client) return res.status(404).json({ error: "Client not found" });
     res.json(client);
   });
 
-  app.post("/api/clients", authMiddleware, permissionMiddleware("projects"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
+  app.post("/api/clients", authMiddleware, permissionMiddleware("customers"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
     try {
-      const client = await storage.createClient(req.body);
+      const scope = getScopeFromRequest(req);
+      const client = await storage.createClient({
+        ...req.body,
+        shopId: scope.shopId || req.body.shopId,
+        branchId: scope.branchId || req.body.branchId,
+      });
       res.status(201).json(client);
-    } catch (error) {
-      res.status(400).json({ error: "Failed to create client" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to create client" });
     }
   });
 
-  app.patch("/api/clients/:id", authMiddleware, permissionMiddleware("projects"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
+  app.patch("/api/clients/:id", authMiddleware, permissionMiddleware("customers"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
     const client = await storage.updateClient(req.params.id, req.body);
     if (!client) return res.status(404).json({ error: "Client not found" });
     res.json(client);
   });
 
-  app.delete("/api/clients/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+  app.delete("/api/clients/:id", authMiddleware, permissionMiddleware("customers"), async (req: AuthRequest, res) => {
     await storage.deleteClient(req.params.id);
     res.status(204).send();
   });
@@ -7086,7 +7091,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/clients/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+  app.delete("/api/clients/:id", authMiddleware, permissionMiddleware("customers"), async (req: AuthRequest, res) => {
     try {
       await storage.deleteClient(req.params.id);
       res.sendStatus(204);

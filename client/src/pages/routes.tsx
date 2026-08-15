@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
-  Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon
+  Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon, Eye
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +66,7 @@ interface Outlet {
   contactPerson?: string;
   contactPhone?: string;
   status: string;
+  isVendor?: boolean;
 }
 
 // ===================== Schemas =====================
@@ -391,12 +392,14 @@ export default function RoutesPage() {
     }
   };
 
-  const filteredOutlets = (Array.isArray(outletsList) ? outletsList : []).filter((o) => {
-    let match = true;
-    if (selectedRouteFilter !== "all" && o.routeId !== selectedRouteFilter) match = false;
-    if (selectedBrandFilter !== "all" && o.brandId !== selectedBrandFilter) match = false;
-    return match;
-  });
+  const filteredOutlets = (Array.isArray(outletsList) ? outletsList : [])
+    .filter((o) => !o.isVendor)
+    .filter((o) => {
+      let match = true;
+      if (selectedRouteFilter !== "all" && o.routeId !== selectedRouteFilter) match = false;
+      if (selectedBrandFilter !== "all" && o.brandId !== selectedBrandFilter) match = false;
+      return match;
+    });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -405,10 +408,10 @@ export default function RoutesPage() {
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
             <RouteIcon className="h-6 w-6 text-primary" />
-            Routes, Brands & Outlets
+            Routes, Brands & Outlets/Customers
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage logistics routes, brands, and their delivery outlets.
+            Manage logistics routes, brands, and Outlets/Customers.
           </p>
         </div>
       </div>
@@ -425,7 +428,7 @@ export default function RoutesPage() {
           </TabsTrigger>
           <TabsTrigger value="outlets" className="gap-2">
             <MapPin className="h-4 w-4" />
-            Outlets
+            Outlets/Customers
           </TabsTrigger>
         </TabsList>
 
@@ -626,8 +629,8 @@ export default function RoutesPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={() => openOutletDialog()} className="gap-2 shrink-0 ml-auto">
-                    <Plus className="h-4 w-4" /> Add Outlet
+                  <Button onClick={() => setLocation("/logistics/customers/new")} className="gap-2 shrink-0 ml-auto">
+                    <Plus className="h-4 w-4" /> Add Outlet/Customer
                   </Button>
                 </div>
               </CardContent>
@@ -639,9 +642,9 @@ export default function RoutesPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-base">
-                      Outlets List
+                      Outlets/Customers List
                     </CardTitle>
-                    <CardDescription>{filteredOutlets.length} outlet{filteredOutlets.length !== 1 ? "s" : ""}</CardDescription>
+                    <CardDescription>{filteredOutlets.length} outlet/customer{filteredOutlets.length !== 1 ? "s" : ""}</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -651,16 +654,16 @@ export default function RoutesPage() {
                 ) : filteredOutlets.length === 0 ? (
                   <div className="p-14 flex flex-col items-center gap-3 text-muted-foreground">
                     <MapPin className="h-10 w-10 opacity-25" />
-                    <p className="text-sm">No outlets match the selected filters.</p>
-                    <Button variant="outline" onClick={() => openOutletDialog()} className="gap-2 mt-1">
-                      <Plus className="h-4 w-4" /> Add Outlet
+                    <p className="text-sm">No outlets/customers match the selected filters.</p>
+                    <Button variant="outline" onClick={() => setLocation("/logistics/customers/new")} className="gap-2 mt-1">
+                      <Plus className="h-4 w-4" /> Add Outlet/Customer
                     </Button>
                   </div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Outlet Name</TableHead>
+                        <TableHead>Outlet/Customer Name</TableHead>
                         <TableHead>Route / Brand</TableHead>
                         <TableHead>Code</TableHead>
                         <TableHead>Phone / Contact</TableHead>
@@ -674,7 +677,11 @@ export default function RoutesPage() {
                         const brand = brands.find(b => b.id === outlet.brandId);
                         
                         return (
-                          <TableRow key={outlet.id} className="hover:bg-accent/30 transition-colors">
+                          <TableRow 
+                            key={outlet.id} 
+                            onClick={() => setLocation(`/logistics/customers/${outlet.id}`)}
+                            className="cursor-pointer hover:bg-accent/30 transition-colors"
+                          >
                             <TableCell>
                               <div className="font-medium">{outlet.name}</div>
                               {outlet.address && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{outlet.address}</div>}
@@ -702,13 +709,16 @@ export default function RoutesPage() {
                                 {outlet.status}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => openOutletDialog(outlet)}>
-                                  <Edit className="h-4 w-4" />
+                                <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/customers/${outlet.id}`)} title="View Details">
+                                  <Eye className="h-4 w-4 text-muted-foreground" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/customers/${outlet.id}/edit`)} title="Edit Outlet / Customer">
+                                  <Edit className="h-4 w-4 text-blue-600" />
                                 </Button>
                                 <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
-                                  onClick={() => setDeleteOutletId(outlet.id)}>
+                                  onClick={() => setDeleteOutletId(outlet.id)} title="Delete Outlet">
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>

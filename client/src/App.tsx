@@ -56,6 +56,8 @@ import DriverHubPage from "@/pages/driver-hub";
 import DriverAllocationPage from "@/pages/driver-allocation";
 import FinanceExpandedPage from "@/pages/finance-expanded";
 import SettingsPage from "@/pages/settings";
+import CustomersPage from "@/pages/customers";
+import VendorsPage from "@/pages/vendors";
 
 function PrivateRouter() {
   return (
@@ -77,9 +79,19 @@ function PrivateRouter() {
       <Route path="/rbac" component={RBACPage} />
 
       {/* Logistics ERP Routes */}
+      <Route path="/logistics/customers" component={CustomersPage} />
+      <Route path="/logistics/customers/new" component={CustomersPage} />
+      <Route path="/logistics/customers/:id" component={CustomersPage} />
+      <Route path="/logistics/customers/:id/edit" component={CustomersPage} />
+      <Route path="/logistics/vendors" component={VendorsPage} />
+      <Route path="/logistics/vendors/new" component={CustomersPage} />
+      <Route path="/logistics/vendors/:id" component={CustomersPage} />
+      <Route path="/logistics/vendors/:id/edit" component={CustomersPage} />
       <Route path="/logistics/routes" component={RoutesPage} />
       <Route path="/logistics/brands" component={RoutesPage} />
       <Route path="/logistics/outlets" component={RoutesPage} />
+      <Route path="/logistics/outlets/:id" component={CustomersPage} />
+      <Route path="/logistics/outlets/:id/edit" component={CustomersPage} />
       <Route path="/logistics/zones" component={ZonesPage} />
       <Route path="/logistics/contracts" component={ContractsPage} />
       <Route path="/logistics/fleet" component={FleetPage} />
