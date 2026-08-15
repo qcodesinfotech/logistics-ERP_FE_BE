@@ -81,6 +81,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Brands", url: "/logistics/brands", icon: Globe, menuKey: "routes" },
       { title: "Outlets & Customers", url: "/logistics/outlets", icon: Store, menuKey: "routes" },
       { title: "Vendor Customers", url: "/logistics/vendors", icon: Users, menuKey: "routes" },
+      { title: "Suppliers", url: "/logistics/suppliers", icon: Building2, menuKey: "suppliers" },
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
       { title: "Fleet & Assets", url: "/logistics/fleet", icon: Truck },
       { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },

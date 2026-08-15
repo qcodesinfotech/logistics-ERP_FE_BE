@@ -18,8 +18,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/status-badge";
 import { TableSkeleton } from "@/components/loading-skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
 import { usePermissions } from "@/contexts/permissions-context";
@@ -1735,258 +1738,398 @@ function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewP
         </div>
       </PageHeader>
 
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* Customer Information Column */}
-        <div className="md:col-span-2 space-y-6">
-          {/* Card 1: Identification */}
-          <Card>
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-base flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> {entityLabel} Identification</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">{entityLabel} Code</span>
-                <span className="font-mono font-semibold">{customer.customerCode || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Trade Name</span>
-                <span className="font-semibold">{customer.tradeName || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">{entityLabel} Type</span>
-                <span className="capitalize font-semibold">{(customer as any).customerType || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">{entityLabel} Category</span>
-                <span className="capitalize font-semibold">{(customer as any).customerCategory || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">CR Number</span>
-                <span className="font-semibold">{(customer as any).crNumber || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">VAT Number</span>
-                <span className="font-semibold">{(customer as any).vatNumber || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Status</span>
-                <div className="mt-1"><StatusBadge status={customer.status} /></div>
-              </div>
-            </CardContent>
-          </Card>
+      <Tabs defaultValue="profile" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="profile">Profile Details</TabsTrigger>
+          <TabsTrigger value="transactions">Transactions Ledger</TabsTrigger>
+        </TabsList>
 
-          {/* Card 2: Contact Information */}
-          <Card>
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-base flex items-center gap-2"><Phone className="h-5 w-5 text-primary" /> Contact Details</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Contact Person</span>
-                <span className="font-semibold">{customer.contactPerson || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Designation</span>
-                <span className="font-semibold">{(customer as any).designation || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Mobile Number</span>
-                <span className="font-semibold">{customer.phone || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">WhatsApp Number</span>
-                <span className="font-semibold">{(customer as any).whatsappNumber || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Email</span>
-                <span className="font-semibold">{customer.email || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Alternative Contact</span>
-                <span className="font-semibold">{(customer as any).alternativeContact || "N/A"}</span>
-              </div>
-              {(customer as any).contacts && (customer as any).contacts.length > 0 && (
-                <div className="sm:col-span-2 border-t pt-4 mt-2">
-                  <span className="text-xs text-muted-foreground block font-medium uppercase mb-2">Additional Contacts</span>
-                  <div className="space-y-2">
-                    {(customer as any).contacts.map((c: any, i: number) => (
-                      <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between text-sm p-2.5 bg-muted/40 rounded border border-muted/70">
-                        <div>
-                          <span className="font-semibold text-foreground">{c.name}</span>
-                          {c.designation && <span className="text-xs text-muted-foreground ml-2">({c.designation})</span>}
-                        </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1 sm:mt-0 font-mono">
-                          <span>📞 {c.phone}</span>
-                          {c.whatsapp && <span>💬 {c.whatsapp}</span>}
-                          {c.email && <span>📧 {c.email}</span>}
-                        </div>
-                      </div>
-                    ))}
+        <TabsContent value="profile">
+          <div className="grid gap-6 md:grid-cols-3">
+            {/* Customer Information Column */}
+            <div className="md:col-span-2 space-y-6">
+              {/* Card 1: Identification */}
+              <Card>
+                <CardHeader className="pb-3 border-b">
+                  <CardTitle className="text-base flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> {entityLabel} Identification</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">{entityLabel} Name</span>
+                    <span className="font-semibold">{customer.name}</span>
                   </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Trade Name</span>
+                    <span className="font-semibold">{customer.tradeName || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">{entityLabel} Type</span>
+                    <span className="capitalize font-semibold">{(customer as any).customerType || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">{entityLabel} Category</span>
+                    <span className="capitalize font-semibold">{(customer as any).customerCategory || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">CR Number</span>
+                    <span className="font-semibold">{(customer as any).crNumber || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">VAT Number</span>
+                    <span className="font-semibold">{(customer as any).vatNumber || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Status</span>
+                    <div className="mt-1"><StatusBadge status={customer.status} /></div>
+                  </div>
+                </CardContent>
+              </Card>
 
-          {/* Card 3: Address Details */}
-          <Card>
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-base flex items-center gap-2"><MapPin className="h-5 w-5 text-primary" /> Address & Location</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 grid gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Billing Address</span>
-                <p className="font-medium">{(customer as any).billingAddress || "N/A"}</p>
-              </div>
-              <div className="sm:col-span-2">
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Delivery Address</span>
-                <p className="font-medium">{(customer as any).deliveryAddress || "N/A"}</p>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Building / Road</span>
-                <span className="font-semibold">Building {(customer as any).buildingNo || "N/A"}, Road {(customer as any).roadStreet || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Area & City</span>
-                <span className="font-semibold">{(customer as any).area || "N/A"}, {(customer as any).city || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">Country</span>
-                <span className="font-semibold">{(customer as any).country || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground block font-medium uppercase">GPS Location</span>
-                {(customer as any).latitude && (customer as any).longitude ? (
-                  <a 
-                    href={`https://www.google.com/maps/search/?api=1&query=${(customer as any).latitude},${(customer as any).longitude}`}
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="text-primary underline text-sm font-semibold flex items-center gap-1.5 mt-1"
-                  >
-                    <MapPin className="h-4 w-4" /> View Map [{(customer as any).latitude}, {(customer as any).longitude}]
-                  </a>
-                ) : (
-                  <span className="text-muted-foreground italic">No GPS coordinates pinned</span>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Financial & Document Column */}
-        <div className="space-y-6">
-          {/* Card 4: Financial Ledger */}
-          <Card>
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-base flex items-center gap-2"><Landmark className="h-5 w-5 text-primary" /> Financial Profile</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-4">
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-sm font-medium text-muted-foreground">Currency</span>
-                <span className="font-bold">{(customer as any).currency || "BHD"}</span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-sm font-medium text-muted-foreground">Payment Terms</span>
-                <span className="font-semibold">{(customer as any).paymentTerms || "30 Days"}</span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-sm font-medium text-muted-foreground">Credit Limit</span>
-                <span className="font-semibold font-mono">
-                  {(customer as any).creditLimit ? `${parseFloat((customer as any).creditLimit).toFixed(3)} BD` : "No Limit"}
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-sm font-medium text-muted-foreground">Opening Balance</span>
-                <span className="font-semibold font-mono">
-                  {parseFloat((customer as any).openingBalance || "0").toFixed(3)} BD
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-sm font-medium text-muted-foreground">Current Outstanding</span>
-                <span className="font-bold text-amber-700 font-mono text-base">
-                  {parseFloat(customer.currentOutstanding || "0.000").toFixed(3)} BD
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-2">
-                <span className="text-sm font-medium text-muted-foreground">Bank Name</span>
-                <span className="font-semibold">{(customer as any).bankName || "N/A"}</span>
-              </div>
-              <div className="space-y-1">
-                <span className="text-xs text-muted-foreground font-medium uppercase">IBAN</span>
-                <div className="font-mono text-xs font-semibold bg-muted/40 p-1.5 rounded truncate">{(customer as any).iban || "N/A"}</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Card 5: Documents list */}
-          <Card>
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-base flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Customer Documents</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-3">
-              {/* CR Certificate */}
-              <div className="border rounded-md p-2.5 space-y-1 bg-muted/10">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-semibold">CR Certificate</span>
-                  {docs.crCertificate ? (
-                    <a href={docs.crCertificate.url} target="_blank" rel="noreferrer">
-                      <Button size="icon" variant="outline" className="h-6 w-6"><Download className="h-3 w-3" /></Button>
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground italic">Missing</span>
-                  )}
-                </div>
-                {docs.crCertificate && <p className="text-[10px] text-muted-foreground truncate">{docs.crCertificate.name}</p>}
-              </div>
-
-              {/* VAT Certificate */}
-              <div className="border rounded-md p-2.5 space-y-1 bg-muted/10">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-semibold">VAT Certificate</span>
-                  {docs.vatCertificate ? (
-                    <a href={docs.vatCertificate.url} target="_blank" rel="noreferrer">
-                      <Button size="icon" variant="outline" className="h-6 w-6"><Download className="h-3 w-3" /></Button>
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground italic">Missing</span>
-                  )}
-                </div>
-                {docs.vatCertificate && <p className="text-[10px] text-muted-foreground truncate">{docs.vatCertificate.name}</p>}
-              </div>
-
-              {/* Customer Agreement */}
-              <div className="border rounded-md p-2.5 space-y-1 bg-muted/10">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-semibold">Agreement</span>
-                  {docs.customerAgreement ? (
-                    <a href={docs.customerAgreement.url} target="_blank" rel="noreferrer">
-                      <Button size="icon" variant="outline" className="h-6 w-6"><Download className="h-3 w-3" /></Button>
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground italic">Missing</span>
-                  )}
-                </div>
-                {docs.customerAgreement && <p className="text-[10px] text-muted-foreground truncate">{docs.customerAgreement.name}</p>}
-              </div>
-
-              {/* Other Documents */}
-              {docs.otherDocuments && docs.otherDocuments.length > 0 && (
-                <div className="space-y-1.5 pt-2 border-t">
-                  <span className="text-xs font-semibold block text-muted-foreground uppercase">Other Files</span>
-                  {docs.otherDocuments.map((doc: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center text-[11px] border p-1.5 rounded bg-muted/5">
-                      <span className="truncate max-w-[180px] font-medium">{doc.name}</span>
-                      <a href={doc.url} target="_blank" rel="noreferrer">
-                        <Button size="icon" variant="ghost" className="h-5 w-5"><Download className="h-3.5 w-3.5" /></Button>
-                      </a>
+              {/* Card 2: Contact Information */}
+              <Card>
+                <CardHeader className="pb-3 border-b">
+                  <CardTitle className="text-base flex items-center gap-2"><Phone className="h-5 w-5 text-primary" /> Contact Details</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Contact Person</span>
+                    <span className="font-semibold">{customer.contactPerson || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Designation</span>
+                    <span className="font-semibold">{(customer as any).designation || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Mobile Number</span>
+                    <span className="font-semibold">{customer.phone || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">WhatsApp Number</span>
+                    <span className="font-semibold">{(customer as any).whatsappNumber || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Email</span>
+                    <span className="font-semibold">{customer.email || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Alternative Contact</span>
+                    <span className="font-semibold">{(customer as any).alternativeContact || "N/A"}</span>
+                  </div>
+                  {(customer as any).contacts && (customer as any).contacts.length > 0 && (
+                    <div className="sm:col-span-2 border-t pt-4 mt-2">
+                      <span className="text-xs text-muted-foreground block font-medium uppercase mb-2">Additional Contacts</span>
+                      <div className="space-y-2">
+                        {(customer as any).contacts.map((c: any, i: number) => (
+                          <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between text-sm p-2.5 bg-muted/40 rounded border border-muted/70">
+                            <div>
+                              <span className="font-semibold text-foreground">{c.name}</span>
+                              {c.designation && <span className="text-xs text-muted-foreground ml-2">({c.designation})</span>}
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1 sm:mt-0 font-mono">
+                              <span>📞 {c.phone}</span>
+                              {c.whatsapp && <span>💬 {c.whatsapp}</span>}
+                              {c.email && <span>📧 {c.email}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Card 3: Address Details */}
+              <Card>
+                <CardHeader className="pb-3 border-b">
+                  <CardTitle className="text-base flex items-center gap-2"><MapPin className="h-5 w-5 text-primary" /> Address & Location</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4 grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Billing Address</span>
+                    <p className="font-medium">{(customer as any).billingAddress || "N/A"}</p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Delivery Address</span>
+                    <p className="font-medium">{(customer as any).deliveryAddress || "N/A"}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Building / Road</span>
+                    <span className="font-semibold">Building {(customer as any).buildingNo || "N/A"}, Road {(customer as any).roadStreet || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Area & City</span>
+                    <span className="font-semibold">{(customer as any).area || "N/A"}, {(customer as any).city || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">Country</span>
+                    <span className="font-semibold">{(customer as any).country || "N/A"}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground block font-medium uppercase">GPS Location</span>
+                    {(customer as any).latitude && (customer as any).longitude ? (
+                      <a 
+                        href={`https://www.google.com/maps/search/?api=1&query=${(customer as any).latitude},${(customer as any).longitude}`}
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-primary underline text-sm font-semibold flex items-center gap-1.5 mt-1"
+                      >
+                        <MapPin className="h-4 w-4" /> View Map [{(customer as any).latitude}, {(customer as any).longitude}]
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground italic">No GPS coordinates pinned</span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Financial & Document Column */}
+            <div className="space-y-6">
+              {/* Card 4: Financial Ledger */}
+              <Card>
+                <CardHeader className="pb-3 border-b">
+                  <CardTitle className="text-base flex items-center gap-2"><Landmark className="h-5 w-5 text-primary" /> Financial Profile</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-4">
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">Currency</span>
+                    <span className="font-bold">{(customer as any).currency || "BHD"}</span>
+                  </div>
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">Payment Terms</span>
+                    <span className="font-semibold">{(customer as any).paymentTerms || "30 Days"}</span>
+                  </div>
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">Credit Limit</span>
+                    <span className="font-semibold font-mono">
+                      {(customer as any).creditLimit ? `${parseFloat((customer as any).creditLimit).toFixed(3)} BD` : "No Limit"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">Opening Balance</span>
+                    <span className="font-semibold font-mono">
+                      {parseFloat((customer as any).openingBalance || "0").toFixed(3)} BD
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">Current Outstanding</span>
+                    <span className="font-bold text-amber-700 font-mono text-base">
+                      {parseFloat(customer.currentOutstanding || "0.000").toFixed(3)} BD
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">Bank Name</span>
+                    <span className="font-semibold">{(customer as any).bankName || "N/A"}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground font-medium uppercase">IBAN</span>
+                    <div className="font-mono text-xs font-semibold bg-muted/40 p-1.5 rounded truncate">{(customer as any).iban || "N/A"}</div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Card 5: Documents list */}
+              <Card>
+                <CardHeader className="pb-3 border-b">
+                  <CardTitle className="text-base flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /> Customer Documents</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-3">
+                  {/* CR Certificate */}
+                  <div className="border rounded-md p-2.5 space-y-1 bg-muted/10">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-semibold">CR Certificate</span>
+                      {docs.crCertificate ? (
+                        <a href={docs.crCertificate.url} target="_blank" rel="noreferrer">
+                          <Button size="icon" variant="outline" className="h-6 w-6"><Download className="h-3 w-3" /></Button>
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground italic">Missing</span>
+                      )}
+                    </div>
+                    {docs.crCertificate && <p className="text-[10px] text-muted-foreground truncate">{docs.crCertificate.name}</p>}
+                  </div>
+
+                  {/* VAT Certificate */}
+                  <div className="border rounded-md p-2.5 space-y-1 bg-muted/10">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-semibold">VAT Certificate</span>
+                      {docs.vatCertificate ? (
+                        <a href={docs.vatCertificate.url} target="_blank" rel="noreferrer">
+                          <Button size="icon" variant="outline" className="h-6 w-6"><Download className="h-3 w-3" /></Button>
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground italic">Missing</span>
+                      )}
+                    </div>
+                    {docs.vatCertificate && <p className="text-[10px] text-muted-foreground truncate">{docs.vatCertificate.name}</p>}
+                  </div>
+
+                  {/* Customer Agreement */}
+                  <div className="border rounded-md p-2.5 space-y-1 bg-muted/10">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-semibold">Customer Agreement</span>
+                      {docs.customerAgreement ? (
+                        <a href={docs.customerAgreement.url} target="_blank" rel="noreferrer">
+                          <Button size="icon" variant="outline" className="h-6 w-6"><Download className="h-3 w-3" /></Button>
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground italic">Missing</span>
+                      )}
+                    </div>
+                    {docs.customerAgreement && <p className="text-[10px] text-muted-foreground truncate">{docs.customerAgreement.name}</p>}
+                  </div>
+
+                  {/* Other Documents */}
+                  {docs.otherDocuments && docs.otherDocuments.length > 0 && (
+                    <div className="space-y-1.5 pt-2 border-t">
+                      <span className="text-xs font-semibold block text-muted-foreground uppercase">Other Files</span>
+                      {docs.otherDocuments.map((doc: any, i: number) => (
+                        <div key={i} className="flex justify-between items-center text-[11px] border p-1.5 rounded bg-muted/5">
+                          <span className="truncate max-w-[180px] font-medium">{doc.name}</span>
+                          <a href={doc.url} target="_blank" rel="noreferrer">
+                            <Button size="icon" variant="ghost" className="h-5 w-5"><Download className="h-3.5 w-3.5" /></Button>
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="transactions">
+          <CustomerTransactionsLedger id={id} />
+        </TabsContent>
+      </Tabs>
     </div>
+  );
+}
+
+interface CustomerTransactionsLedgerProps {
+  id: string;
+}
+
+function CustomerTransactionsLedger({ id }: CustomerTransactionsLedgerProps) {
+  // Query logistics orders for this customer
+  const { data: orders = [], isLoading: ordersLoading } = useQuery<any[]>({
+    queryKey: [`/api/orders?customerId=${id}`],
+  });
+
+  // Query contract invoices for this customer
+  const { data: contractInvoices = [], isLoading: contractsLoading } = useQuery<any[]>({
+    queryKey: [`/api/contract-invoices?customerId=${id}`],
+  });
+
+  // Query brand invoices for this customer/outlet
+  const { data: brandInvoices = [], isLoading: brandsLoading } = useQuery<any[]>({
+    queryKey: [`/api/brand-invoices?outletId=${id}`],
+  });
+
+  const isLoading = ordersLoading || contractsLoading || brandsLoading;
+
+  const consolidatedLedger: {
+    date: Date;
+    type: string;
+    refNo: string;
+    amount: number;
+    status: string;
+  }[] = [];
+
+  // 1. Add Logistics Orders
+  orders.forEach(o => {
+    consolidatedLedger.push({
+      date: new Date(o.orderDate || o.createdAt || Date.now()),
+      type: "Logistics Order",
+      refNo: o.orderNumber || "ORD",
+      amount: parseFloat(o.grandTotal || "0"),
+      status: o.status || "pending",
+    });
+  });
+
+  // 2. Add Contract Invoices
+  contractInvoices.forEach(c => {
+    consolidatedLedger.push({
+      date: new Date(c.invoiceDate || c.createdAt || Date.now()),
+      type: "Contract Invoice",
+      refNo: c.invoiceNumber || "INV",
+      amount: parseFloat(c.totalAmount || "0"),
+      status: c.status || "pending",
+    });
+  });
+
+  // 3. Add Brand Invoices
+  brandInvoices.forEach(b => {
+    consolidatedLedger.push({
+      date: new Date(b.periodEnd || b.createdAt || Date.now()),
+      type: "Brand Invoice",
+      refNo: b.invoiceNumber || "INV-BRD",
+      amount: parseFloat(b.totalAmount || "0"),
+      status: b.status || "pending",
+    });
+  });
+
+  // Sort consolidated ledger chronologically (newest first)
+  consolidatedLedger.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="text-base">Customer Transactions Ledger</CardTitle>
+        <CardDescription>Unified history of logistics orders, contract invoices, and brand invoices</CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="p-10 text-center text-muted-foreground">Loading ledger transactions...</div>
+        ) : consolidatedLedger.length === 0 ? (
+          <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
+            <FileText className="h-8 w-8 opacity-20" />
+            <span>No transactions recorded for this customer.</span>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Reference No</TableHead>
+                <TableHead className="text-right font-semibold">Amount</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {consolidatedLedger.map((item, index) => (
+                <TableRow key={index}>
+                  <TableCell className="font-mono text-xs">
+                    {item.date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={item.type === "Logistics Order" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-purple-50 text-purple-700 border-purple-200"}>
+                      {item.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-mono font-medium">{item.refNo}</TableCell>
+                  <TableCell className="text-right font-mono font-semibold text-foreground">
+                    {item.amount.toFixed(3)} BD
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      className={
+                        ["paid", "completed", "delivered", "confirmed"].includes(item.status)
+                          ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                          : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                      }
+                    >
+                      {item.status}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
