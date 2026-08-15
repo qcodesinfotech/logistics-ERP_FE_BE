@@ -995,23 +995,37 @@ export class DatabaseStorage implements IStorage {
 
   // Suppliers
   async getSuppliers(scope?: { companyId?: string | null; shopId?: string | null; branchId?: string | null } | null): Promise<Supplier[]> {
-    return [];
+    const conditions = [];
+    if (scope?.companyId) conditions.push(eq(suppliers.companyId, scope.companyId));
+    if (scope?.shopId) conditions.push(eq(suppliers.shopId, scope.shopId));
+    if (scope?.branchId) conditions.push(eq(suppliers.branchId, scope.branchId));
+    
+    if (conditions.length > 0) {
+      return db.select().from(suppliers).where(and(...conditions)).orderBy(desc(suppliers.createDate));
+    }
+    return db.select().from(suppliers).orderBy(desc(suppliers.createDate));
   }
 
   async getSupplier(id: string): Promise<Supplier | undefined> {
-    return undefined;
+    const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, id));
+    return supplier || undefined;
   }
 
   async createSupplier(data: InsertSupplier): Promise<Supplier> {
-    return {} as any;
+    const [supplier] = await db.insert(suppliers).values({
+      ...data,
+      currentBalance: data.openingBalance || "0.000",
+    }).returning();
+    return supplier;
   }
 
   async updateSupplier(id: string, data: Partial<InsertSupplier>): Promise<Supplier | undefined> {
-    return undefined;
+    const [supplier] = await db.update(suppliers).set(data).where(eq(suppliers.id, id)).returning();
+    return supplier || undefined;
   }
 
   async deleteSupplier(id: string): Promise<void> {
-    return;
+    await db.delete(suppliers).where(eq(suppliers.id, id));
   }
 
   // Products
