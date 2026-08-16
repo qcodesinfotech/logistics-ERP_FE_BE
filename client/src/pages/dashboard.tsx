@@ -65,11 +65,11 @@ export default function Dashboard() {
 
   // Fetch bank accounts to show balances
   const { data: bankAccounts = [], isLoading: accountsLoading } = useQuery<BankAccount[]>({
-    queryKey: ["/api/bank/accounts", currentBranchId],
+    queryKey: ["/api/bank-accounts", currentBranchId],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (currentBranchId) params.append("branchId", currentBranchId);
-      const url = `/api/bank/accounts${params.toString() ? `?${params.toString()}` : ""}`;
+      const url = `/api/bank-accounts${params.toString() ? `?${params.toString()}` : ""}`;
       const res = await apiRequest("GET", url);
       return res.json();
     },

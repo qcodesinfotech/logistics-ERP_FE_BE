@@ -32,7 +32,7 @@ export default function VendorsPage() {
     mutationFn: (id: string) => apiRequest("DELETE", `/api/outlets/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
-      toast({ title: "Vendor Customer deleted successfully" });
+      toast({ title: "Vendor deleted successfully" });
     },
     onError: (error) => {
       toast({ title: "Failed to delete vendor", description: getErrorMessage(error), variant: "destructive" });
@@ -55,14 +55,14 @@ export default function VendorsPage() {
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
             <Users className="h-6 w-6 text-primary" />
-            Vendor Customers
+            Vendors
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage logistics vendor customers.
+            Manage logistics vendors.
           </p>
         </div>
         <Button onClick={() => setLocation("/logistics/vendors/new")} className="gap-2">
-          <Plus className="h-4 w-4" /> Add Vendor Customer
+          <Plus className="h-4 w-4" /> Add Vendor
         </Button>
       </div>
 
@@ -72,28 +72,28 @@ export default function VendorsPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base">
-                Vendor Customers List
+                Vendors List
               </CardTitle>
-              <CardDescription>{vendors.length} vendor customer{vendors.length !== 1 ? "s" : ""}</CardDescription>
+              <CardDescription>{vendors.length} vendor{vendors.length !== 1 ? "s" : ""}</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-10 text-center text-muted-foreground">Loading vendor customers...</div>
+            <div className="p-10 text-center text-muted-foreground">Loading vendors...</div>
           ) : vendors.length === 0 ? (
             <div className="p-14 flex flex-col items-center gap-3 text-muted-foreground">
               <Users className="h-10 w-10 opacity-25" />
-              <p className="text-sm">No vendor customers added yet.</p>
+              <p className="text-sm">No vendors added yet.</p>
               <Button variant="outline" onClick={() => setLocation("/logistics/vendors/new")} className="gap-2 mt-1">
-                <Plus className="h-4 w-4" /> Add Vendor Customer
+                <Plus className="h-4 w-4" /> Add Vendor
               </Button>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Vendor Customer Name</TableHead>
+                  <TableHead>Vendor Name</TableHead>
                   <TableHead>Code</TableHead>
                   <TableHead>Phone / Contact</TableHead>
                   <TableHead>Status</TableHead>
@@ -134,11 +134,11 @@ export default function VendorsPage() {
                         <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/vendors/${vendor.id}`)} title="View Details">
                           <Eye className="h-4 w-4 text-muted-foreground" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/vendors/${vendor.id}/edit`)} title="Edit Vendor Customer">
+                        <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/vendors/${vendor.id}/edit`)} title="Edit Vendor">
                           <Edit className="h-4 w-4 text-blue-600" />
                         </Button>
                         <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
-                          onClick={() => setDeleteVendorId(vendor.id)} title="Delete Vendor Customer">
+                          onClick={() => setDeleteVendorId(vendor.id)} title="Delete Vendor">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -157,7 +157,7 @@ export default function VendorsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the vendor customer record and its synced outlet. This action cannot be undone.
+              This will permanently delete the vendor record and its synced outlet. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -8595,10 +8595,11 @@ export async function registerRoutes(
       const capacity = parseFloat(vehicle?.capacity || "0");
       const usedCapacity = parseFloat(truckAssign.usedCapacity?.toString() || "0");
       const weight = parseFloat(outletWeight || "0");
+      const force = req.body.force === true;
 
-      if (capacity > 0 && usedCapacity + weight > capacity) {
+      if (!force && capacity > 0 && usedCapacity + weight > capacity) {
         return res.status(422).json({
-          error: `Capacity exceeded: Adding this (${weight.toFixed(3)}T) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${capacity}T. Current load: ${usedCapacity.toFixed(3)}T.`
+          error: `Capacity exceeded: Adding this (${weight.toFixed(3)}) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${capacity}. Current load: ${usedCapacity.toFixed(3)}.`
         });
       }
 
@@ -9392,93 +9393,54 @@ export async function registerRoutes(
         doc.moveDown(1.5);
       }
 
-      if (includeAttachments && podUrls.length > 0) {
-        doc.addPage();
-        doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Delivery (POD) Images", { underline: true });
-        doc.moveDown(1);
-
-        let imgX = 40;
-        let imgY = doc.y;
-
-        for (const url of podUrls) {
-          try {
-            if (url.startsWith("/uploads/")) {
-              const localPath = path.join(process.cwd(), url);
-              if (fs.existsSync(localPath)) {
-                doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
-                imgX += 200;
-                if (imgX > 450) {
-                  imgX = 40;
-                  imgY += 200;
-                }
-              } else {
-                doc.fillColor("#EF4444").text(`[Image missing on disk: ${url}]`, imgX, imgY);
-                imgX += 200;
-              }
-            } else if (url.startsWith("http")) {
-              const response = await fetch(url);
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-              doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
-              imgX += 200;
-              if (imgX > 450) {
-                imgX = 40;
-                imgY += 200;
-              }
-            }
-          } catch (err: any) {
-            doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POD Image: ${err.message}]`, imgX, imgY);
-            imgX += 200;
-            if (imgX > 450) {
-              imgX = 40;
-              imgY += 200;
-            }
-          }
-        }
-      }
-
       const potUrls = firstRow.potUrl ? firstRow.potUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
-      if (includeAttachments && potUrls.length > 0) {
+      
+      const allAttachments = [
+        ...podUrls.map(url => ({ type: "POD", url })),
+        ...potUrls.map(url => ({ type: "POT", url }))
+      ];
+
+      if (includeAttachments && allAttachments.length > 0) {
         doc.addPage();
-        doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Temperature (POT) Images", { underline: true });
-        doc.moveDown(1);
+        doc.fillColor("#1E3A8A").fontSize(12).text("Delivery Attachments (POD & POT)", { underline: true });
+        doc.moveDown(1.5);
 
         let imgX = 40;
         let imgY = doc.y;
 
-        for (const url of potUrls) {
+        for (const att of allAttachments) {
+          const { type, url } = att;
           try {
+            if (imgY > 650) {
+              doc.addPage();
+              imgY = 40;
+              imgX = 40;
+            }
             if (url.startsWith("/uploads/")) {
-              const localPath = path.join(process.cwd(), url);
+              const localPath = path.join(process.cwd(), decodeURIComponent(url));
               if (fs.existsSync(localPath)) {
+                doc.fillColor("#4B5563").fontSize(10).text(`${type} Image`, imgX, imgY - 15);
                 doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
                 imgX += 200;
-                if (imgX > 450) {
-                  imgX = 40;
-                  imgY += 200;
-                }
+                if (imgX > 450) { imgX = 40; imgY += 220; }
               } else {
-                doc.fillColor("#EF4444").text(`[Image missing on disk: ${url}]`, imgX, imgY);
+                doc.fillColor("#EF4444").fontSize(9).text(`[Missing on disk: ${url}]`, imgX, imgY);
                 imgX += 200;
+                if (imgX > 450) { imgX = 40; imgY += 220; }
               }
             } else if (url.startsWith("http")) {
               const response = await fetch(url);
               const arrayBuffer = await response.arrayBuffer();
               const buffer = Buffer.from(arrayBuffer);
+              doc.fillColor("#4B5563").fontSize(10).text(`${type} Image`, imgX, imgY - 15);
               doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
               imgX += 200;
-              if (imgX > 450) {
-                imgX = 40;
-                imgY += 200;
-              }
+              if (imgX > 450) { imgX = 40; imgY += 220; }
             }
           } catch (err: any) {
-            doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POT Image: ${err.message}]`, imgX, imgY);
+            doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load ${type}: ${err.message}]`, imgX, imgY);
             imgX += 200;
-            if (imgX > 450) {
-              imgX = 40;
-              imgY += 200;
-            }
+            if (imgX > 450) { imgX = 40; imgY += 220; }
           }
         }
       }
