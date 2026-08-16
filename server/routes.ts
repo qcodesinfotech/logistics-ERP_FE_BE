@@ -7812,7 +7812,7 @@ export async function registerRoutes(
     try {
       const payload = {
         ...req.body,
-        driverId: req.body.driverId || req.user?.id,
+        driverId: req.body.driverId || req.user?.employeeId || req.user?.id,
       };
       const log = await storage.createVehicleMaintenance(payload);
       res.status(201).json(log);
@@ -7839,7 +7839,7 @@ export async function registerRoutes(
     try {
       const payload = {
         ...req.body,
-        driverId: req.body.driverId || req.user?.id,
+        driverId: req.body.driverId || req.user?.employeeId || req.user?.id,
       };
       const log = await storage.createFuelLog(payload);
       res.status(201).json(log);
