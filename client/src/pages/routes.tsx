@@ -408,10 +408,10 @@ export default function RoutesPage() {
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
             <RouteIcon className="h-6 w-6 text-primary" />
-            Routes, Brands & Outlets/Customers
+            Routes, Brands & Outlets
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage logistics routes, brands, and Outlets/Customers.
+            Manage logistics routes, brands, and their delivery outlets.
           </p>
         </div>
       </div>
@@ -428,7 +428,7 @@ export default function RoutesPage() {
           </TabsTrigger>
           <TabsTrigger value="outlets" className="gap-2">
             <MapPin className="h-4 w-4" />
-            Outlets/Customers
+            Outlets
           </TabsTrigger>
         </TabsList>
 
@@ -629,8 +629,8 @@ export default function RoutesPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button onClick={() => setLocation("/logistics/customers/new")} className="gap-2 shrink-0 ml-auto">
-                    <Plus className="h-4 w-4" /> Add Outlet/Customer
+                  <Button onClick={() => openOutletDialog()} className="gap-2 shrink-0 ml-auto">
+                    <Plus className="h-4 w-4" /> Add Outlet
                   </Button>
                 </div>
               </CardContent>
@@ -642,9 +642,9 @@ export default function RoutesPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-base">
-                      Outlets/Customers List
+                      Outlets List
                     </CardTitle>
-                    <CardDescription>{filteredOutlets.length} outlet/customer{filteredOutlets.length !== 1 ? "s" : ""}</CardDescription>
+                    <CardDescription>{filteredOutlets.length} outlet{filteredOutlets.length !== 1 ? "s" : ""}</CardDescription>
                   </div>
                 </div>
               </CardHeader>
@@ -654,16 +654,16 @@ export default function RoutesPage() {
                 ) : filteredOutlets.length === 0 ? (
                   <div className="p-14 flex flex-col items-center gap-3 text-muted-foreground">
                     <MapPin className="h-10 w-10 opacity-25" />
-                    <p className="text-sm">No outlets/customers match the selected filters.</p>
-                    <Button variant="outline" onClick={() => setLocation("/logistics/customers/new")} className="gap-2 mt-1">
-                      <Plus className="h-4 w-4" /> Add Outlet/Customer
+                    <p className="text-sm">No outlets match the selected filters.</p>
+                    <Button variant="outline" onClick={() => openOutletDialog()} className="gap-2 mt-1">
+                      <Plus className="h-4 w-4" /> Add Outlet
                     </Button>
                   </div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Outlet/Customer Name</TableHead>
+                        <TableHead>Outlet Name</TableHead>
                         <TableHead>Route / Brand</TableHead>
                         <TableHead>Code</TableHead>
                         <TableHead>Phone / Contact</TableHead>
@@ -677,11 +677,7 @@ export default function RoutesPage() {
                         const brand = brands.find(b => b.id === outlet.brandId);
                         
                         return (
-                          <TableRow 
-                            key={outlet.id} 
-                            onClick={() => setLocation(`/logistics/customers/${outlet.id}`)}
-                            className="cursor-pointer hover:bg-accent/30 transition-colors"
-                          >
+                          <TableRow key={outlet.id} className="hover:bg-accent/30 transition-colors">
                             <TableCell>
                               <div className="font-medium">{outlet.name}</div>
                               {outlet.address && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{outlet.address}</div>}
@@ -709,16 +705,13 @@ export default function RoutesPage() {
                                 {outlet.status}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                            <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/customers/${outlet.id}`)} title="View Details">
-                                  <Eye className="h-4 w-4 text-muted-foreground" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/customers/${outlet.id}/edit`)} title="Edit Outlet / Customer">
-                                  <Edit className="h-4 w-4 text-blue-600" />
+                                <Button variant="ghost" size="icon" onClick={() => openOutletDialog(outlet)}>
+                                  <Edit className="h-4 w-4" />
                                 </Button>
                                 <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
-                                  onClick={() => setDeleteOutletId(outlet.id)} title="Delete Outlet">
+                                  onClick={() => setDeleteOutletId(outlet.id)}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>

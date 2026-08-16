@@ -79,7 +79,8 @@ const menuGroups: MenuGroup[] = [
     items: [
       { title: "Routes", url: "/logistics/routes", icon: Route, menuKey: "routes" },
       { title: "Brands", url: "/logistics/brands", icon: Globe, menuKey: "routes" },
-      { title: "Outlets & Customers", url: "/logistics/outlets", icon: Store, menuKey: "routes" },
+      { title: "Outlets", url: "/logistics/outlets", icon: Store, menuKey: "routes" },
+      { title: "Customers", url: "/logistics/customers", icon: Users, menuKey: "routes" },
       { title: "Vendor Customers", url: "/logistics/vendors", icon: Users, menuKey: "routes" },
       { title: "Suppliers", url: "/logistics/suppliers", icon: Building2, menuKey: "suppliers" },
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
