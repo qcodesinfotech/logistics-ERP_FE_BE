@@ -2011,7 +2011,7 @@ interface CustomerTransactionsLedgerProps {
   id: string;
 }
 
-function CustomerTransactionsLedger({ id }: CustomerTransactionsLedgerProps) {
+export function CustomerTransactionsLedger({ id }: CustomerTransactionsLedgerProps) {
   // Query logistics orders for this customer
   const { data: orders = [], isLoading: ordersLoading } = useQuery<any[]>({
     queryKey: [`/api/orders?customerId=${id}`],

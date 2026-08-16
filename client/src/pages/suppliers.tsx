@@ -446,23 +446,6 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
     queryKey: [`/api/suppliers/${id}`],
   });
 
-  // Queries for Supplier Transactions
-  const { data: purchases = [], isLoading: purchasesLoading } = useQuery<Purchase[]>({
-    queryKey: ["/api/purchases"],
-  });
-
-  const { data: paymentTransactions = [], isLoading: paymentsLoading } = useQuery<any[]>({
-    queryKey: [`/api/suppliers/${id}/payment-transactions`],
-  });
-
-  const { data: obPayments = [], isLoading: obLoading } = useQuery<any[]>({
-    queryKey: [`/api/suppliers/${id}/opening-balance-payments`],
-  });
-
-  const { data: creditRefunds = [], isLoading: refundsLoading } = useQuery<any[]>({
-    queryKey: [`/api/suppliers/${id}/credit-refunds`],
-  });
-
   if (isLoading) {
     return (
       <div className="p-10 text-center">
@@ -485,67 +468,6 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
       </div>
     );
   }
-
-  // Filter supplier purchase invoices
-  const supplierPurchases = purchases.filter(p => p.supplierId === id);
-
-  // Consolidate all supplier ledger entries chronologically
-  const consolidatedLedger: {
-    date: Date;
-    type: string;
-    refNo: string;
-    debit?: number; // Payments/Refunds decrease liability
-    credit?: number; // Purchase invoices increase liability
-    status?: string;
-  }[] = [];
-
-  // 1. Add Purchase Invoices (increases liability -> Credit)
-  supplierPurchases.forEach(p => {
-    consolidatedLedger.push({
-      date: new Date(p.purchaseDate || p.date || Date.now()),
-      type: "Purchase Invoice",
-      refNo: p.purchaseNumber,
-      credit: parseFloat(p.grandTotal || p.total || p.subtotal || "0"),
-      status: p.paymentStatus || "pending",
-    });
-  });
-
-  // 2. Add Supplier Payments (decreases liability -> Debit)
-  paymentTransactions.forEach(t => {
-    consolidatedLedger.push({
-      date: new Date(t.date || t.createDate || Date.now()),
-      type: "Supplier Payment",
-      refNo: t.entryNumber || t.reference || "PAY",
-      debit: parseFloat(t.amount || "0"),
-      status: "paid",
-    });
-  });
-
-  // 3. Add Opening Balance Payments (decreases liability -> Debit)
-  obPayments.forEach(t => {
-    consolidatedLedger.push({
-      date: new Date(t.date || t.createDate || Date.now()),
-      type: "Opening Balance Payment",
-      refNo: t.entryNumber || t.reference || "OB-PAY",
-      debit: parseFloat(t.amount || "0"),
-      status: "paid",
-    });
-  });
-
-  // 4. Add Credit Refunds (decreases liability -> Debit)
-  creditRefunds.forEach(t => {
-    consolidatedLedger.push({
-      date: new Date(t.refundDate || t.createDate || Date.now()),
-      type: "Credit Refund",
-      refNo: t.refundNumber || "RFD",
-      debit: parseFloat(t.amount || "0"),
-      status: "refunded",
-    });
-  });
-
-  // Sort consolidated ledger chronologically (newest first)
-  consolidatedLedger.sort((a, b) => b.date.getTime() - a.date.getTime());
-
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <PageHeader
@@ -640,71 +562,156 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
 
         {/* Transactions Tab */}
         <TabsContent value="transactions">
-          <Card>
-            <CardHeader className="pb-3 border-b">
-              <CardTitle className="text-base">Supplier Transactions Ledger</CardTitle>
-              <CardDescription>Chronological purchase and payment transactions history</CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              {purchasesLoading || paymentsLoading || obLoading || refundsLoading ? (
-                <div className="p-10 text-center text-muted-foreground">Loading ledger entries...</div>
-              ) : consolidatedLedger.length === 0 ? (
-                <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
-                  <FileText className="h-8 w-8 opacity-20" />
-                  <span>No transactions recorded for this supplier.</span>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Ref No / ID</TableHead>
-                      <TableHead className="text-right">Debit (Paid/Ref)</TableHead>
-                      <TableHead className="text-right">Credit (Purchased)</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {consolidatedLedger.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="font-mono text-xs">
-                          {item.date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={item.type.includes("Payment") ? "bg-green-50 text-green-700 border-green-200" : "bg-blue-50 text-blue-700 border-blue-200"}>
-                            {item.type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono font-medium">{item.refNo}</TableCell>
-                        <TableCell className="text-right font-mono font-semibold text-green-700">
-                          {item.debit ? `${item.debit.toFixed(3)} BD` : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-semibold text-blue-700">
-                          {item.credit ? `${item.credit.toFixed(3)} BD` : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {item.status ? (
-                            <Badge
-                              className={
-                                ["paid", "refunded", "completed"].includes(item.status)
-                                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                                  : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-                              }
-                            >
-                              {item.status}
-                            </Badge>
-                          ) : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+          <SupplierTransactionsLedger id={id} />
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export function SupplierTransactionsLedger({ id }: { id: string }) {
+  // Queries for Supplier Transactions
+  const { data: purchases = [], isLoading: purchasesLoading } = useQuery<Purchase[]>({
+    queryKey: ["/api/purchases"],
+  });
+
+  const { data: paymentTransactions = [], isLoading: paymentsLoading } = useQuery<any[]>({
+    queryKey: [`/api/suppliers/${id}/payment-transactions`],
+  });
+
+  const { data: obPayments = [], isLoading: obLoading } = useQuery<any[]>({
+    queryKey: [`/api/suppliers/${id}/opening-balance-payments`],
+  });
+
+  const { data: creditRefunds = [], isLoading: refundsLoading } = useQuery<any[]>({
+    queryKey: [`/api/suppliers/${id}/credit-refunds`],
+  });
+
+  const isLoading = purchasesLoading || paymentsLoading || obLoading || refundsLoading;
+
+  // Filter supplier purchase invoices
+  const supplierPurchases = purchases.filter(p => p.supplierId === id);
+
+  // Consolidate all supplier ledger entries chronologically
+  const consolidatedLedger: {
+    date: Date;
+    type: string;
+    refNo: string;
+    debit?: number; // Payments/Refunds decrease liability
+    credit?: number; // Purchase invoices increase liability
+    status?: string;
+  }[] = [];
+
+  // 1. Add Purchase Invoices (increases liability -> Credit)
+  supplierPurchases.forEach(p => {
+    consolidatedLedger.push({
+      date: new Date(p.purchaseDate || p.date || Date.now()),
+      type: "Purchase Invoice",
+      refNo: p.purchaseNumber,
+      credit: parseFloat(p.grandTotal || p.total || p.subtotal || "0"),
+      status: p.paymentStatus || "pending",
+    });
+  });
+
+  // 2. Add Supplier Payments (decreases liability -> Debit)
+  paymentTransactions.forEach(t => {
+    consolidatedLedger.push({
+      date: new Date(t.date || t.createDate || Date.now()),
+      type: "Supplier Payment",
+      refNo: t.entryNumber || t.reference || "PAY",
+      debit: parseFloat(t.amount || "0"),
+      status: "paid",
+    });
+  });
+
+  // 3. Add Opening Balance Payments (decreases liability -> Debit)
+  obPayments.forEach(t => {
+    consolidatedLedger.push({
+      date: new Date(t.date || t.createDate || Date.now()),
+      type: "Opening Balance Payment",
+      refNo: t.entryNumber || t.reference || "OB-PAY",
+      debit: parseFloat(t.amount || "0"),
+      status: "paid",
+    });
+  });
+
+  // 4. Add Credit Refunds (decreases liability -> Debit)
+  creditRefunds.forEach(t => {
+    consolidatedLedger.push({
+      date: new Date(t.refundDate || t.createDate || Date.now()),
+      type: "Credit Refund",
+      refNo: t.refundNumber || "RFD",
+      debit: parseFloat(t.amount || "0"),
+      status: "refunded",
+    });
+  });
+
+  // Sort consolidated ledger chronologically (newest first)
+  consolidatedLedger.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="text-base">Supplier Transactions Ledger</CardTitle>
+        <CardDescription>Chronological purchase and payment transactions history</CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="p-10 text-center text-muted-foreground">Loading ledger entries...</div>
+        ) : consolidatedLedger.length === 0 ? (
+          <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
+            <FileText className="h-8 w-8 opacity-20" />
+            <span>No transactions recorded for this supplier.</span>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Ref No / ID</TableHead>
+                <TableHead className="text-right">Debit (Paid/Ref)</TableHead>
+                <TableHead className="text-right">Credit (Purchased)</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {consolidatedLedger.map((item, index) => (
+                <TableRow key={index}>
+                  <TableCell className="font-mono text-xs">
+                    {item.date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={item.type.includes("Payment") ? "bg-green-50 text-green-700 border-green-200" : "bg-blue-50 text-blue-700 border-blue-200"}>
+                      {item.type}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-mono font-medium">{item.refNo}</TableCell>
+                  <TableCell className="text-right font-mono font-semibold text-green-700">
+                    {item.debit ? `${item.debit.toFixed(3)} BD` : "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-semibold text-blue-700">
+                    {item.credit ? `${item.credit.toFixed(3)} BD` : "—"}
+                  </TableCell>
+                  <TableCell>
+                    {item.status ? (
+                      <Badge
+                        className={
+                          ["paid", "refunded", "completed"].includes(item.status)
+                            ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                            : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                        }
+                      >
+                        {item.status}
+                      </Badge>
+                    ) : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }

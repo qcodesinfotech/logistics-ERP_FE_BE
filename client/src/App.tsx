@@ -59,6 +59,7 @@ import SettingsPage from "@/pages/settings";
 import CustomersPage from "@/pages/customers";
 import VendorsPage from "@/pages/vendors";
 import SuppliersPage from "@/pages/suppliers";
+import TransactionsPage from "@/pages/transactions";
 
 function PrivateRouter() {
   return (
@@ -93,6 +94,7 @@ function PrivateRouter() {
       <Route path="/logistics/outlets" component={RoutesPage} />
       <Route path="/logistics/suppliers" component={SuppliersPage} />
       <Route path="/logistics/suppliers/:id" component={SuppliersPage} />
+      <Route path="/logistics/transactions" component={TransactionsPage} />
       <Route path="/logistics/zones" component={ZonesPage} />
       <Route path="/logistics/contracts" component={ContractsPage} />
       <Route path="/logistics/fleet" component={FleetPage} />

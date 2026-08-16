@@ -26,7 +26,8 @@ import {
   FileCheck,
   Route,
   Globe,
-  Store
+  Store,
+  History
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { usePermissions } from "@/contexts/permissions-context";
@@ -104,6 +105,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Contract Invoices", url: "/logistics/contract-invoices", icon: Receipt },
       { title: "Brand Invoices", url: "/logistics/brand-invoices", icon: Receipt },
       { title: "Logistics Finance", url: "/logistics/finance", icon: Calculator },
+      { title: "Transactions", url: "/logistics/transactions", icon: History },
     ],
   },
   {
