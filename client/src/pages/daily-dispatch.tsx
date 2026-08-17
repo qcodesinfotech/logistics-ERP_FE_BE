@@ -1932,7 +1932,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     // Calculate total weight per outlet (sum of item weights) and sort heaviest first
     const outletRows = outlets.map((outlet: any) => {
       const totalWeight = outlet.items.reduce((sum: number, item: any) => {
-        return sum + parseFloat(item.weight || item.totalDelivered || "0");
+        return sum + parseFloat(item.requestedQty || item.weight || item.totalDelivered || "0");
       }, 0);
       // Find current truck assignment for this outlet
       const assignment = outletAssignments.find((oa: any) =>
@@ -2010,20 +2010,22 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
           truckAssignmentId: truckAssignId,
           outletWeight: weightT.toFixed(3),
           sheetId: boardSheetId!,
-          storageType
+          storageType,
+          force: true
         }
       });
       return;
     } else if (capCarton === 0 && cap > 0 && used + weightT > cap) {
       setPendingAssignment({
         title: "Capacity Exceeded!",
-        description: `Adding ${outlet.outletCode} (${weightT.toFixed(2)}T) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}T.\nCurrent load: ${used.toFixed(2)}T.\n\nDo you want to proceed anyway?`,
+        description: `Adding ${outlet.outletCode} (${weightT.toFixed(2)}) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}.\nCurrent load: ${used.toFixed(2)}.\n\nDo you want to proceed anyway?`,
         payload: {
           outletCode: outlet.outletCode,
           truckAssignmentId: truckAssignId,
           outletWeight: weightT.toFixed(3),
           sheetId: boardSheetId!,
-          storageType
+          storageType,
+          force: true
         }
       });
       return;
@@ -2270,7 +2272,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                         <TableHeader>
                           <TableRow className="bg-muted/30">
                             <TableHead className="pl-4">Outlet</TableHead>
-                            <TableHead className="text-right">Total Weight</TableHead>
+                            <TableHead className="text-right">Total Qty (Items)</TableHead>
                             <TableHead className="text-right pr-4">Assigned Truck</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -2306,8 +2308,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     </div>
                                   </TableCell>
                                   <TableCell className="text-right">
-                                    <span className={`font-mono text-sm font-semibold ${outletWeightT > 10 ? "text-amber-600" : "text-foreground"}`}>
-                                      {outletWeightT.toFixed(3)} T
+                                    <span className={`font-mono text-sm font-semibold ${outletWeightT > 50 ? "text-amber-600" : "text-foreground"}`}>
+                                      {Number(outletWeightT.toFixed(3))}
                                     </span>
                                   </TableCell>
                                   <TableCell className="text-right pr-4">
@@ -2416,7 +2418,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                           ↳ {st} Items ({stItems.length})
                                         </TableCell>
                                         <TableCell className="text-right text-xs font-mono text-muted-foreground border-t-0 py-2">
-                                          {stWeightT.toFixed(3)} T
+                                          {stWeightT.toFixed(3)}
                                         </TableCell>
                                         <TableCell className="text-right pr-4 border-t-0 py-2">
                                           {isStCompleted ? (
@@ -2918,6 +2920,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; pods: {url: string, date: string}[] }>({ isOpen: false, title: "", pods: [] });
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [includeAttachments, setIncludeAttachments] = useState(true);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -3011,6 +3014,14 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
     
     if (d.podUrl) {
       d.podUrl.split(",").forEach((p: string) => {
+        const trimmed = p.trim();
+        if (trimmed) {
+          outletGroup.pods.set(trimmed, d.deliveredAt);
+        }
+      });
+    }
+    if (d.potUrl) {
+      d.potUrl.split(",").forEach((p: string) => {
         const trimmed = p.trim();
         if (trimmed) {
           outletGroup.pods.set(trimmed, d.deliveredAt);
@@ -3332,7 +3343,12 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                   </div>
                   <div className="flex-1 flex items-center justify-center p-2">
                     {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
-                      <img src={srcUrl} alt={`POD ${idx + 1}`} className="w-full h-auto object-contain max-h-[400px]" />
+                      <img 
+                        src={encodeURI(srcUrl)} 
+                        alt={`Attachment ${idx + 1}`} 
+                        className="w-full h-auto object-contain max-h-[400px] cursor-pointer hover:opacity-90 transition-opacity" 
+                        onClick={() => setFullScreenImage(encodeURI(srcUrl))}
+                      />
                     ) : (
                       <div className="text-center p-4">
                         <FileText className="mx-auto h-8 w-8 text-slate-400 mb-2" />
@@ -3348,6 +3364,29 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {fullScreenImage && (
+        <div 
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 cursor-pointer backdrop-blur-sm" 
+          onClick={() => setFullScreenImage(null)}
+        >
+          <button 
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors bg-black/50 p-2 rounded-full" 
+            onClick={(e) => {
+              e.stopPropagation();
+              setFullScreenImage(null);
+            }}
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <img 
+            src={fullScreenImage} 
+            className="max-w-full max-h-[90vh] object-contain cursor-default rounded-md shadow-2xl" 
+            onClick={(e) => e.stopPropagation()}
+            alt="Full screen attachment"
+          />
+        </div>
+      )}
     </div>
   );
 }

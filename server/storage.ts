@@ -1934,12 +1934,7 @@ export class DatabaseStorage implements IStorage {
         throw new Error(`An employee with phone "${data.phone}" already exists`);
       }
     }
-    if (data.name) {
-      const existingByName = await db.select().from(employees).where(sql`LOWER(name) = LOWER(${data.name})`);
-      if (existingByName.length > 0) {
-        throw new Error(`An employee with name "${data.name}" already exists`);
-      }
-    }
+
     const [employee] = await db.insert(employees).values(data).returning();
     return employee;
   }
@@ -1957,12 +1952,7 @@ export class DatabaseStorage implements IStorage {
         throw new Error(`An employee with phone "${data.phone}" already exists`);
       }
     }
-    if (data.name) {
-      const existingByName = await db.select().from(employees).where(and(sql`LOWER(name) = LOWER(${data.name})`, ne(employees.id, id)));
-      if (existingByName.length > 0) {
-        throw new Error(`An employee with name "${data.name}" already exists`);
-      }
-    }
+
     const [employee] = await db.update(employees).set(data).where(eq(employees.id, id)).returning();
     return employee || undefined;
   }
