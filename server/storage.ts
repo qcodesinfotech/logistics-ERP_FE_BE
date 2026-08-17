@@ -38,7 +38,7 @@ import {
   userScopes, type UserScope,
   zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, orderExpenses, invoicePayments, trips, tripOrders, deliveries, deliveryAttachments, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
   type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type OrderExpense, type InsertOrderExpense, type InvoicePayment, type InsertInvoicePayment, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone, routes, type Route, type InsertRoute,
-  driverZones, dispatchSheets, dispatchItems, dispatchOutletZoneOverrides, dispatchDeliveries,
+  driverZones, dispatchSheets, dispatchItems, dispatchOutletZoneOverrides, dispatchDeliveries, dispatchOutletSequences,
   dispatchTruckAssignments, dispatchOutletTruckAssignments, dispatchPendingQuantities, truckTransfers,
   contractInvoices, contractMonthlyUsage,
   type DispatchTruckAssignment, type InsertDispatchTruckAssignment,
@@ -2780,6 +2780,10 @@ export class DatabaseStorage implements IStorage {
     const deliveries = itemIds.length > 0 ? await db.select().from(dispatchDeliveries).where(inArray(dispatchDeliveries.dispatchItemId, itemIds)) : [];
     const deliveryMap = new Map(deliveries.map(d => [d.dispatchItemId, d]));
 
+    // Get outlet sequences for this sheet
+    const outletSeqs = await db.select().from(dispatchOutletSequences).where(eq(dispatchOutletSequences.sheetId, sheetId));
+    const sequenceMap = new Map(outletSeqs.map(s => [`${s.routeId}-${s.outletId}`, s.sequence]));
+
     // Build board
     const board: Record<string, any> = {};
 
@@ -2850,10 +2854,23 @@ export class DatabaseStorage implements IStorage {
       });
     }
 
-    const zonesList = Object.values(board).map(z => ({
-      ...z,
-      outlets: Object.values(z.outlets),
-    }));
+    const zonesList = Object.values(board).map(z => {
+      const outletsArr = Object.values(z.outlets);
+      outletsArr.sort((a: any, b: any) => {
+        const keyA = `${z.zoneId}-${a.outletId || a.outletCode}`;
+        const keyB = `${z.zoneId}-${b.outletId || b.outletCode}`;
+        const seqA = sequenceMap.get(keyA) !== undefined ? sequenceMap.get(keyA)! : 999999;
+        const seqB = sequenceMap.get(keyB) !== undefined ? sequenceMap.get(keyB)! : 999999;
+        
+        if (seqA !== seqB) return seqA - seqB;
+        return (a.outletName || "").localeCompare(b.outletName || "");
+      });
+
+      return {
+        ...z,
+        outlets: outletsArr,
+      };
+    });
 
     zonesList.sort((a, b) => {
       if (a.zoneId === "unassigned") return -1;
@@ -7104,7 +7121,8 @@ export class DatabaseStorage implements IStorage {
     const truckAssigns = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
     const truckCaps = await Promise.all(truckAssigns.map(async t => {
       const veh = await db.select().from(vehicles).where(eq(vehicles.id, t.truckId));
-      const cap = parseFloat(veh[0]?.capacity || "0");
+      const rawCap = parseFloat(veh[0]?.capacity || "0");
+      const cap = rawCap < 100 ? rawCap * 1000 : rawCap;
       return { ...t, capacity: cap, remaining: cap - parseFloat(t.usedCapacity || "0") };
     }));
 
@@ -7188,7 +7206,7 @@ export class DatabaseStorage implements IStorage {
     .where(and(...conditions))
     .orderBy(desc(schema.dispatchSheets.date));
     
-    const sheetIds = [...new Set(results.map(r => r.sheet.id))];
+    const sheetIds = Array.from(new Set(results.map(r => r.sheet.id)));
     const assignmentsMap = new Map();
     
     if (sheetIds.length > 0) {

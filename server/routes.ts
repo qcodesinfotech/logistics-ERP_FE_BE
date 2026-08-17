@@ -6491,6 +6491,28 @@ export async function registerRoutes(
         }
       }
 
+      let isDriver = false;
+      if (isEmployeeLogin) {
+        if (employeeObj.position?.toLowerCase() === "driver") {
+          isDriver = true;
+        }
+      } else {
+        if (user!.role?.toLowerCase() === "driver") {
+          isDriver = true;
+        } else if (user!.employeeId) {
+          const [emp] = await db.select().from(schema.employees)
+            .where(eq(schema.employees.id, user!.employeeId))
+            .limit(1);
+          if (emp && emp.position?.toLowerCase() === "driver") {
+            isDriver = true;
+          }
+        }
+      }
+
+      if (!isDriver) {
+        return res.status(403).json({ message: "Access denied: Only drivers can login to the mobile app" });
+      }
+
       const jwtLib = await import("jsonwebtoken");
       const jwtSecret = process.env.JWT_SECRET || "tt-erp-jwt-secret-key-2024";
 
@@ -6506,7 +6528,7 @@ export async function registerRoutes(
       } : {
         id: user!.id,
         username: user!.username,
-        role: user!.role,
+        role: "driver", // Force role to driver on mobile app for consistent navigation
         name: user!.name,
         employeeId: user!.employeeId,
         companyId: user!.companyId,
@@ -6537,6 +6559,99 @@ export async function registerRoutes(
       res.status(500).json({ message: "Login failed" });
     }
   });
+
+  // Mobile: Update profile (name, email) for current logged in user
+  app.patch("/api/auth/profile", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { name, email } = req.body;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      // 1. Try to find the user in users table
+      const user = await storage.getUser(userId);
+      if (user) {
+        const updatedUser = await storage.updateUser(userId, { name, email });
+        
+        // If this user has an employee record linked, update the employee record name & email/phone too
+        if (updatedUser?.employeeId) {
+          await storage.updateEmployee(updatedUser.employeeId, {
+            name,
+            email,
+            phone: email, // Set phone to email too, since in mobile app email represents phone
+          });
+        }
+        
+        // Also check if they are in the drivers table and update their name
+        const [drv] = await db.select().from(schema.drivers)
+          .where(eq(schema.drivers.name, user.name || ''))
+          .limit(1);
+        if (drv) {
+          await storage.updateDriver(drv.id, { name });
+        }
+
+        const activeUser = {
+          id: updatedUser!.id,
+          username: updatedUser!.username,
+          role: "driver",
+          name: updatedUser!.name,
+          email: updatedUser!.email,
+          employeeId: updatedUser!.employeeId,
+          companyId: updatedUser!.companyId,
+          shopId: updatedUser!.shopId,
+          branchId: updatedUser!.branchId,
+        };
+
+        return res.json(activeUser);
+      } else {
+        // Fallback: This is an employee login using employeeCode/phone directly
+        // The userId is the employeeId
+        const updatedEmployee = await storage.updateEmployee(userId, {
+          name,
+          email,
+          phone: email
+        });
+
+        if (updatedEmployee) {
+          // If a user account exists for this employee, update it too
+          const [associatedUser] = await db.select().from(schema.users)
+            .where(eq(schema.users.employeeId, updatedEmployee.id))
+            .limit(1);
+          if (associatedUser) {
+            await storage.updateUser(associatedUser.id, { name, email });
+          }
+
+          // Check if driver record exists
+          const [drv] = await db.select().from(schema.drivers)
+            .where(eq(schema.drivers.name, updatedEmployee.name))
+            .limit(1);
+          if (drv) {
+            await storage.updateDriver(drv.id, { name });
+          }
+
+          const activeUser = {
+            id: updatedEmployee.id,
+            username: updatedEmployee.employeeCode,
+            role: "driver",
+            name: updatedEmployee.name,
+            email: updatedEmployee.email,
+            employeeId: updatedEmployee.id,
+            companyId: updatedEmployee.companyId,
+            shopId: updatedEmployee.shopId,
+            branchId: updatedEmployee.branchId,
+          };
+          return res.json(activeUser);
+        }
+      }
+
+      res.status(404).json({ message: "User not found" });
+    } catch (error: any) {
+      console.error("Profile update error:", error);
+      res.status(500).json({ error: error.message || "Failed to update profile" });
+    }
+  });
+
 
 
 
@@ -8597,9 +8712,11 @@ export async function registerRoutes(
       const weight = parseFloat(outletWeight || "0");
       const force = req.body.force === true;
 
-      if (!force && capacity > 0 && usedCapacity + weight > capacity) {
+      const limit = capacity < 100 ? capacity * 1000 : capacity;
+
+      if (!force && limit > 0 && usedCapacity + weight > limit) {
         return res.status(422).json({
-          error: `Capacity exceeded: Adding this (${weight.toFixed(3)}) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${capacity}. Current load: ${usedCapacity.toFixed(3)}.`
+          error: `Capacity exceeded: Adding this (${weight.toFixed(0)} Boxes) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${limit.toFixed(0)} Boxes. Current load: ${usedCapacity.toFixed(0)} Boxes.`
         });
       }
 
@@ -8662,6 +8779,49 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Assign outlet error:", error);
       res.status(500).json({ error: "Failed to assign outlet: " + error.message });
+    }
+  });
+
+  // Save outlet delivery sequence for a route on a specific sheet
+  // Trigger server hot reload check
+  app.post("/api/dispatch/sheets/:sheetId/routes/:routeId/sequence", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { sheetId, routeId } = req.params;
+      const { sequences } = req.body; // Array of outlet IDs (or codes) in the desired sequence order
+
+      if (!Array.isArray(sequences)) {
+        return res.status(400).json({ error: "sequences array is required" });
+      }
+
+      const validSequences = sequences.filter((id: any) => typeof id === "string" && id.trim().length > 0);
+
+      await db.transaction(async (tx) => {
+        // Delete any existing sequence overrides for this sheet + route
+        await tx.delete(schema.dispatchOutletSequences)
+          .where(
+            and(
+              eq(schema.dispatchOutletSequences.sheetId, sheetId),
+              eq(schema.dispatchOutletSequences.routeId, routeId)
+            )
+          );
+
+        // Insert new sequences
+        if (validSequences.length > 0) {
+          await tx.insert(schema.dispatchOutletSequences).values(
+            validSequences.map((outletId: string, idx: number) => ({
+              sheetId,
+              routeId,
+              outletId,
+              sequence: idx,
+            }))
+          );
+        }
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Save sequences error:", error);
+      res.status(500).json({ error: "Failed to save sequence: " + error.message });
     }
   });
 

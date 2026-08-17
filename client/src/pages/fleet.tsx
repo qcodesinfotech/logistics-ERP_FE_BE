@@ -644,11 +644,11 @@ export default function FleetPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Add Vehicle Dialog */}
+      {/* Add/Edit Vehicle Dialog */}
       <Dialog open={isVehicleDialogOpen} onOpenChange={setIsVehicleDialogOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Register Logistics Vehicle</DialogTitle>
+            <DialogTitle>{editingVehicleId ? "Edit Logistics Vehicle" : "Register Logistics Vehicle"}</DialogTitle>
             <DialogDescription>Input vehicle model, license plate number, and compliance metrics.</DialogDescription>
           </DialogHeader>
           <Form {...vehicleForm}>
@@ -715,7 +715,7 @@ export default function FleetPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Ownership</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select type" />
@@ -736,7 +736,7 @@ export default function FleetPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Status</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select status" />
@@ -784,7 +784,7 @@ export default function FleetPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Storage Type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select storage type" />
@@ -862,7 +862,7 @@ export default function FleetPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Assigned Primary Zone</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select zone" />
@@ -885,7 +885,7 @@ export default function FleetPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Assigned Brand (Optional)</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value || ""}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select brand" />
@@ -950,7 +950,9 @@ export default function FleetPage() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createVehicleMutation.isPending}>
-                  {createVehicleMutation.isPending ? "Adding..." : "Add Vehicle"}
+                  {createVehicleMutation.isPending 
+                    ? (editingVehicleId ? "Saving..." : "Adding...") 
+                    : (editingVehicleId ? "Save Changes" : "Add Vehicle")}
                 </Button>
               </DialogFooter>
             </form>

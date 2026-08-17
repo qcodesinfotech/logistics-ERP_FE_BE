@@ -167,6 +167,15 @@ export async function ensureDriverTablesSchema() {
         "sequence" integer DEFAULT 0,
         "created_at" timestamp DEFAULT now()
       );
+
+      CREATE TABLE IF NOT EXISTS "dispatch_outlet_sequences" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "sheet_id" varchar NOT NULL,
+        "route_id" varchar NOT NULL,
+        "outlet_id" varchar NOT NULL,
+        "sequence" integer NOT NULL DEFAULT 0,
+        "created_at" timestamp DEFAULT now()
+      );
     `);
     schemaCheckDone = true;
     console.log("[db] Driver tables schema verified and updated successfully");

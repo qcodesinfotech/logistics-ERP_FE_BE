@@ -61,6 +61,19 @@ export default function DriverAllocation() {
     },
   });
 
+  const assignZoneMutation = useMutation({
+    mutationFn: async ({ vehicleId, zoneId }: { vehicleId: string; zoneId: string | null }) => {
+      return apiRequest("PUT", `/api/vehicles/${vehicleId}`, { currentZoneId: zoneId });
+    },
+    onSuccess: () => {
+      toast({ title: "Default route/zone updated successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+    },
+    onError: (err) => {
+      toast({ title: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
   const filteredVehicles = vehicles.filter(v => 
     v.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     v.plateNumber.toLowerCase().includes(searchQuery.toLowerCase())
@@ -136,9 +149,27 @@ export default function DriverAllocation() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-secondary text-secondary-foreground">
-                          {getZoneName(vehicle.currentZoneId)}
-                        </span>
+                        <Select
+                          value={vehicle.currentZoneId || "unassigned"}
+                          onValueChange={(val) => {
+                            assignZoneMutation.mutate({
+                              vehicleId: vehicle.id,
+                              zoneId: val === "unassigned" ? null : val,
+                            });
+                          }}
+                        >
+                          <SelectTrigger className="w-full max-w-[150px]">
+                            <SelectValue placeholder="Select a zone..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
+                            {zones.map(zone => (
+                              <SelectItem key={zone.id} value={zone.id}>
+                                {zone.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <Select

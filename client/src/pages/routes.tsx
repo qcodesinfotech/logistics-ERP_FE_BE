@@ -30,11 +30,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import type { Zone } from "@shared/schema";
+import type { Zone, Client } from "@shared/schema";
 
 // ===================== Types =====================
 interface Brand {
   id: string;
+  clientId?: string;
   name: string;
   email?: string;
   phone?: string;
@@ -54,6 +55,7 @@ interface RouteType {
 
 interface Outlet {
   id: string;
+  clientId?: string;
   brandId?: string;
   routeId?: string;
   name: string;
@@ -72,6 +74,7 @@ interface Outlet {
 // ===================== Schemas =====================
 const brandSchema = z.object({
   name: z.string().min(1, "Brand name is required"),
+  clientId: z.string().optional().nullable().or(z.literal("")),
   email: z.string().email("Invalid email").optional().or(z.literal("")),
   phone: z.string().optional(),
   website: z.string().optional(),
@@ -88,6 +91,7 @@ const routeSchema = z.object({
 const outletSchema = z.object({
   routeId: z.string().optional(),
   brandId: z.string().optional(),
+  clientId: z.string().optional().nullable().or(z.literal("")),
   name: z.string().min(1, "Outlet name is required"),
   code: z.string().optional(),
   phone: z.string().optional(),
@@ -192,16 +196,21 @@ export default function RoutesPage() {
     enabled: true,
   });
 
+  const { data: clients = [] } = useQuery<Client[]>({
+    queryKey: ["/api/clients"],
+  });
+
   // ---- Brand Form ----
   const brandForm = useForm<BrandFormData>({
     resolver: zodResolver(brandSchema),
-    defaultValues: { name: "", email: "", phone: "", website: "", address: "", status: "active" },
+    defaultValues: { name: "", clientId: "", email: "", phone: "", website: "", address: "", status: "active" },
   });
 
   const openBrandDialog = (brand?: Brand) => {
     if (brand) {
       brandForm.reset({
         name: brand.name,
+        clientId: brand.clientId || "",
         email: brand.email || "",
         phone: brand.phone || "",
         website: brand.website || "",
@@ -209,7 +218,7 @@ export default function RoutesPage() {
         status: brand.status as "active" | "inactive",
       });
     } else {
-      brandForm.reset({ name: "", email: "", phone: "", website: "", address: "", status: "active" });
+      brandForm.reset({ name: "", clientId: "", email: "", phone: "", website: "", address: "", status: "active" });
     }
     setBrandDialog({ open: true, editing: brand });
   };
@@ -314,7 +323,7 @@ export default function RoutesPage() {
   // ---- Outlet Form ----
   const outletForm = useForm<OutletFormData>({
     resolver: zodResolver(outletSchema),
-    defaultValues: { routeId: "", brandId: "", name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" },
+    defaultValues: { routeId: "", brandId: "", clientId: "", name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" },
   });
 
   const openOutletDialog = async (outlet?: Outlet) => {
@@ -323,6 +332,7 @@ export default function RoutesPage() {
       outletForm.reset({
         routeId: outlet.routeId || "",
         brandId: outlet.brandId || "",
+        clientId: outlet.clientId || "",
         name: outlet.name,
         code: outlet.code || "",
         phone: outlet.phone || "",
@@ -346,6 +356,7 @@ export default function RoutesPage() {
       outletForm.reset({ 
         routeId: selectedRouteFilter !== "all" ? selectedRouteFilter : "",
         brandId: selectedBrandFilter !== "all" ? selectedBrandFilter : "",
+        clientId: "",
         name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" 
       });
     }
@@ -795,6 +806,25 @@ export default function RoutesPage() {
                   <FormMessage />
                 </FormItem>
               )} />
+              <FormField control={brandForm.control} name="clientId" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Linked Customer (Master Customer)</FormLabel>
+                  <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select master customer (optional)" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="none">No Customer Selected</SelectItem>
+                      {clients.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
               <FormField control={brandForm.control} name="email" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Email</FormLabel>
@@ -897,7 +927,26 @@ export default function RoutesPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
-                
+                <FormField control={outletForm.control} name="clientId" render={({ field }) => (
+                  <FormItem className="col-span-2">
+                    <FormLabel>Linked Customer (Master Customer)</FormLabel>
+                    <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select master customer (optional)" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">No Customer Selected</SelectItem>
+                        {clients.map(c => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
                 <FormField control={outletForm.control} name="name" render={({ field }) => (
                   <FormItem className="col-span-2">
                     <FormLabel>Outlet Name *</FormLabel>

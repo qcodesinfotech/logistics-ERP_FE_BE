@@ -59,6 +59,7 @@ export const categories = pgTable("categories", {
 
 export const brands = pgTable("brands", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientId: varchar("client_id"), // points to clients.id (master customer)
   name: text("name").notNull(),
   description: text("description"),
   email: text("email"),
@@ -2477,3 +2478,18 @@ export type InsertContractMonthlyUsage = z.infer<typeof insertContractMonthlyUsa
 export const insertOrderExpenseSchema = createInsertSchema(orderExpenses).omit({ id: true, createdAt: true });
 export type OrderExpense = typeof orderExpenses.$inferSelect;
 export type InsertOrderExpense = z.infer<typeof insertOrderExpenseSchema>;
+
+// Dispatch Outlet sequences
+export const dispatchOutletSequences = pgTable("dispatch_outlet_sequences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sheetId: varchar("sheet_id").notNull(),
+  routeId: varchar("route_id").notNull(),
+  outletId: varchar("outlet_id").notNull(),
+  sequence: integer("sequence").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertDispatchOutletSequenceSchema = createInsertSchema(dispatchOutletSequences).omit({ id: true, createdAt: true });
+export type DispatchOutletSequence = typeof dispatchOutletSequences.$inferSelect;
+export type InsertDispatchOutletSequence = z.infer<typeof insertDispatchOutletSequenceSchema>;
+

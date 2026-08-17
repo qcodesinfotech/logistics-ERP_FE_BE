@@ -23,6 +23,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -40,7 +42,7 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
-  Share2, MoreHorizontal,
+  Share2, MoreHorizontal, Folder, Wrench, History, Fuel,
 } from "lucide-react";
 
 // ===== Types =====
@@ -253,7 +255,7 @@ function MoveOverrideDialog({
 
 // ===== Outlet Card =====
 function OutletCard({
-  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
+  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
@@ -261,6 +263,7 @@ function OutletCard({
   onOverride: (outlet: OutletGroup) => void;
   onOverrideItem: (item: DispatchItem) => void;
   selectedDate: string;
+  onSelect?: () => void;
 }) {
   const { user } = useAuth();
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
@@ -278,7 +281,7 @@ function OutletCard({
 
   return (
     <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
-      <div className="p-3 cursor-pointer space-y-2.5" onClick={() => setExpanded(e => !e)}>
+      <div className="p-3 cursor-pointer space-y-2.5" onClick={() => { setExpanded(e => !e); if (onSelect) onSelect(); }}>
         {/* Row 1: Icon + Name + Chevron */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
@@ -385,25 +388,116 @@ function OutletCard({
 }
 
 // ===== Zone Column =====
+// ===== Zone Column =====
 function ZoneColumn({
   zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
+  onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
   onOverride: (outlet: OutletGroup) => void;
   onOverrideItem: (item: DispatchItem) => void;
   selectedDate: string;
+  onSelectRoute: () => void;
+  onSelectOutlet: (outlet: OutletGroup) => void;
+  isExpanded: boolean;
+  selectedOutletForDetails: any | null;
+  onCloseDetails: () => void;
 }) {
+  const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const [localOutlets, setLocalOutlets] = useState(zone.outlets);
+
+  useEffect(() => {
+    setLocalOutlets(zone.outlets);
+  }, [zone.outlets]);
+
+  const updateSequenceMutation = useMutation({
+    mutationFn: async (sequences: string[]) => {
+      const response = await apiRequest("POST", `/api/dispatch/sheets/${sheetId}/routes/${zone.zoneId}/sequence`, { sequences });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/board`] });
+      toast({ title: "Delivery sequence updated successfully" });
+    },
+    onError: (err: any) => {
+      setLocalOutlets(zone.outlets);
+      toast({
+        title: "Error updating sequence",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleMoveSequence = (outlet: any, direction: "up" | "down") => {
+    const idx = localOutlets.findIndex(o => (o.outletId || o.outletCode) === (outlet.outletId || outlet.outletCode));
+    if (idx === -1) return;
+
+    const newOutlets = [...localOutlets];
+    if (direction === "up" && idx > 0) {
+      const temp = newOutlets[idx];
+      newOutlets[idx] = newOutlets[idx - 1];
+      newOutlets[idx - 1] = temp;
+    } else if (direction === "down" && idx < newOutlets.length - 1) {
+      const temp = newOutlets[idx];
+      newOutlets[idx] = newOutlets[idx + 1];
+      newOutlets[idx + 1] = temp;
+    } else {
+      return;
+    }
+
+    setLocalOutlets(newOutlets);
+    const sequences = newOutlets.map(o => o.outletId || o.outletCode).filter(Boolean) as string[];
+    updateSequenceMutation.mutate(sequences);
+  };
+
+  const toggleOutlet = (id: string) => {
+    setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIdx) return;
+
+    const newOutlets = [...localOutlets];
+    const [draggedItem] = newOutlets.splice(draggedIdx, 1);
+    newOutlets.splice(targetIdx, 0, draggedItem);
+
+    setLocalOutlets(newOutlets);
+    const sequences = newOutlets.map(o => o.outletId || o.outletCode).filter(Boolean) as string[];
+    updateSequenceMutation.mutate(sequences);
+    setDraggedIdx(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+  };
+
   const parseNumber = (val: any) => {
     const num = parseFloat(val);
     return isNaN(num) ? 0 : num;
   };
 
-  const totalItems = zone.outlets.reduce((s, o) => s + o.items.length, 0);
-  const totalQty = zone.outlets.reduce((sumOutlet, o) => {
+  const totalItems = localOutlets.reduce((s, o) => s + o.items.length, 0);
+  const totalQty = localOutlets.reduce((sumOutlet, o) => {
     return sumOutlet + o.items.reduce((sumItem, i) => sumItem + parseNumber(i.requestedQty || i.weight), 0);
   }, 0);
-  const deliveredQty = zone.outlets.reduce((sumOutlet, o) => {
+  const deliveredQty = localOutlets.reduce((sumOutlet, o) => {
     return sumOutlet + o.items.reduce((sumItem, i) => {
       if (i.delivery?.status === "delivered") {
         return sumItem + parseNumber(i.delivery.deliveredQty || i.requestedQty || i.weight);
@@ -417,88 +511,519 @@ function ZoneColumn({
   const completionPercentage = totalQty > 0 ? Math.round((deliveredQty / totalQty) * 100) : 0;
   const isUnassigned = zone.zoneId === "unassigned";
 
-  return (
-    <div className={`flex-shrink-0 w-80 flex flex-col rounded-2xl border ${isUnassigned ? "border-dashed border-slate-300 bg-slate-50/50 dark:bg-slate-900/20" : "border-border bg-card"} shadow-sm`}>
-      {/* Zone Header */}
-      <div className={`p-4 rounded-t-2xl ${isUnassigned ? "" : "bg-gradient-to-r from-primary/10 to-primary/5"}`}>
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isUnassigned ? "bg-slate-200" : "bg-primary/20"}`}>
-              <MapPin className={`h-4 w-4 ${isUnassigned ? "text-slate-500" : "text-primary"}`} />
+  const renderOutletItems = (items: any[]) => {
+    return (
+      <div className="pl-6 space-y-1.5 border-l border-slate-200 ml-3.5 mt-1">
+        {items.map((item, idx) => {
+          const req = item.requestedQty || item.weight || "0";
+          const status = item.delivery?.status || "pending";
+          const statusColor = status === "delivered" 
+            ? "text-emerald-600 bg-emerald-50 border-emerald-100" 
+            : status === "partial" || status === "damaged"
+            ? "text-amber-600 bg-amber-50 border-amber-100"
+            : "text-slate-500 bg-slate-50 border-slate-100";
+
+          return (
+            <div key={idx} className="flex items-start gap-2 text-xs py-1 hover:bg-slate-50 rounded px-1 transition-colors">
+              <FileText className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-slate-700 truncate" title={item.description || item.itemCode}>
+                  {item.description || item.itemCode}
+                </p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[10px] text-slate-400">Qty: {req}</span>
+                  <span className={`text-[9px] px-1 rounded border font-semibold uppercase ${statusColor}`}>
+                    {status}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm">{zone.zoneName}</h3>
-              <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · Qty: {formattedTotalQty}</p>
-            </div>
-          </div>
-          <Badge className={`${deliveredQty === totalQty && totalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
-            {formattedDeliveredQty}/{formattedTotalQty} ({completionPercentage}%)
-          </Badge>
-        </div>
-        {totalQty > 0 && (
-          <div className="mb-3 space-y-1">
-            <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-              <span>Delivery Completion</span>
-              <span className="font-semibold text-primary">{completionPercentage}%</span>
-            </div>
-            <Progress value={completionPercentage} className="h-1.5 bg-slate-100 dark:bg-slate-800" />
-          </div>
+          );
+        })}
+        {items.length === 0 && (
+          <p className="text-[10px] text-muted-foreground italic pl-2">No items assigned</p>
         )}
-        {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
-          !isUnassigned && <p className="text-xs text-muted-foreground mt-2 italic flex items-center gap-1"><AlertTriangle className="h-3 w-3" />No trucks or drivers assigned</p>
-        ) : (
-          <div className="flex flex-col gap-2 mt-2">
-            {zone.trucks && zone.trucks.map(t => {
-              const capacity = parseFloat(t.vehicle?.capacity || "0");
-              const used = parseFloat(t.usedCapacity || "0");
-              const isOver = used > capacity && capacity > 0;
-              return (
-                <div key={`truck-${t.id}`} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
-                  <div className="flex items-center justify-between font-medium">
-                    <div className="flex items-center gap-1.5">
-                      <Truck className="h-3.5 w-3.5 text-primary" />
-                      <span className="truncate max-w-[100px]" title={t.vehicle?.name}>{t.vehicle?.name || 'Unknown Truck'}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className={`flex-shrink-0 flex rounded-2xl border ${isUnassigned ? "border-dashed border-slate-300 bg-slate-50/50 dark:bg-slate-900/20" : "border-border bg-card"} shadow-sm transition-all duration-300 ${isExpanded ? "w-[600px] flex-row" : "w-80 flex-col"}`}>
+      {/* Left Column */}
+      <div className={`flex flex-col h-full ${isExpanded ? "w-80 border-r" : "w-full"}`}>
+        {/* Zone Header */}
+        <div 
+          onClick={onSelectRoute}
+          className={`p-4 rounded-t-2xl cursor-pointer hover:opacity-90 select-none ${isUnassigned ? "" : "bg-gradient-to-r from-primary/10 to-primary/5"}`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isUnassigned ? "bg-slate-200" : "bg-primary/20"}`}>
+                <MapPin className={`h-4 w-4 ${isUnassigned ? "text-slate-500" : "text-primary"}`} />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm">{zone.zoneName}</h3>
+                <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · Qty: {formattedTotalQty}</p>
+              </div>
+            </div>
+            <Badge className={`${deliveredQty === totalQty && totalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
+              {formattedDeliveredQty}/{formattedTotalQty} ({completionPercentage}%)
+            </Badge>
+          </div>
+          {totalQty > 0 && (
+            <div className="mb-3 space-y-1">
+              <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                <span>Delivery Completion</span>
+                <span className="font-semibold text-primary">{completionPercentage}%</span>
+              </div>
+              <Progress value={completionPercentage} className="h-1.5 bg-slate-100 dark:bg-slate-800" />
+            </div>
+          )}
+          {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
+            !isUnassigned && <p className="text-xs text-muted-foreground mt-2 italic flex items-center gap-1"><AlertTriangle className="h-3 w-3" />No trucks or drivers assigned</p>
+          ) : (
+            <div className="flex flex-col gap-2 mt-2">
+              {zone.trucks && zone.trucks.map(t => {
+                const capacity = parseFloat(t.vehicle?.capacity || "0");
+                const used = parseFloat(t.usedCapacity || "0");
+                const isOver = used > capacity && capacity > 0;
+                return (
+                  <div key={`truck-${t.id}`} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
+                    <div className="flex items-center justify-between font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <Truck className="h-3.5 w-3.5 text-primary" />
+                        <span className="truncate max-w-[100px]" title={t.vehicle?.plateNumber || t.vehicle?.name}>{t.vehicle?.plateNumber || t.vehicle?.name || 'Unknown Truck'}</span>
+                      </div>
+                      {capacity > 0 && (
+                        <span className={isOver ? "text-red-600 font-bold flex items-center gap-1" : "text-emerald-600"}>
+                          {isOver && <AlertTriangle className="h-3.5 w-3.5" />}
+                          {used.toFixed(1)} / {capacity.toFixed(0)} kg
+                        </span>
+                      )}
                     </div>
-                    {capacity > 0 && (
-                      <span className={isOver ? "text-red-600 font-bold flex items-center gap-1" : "text-emerald-600"}>
-                        {isOver && <AlertTriangle className="h-3.5 w-3.5" />}
-                        {used.toFixed(1)} / {capacity.toFixed(0)} kg
-                      </span>
+                    {t.driver && (
+                      <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1 mt-1">
+                        <User className="h-3 w-3" />
+                        <span className="truncate">{t.driver.name}</span>
+                      </div>
                     )}
                   </div>
-                  {t.driver && (
-                    <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1 mt-1">
-                      <User className="h-3 w-3" />
-                      <span className="truncate">{t.driver.name}</span>
-                    </div>
-                  )}
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {/* Outlets */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ maxHeight: "calc(100vh - 280px)" }}>
+          {localOutlets.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground text-sm">No outlets in this zone</div>
+          ) : (
+            localOutlets.map((outlet, i) => {
+              const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
+              return (
+                <div
+                  key={outlet.outletId || outlet.outletCode}
+                  draggable={isSupervisor}
+                  onDragStart={(e) => handleDragStart(e, i)}
+                  onDragOver={(e) => handleDragOver(e, i)}
+                  onDrop={(e) => handleDrop(e, i)}
+                  onDragEnd={handleDragEnd}
+                  className={`transition-all duration-200 ${isSupervisor ? "cursor-grab active:cursor-grabbing" : ""} ${draggedIdx === i ? "opacity-40 scale-95" : "opacity-100"}`}
+                >
+                  <OutletCard
+                    outlet={outlet} sheetId={sheetId} zones={zones}
+                    isSupervisor={isSupervisor}
+                    assignedTruck={assignedTruck}
+                    onDeliveryUpdate={onDeliveryUpdate}
+                    onOverride={onOverride}
+                    onOverrideItem={onOverrideItem}
+                    selectedDate={selectedDate}
+                    onSelect={() => onSelectOutlet(outlet)}
+                  />
                 </div>
               );
-            })}
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Right Column */}
+      {isExpanded && (
+        <div className="w-[280px] flex flex-col h-full bg-slate-100/90 rounded-r-2xl border-l animate-in fade-in slide-in-from-left-5 duration-250">
+          <div className="p-3 border-b flex items-center justify-between bg-slate-100 rounded-tr-2xl">
+            <div>
+              <h4 className="font-bold text-xs text-slate-800 truncate max-w-[190px]" title={zone.zoneName}>
+                Route: {zone.zoneName}
+              </h4>
+              <p className="text-[9px] text-muted-foreground">Route Details Structure</p>
+            </div>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 hover:bg-slate-200" onClick={onCloseDetails}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
           </div>
-        )}
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {selectedOutletForDetails && selectedOutletForDetails.zoneId === zone.zoneId ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-800 bg-white p-2 rounded shadow-sm border">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Store className="h-4 w-4 text-blue-600 fill-blue-50 shrink-0" />
+                    <span className="truncate">{selectedOutletForDetails.outletName}</span>
+                  </div>
+                  <Button variant="ghost" className="h-5 text-[9px] px-1 hover:bg-slate-200" onClick={onSelectRoute}>
+                    Show All
+                  </Button>
+                </div>
+                {renderOutletItems(selectedOutletForDetails.items || [])}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-800 bg-white p-2 rounded shadow-sm border">
+                  <MapPin className="h-4 w-4 text-primary fill-primary/10 shrink-0" />
+                  <span className="truncate">{zone.zoneName} Route</span>
+                </div>
+                
+                <div className="pl-1 space-y-2">
+                  {localOutlets.map((ot: any, idx: number) => {
+                    const id = ot.outletId || ot.outletCode || idx.toString();
+                    const isExpanded = !!expandedOutlets[id];
+                    return (
+                      <div
+                        key={id}
+                        draggable={isSupervisor}
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOver(e, idx)}
+                        onDrop={(e) => handleDrop(e, idx)}
+                        onDragEnd={handleDragEnd}
+                        className={`space-y-1 transition-all duration-200 ${isSupervisor ? "cursor-grab active:cursor-grabbing" : ""} ${draggedIdx === idx ? "opacity-40 scale-95" : "opacity-100"}`}
+                      >
+                        <div 
+                          className="group flex items-center justify-between gap-2 text-xs font-semibold text-slate-700 cursor-pointer hover:bg-white p-1.5 rounded shadow-sm border border-transparent hover:border-slate-200 bg-white/40 transition-colors"
+                          onClick={() => toggleOutlet(id)}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {isExpanded ? (
+                              <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                            )}
+                            <Store className="h-3.5 w-3.5 text-blue-600 fill-blue-50 shrink-0" />
+                            <span className="truncate" title={ot.outletName}>{ot.outletName}</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isSupervisor && (
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-5 w-5 p-0 hover:bg-slate-200"
+                                  disabled={idx === 0 || updateSequenceMutation.isPending}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveSequence(ot, "up");
+                                  }}
+                                  title="Move Up (Sequence)"
+                                >
+                                  <ChevronUp className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-5 w-5 p-0 hover:bg-slate-200"
+                                  disabled={idx === localOutlets.length - 1 || updateSequenceMutation.isPending}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveSequence(ot, "down");
+                                  }}
+                                  title="Move Down (Sequence)"
+                                >
+                                  <ChevronDown className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
+                            <span className="text-[9px] font-normal text-slate-500 bg-slate-100 px-1 py-0.5 rounded-full shrink-0">
+                              {ot.items?.length || 0}
+                            </span>
+                          </div>
+                        </div>
+                        {isExpanded && renderOutletItems(ot.items)}
+                      </div>
+                    );
+                  })}
+                  {localOutlets.length === 0 && (
+                    <p className="text-xs text-muted-foreground italic pl-2">No outlets assigned</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SearchableSelect({
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  emptyText = "No results found.",
+  width = "w-[160px]"
+}: {
+  value: string;
+  onValueChange: (val: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  emptyText?: string;
+  width?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={`h-8 text-xs justify-between font-normal bg-white border border-input shadow-sm hover:bg-accent hover:text-accent-foreground ${width}`}
+        >
+          <span className="truncate">
+            {selectedOption ? selectedOption.label : placeholder}
+          </span>
+          <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className={`p-0 ${width}`} align="start">
+        <Command>
+          <CommandInput placeholder="Search..." className="h-8 text-xs" />
+          <CommandList className="max-h-[220px]">
+            <CommandEmpty className="py-2 text-center text-xs text-muted-foreground">{emptyText}</CommandEmpty>
+            <CommandGroup>
+              {options.map((opt) => (
+                <CommandItem
+                  key={opt.value}
+                  value={opt.label}
+                  onSelect={() => {
+                    onValueChange(opt.value);
+                    setOpen(false);
+                  }}
+                  className="text-xs flex items-center justify-between py-1 px-2 cursor-pointer"
+                >
+                  <span className="truncate mr-2">{opt.label}</span>
+                  {value === opt.value && (
+                    <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+function TruckHistoryTab({ vehicles }: { vehicles: any[] }) {
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
+
+  useEffect(() => {
+    if (vehicles && vehicles.length > 0 && !selectedVehicleId) {
+      setSelectedVehicleId(vehicles[0].id);
+    }
+  }, [vehicles, selectedVehicleId]);
+
+  const { data: maintenanceLogs = [] } = useQuery<any[]>({
+    queryKey: ["/api/vehicles/maintenance"],
+  });
+
+  const { data: fuelLogs = [] } = useQuery<any[]>({
+    queryKey: ["/api/vehicles/fuel"],
+  });
+
+  const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId);
+
+  const vehicleMaintenance = useMemo(() => {
+    return maintenanceLogs.filter(log => log.vehicleId === selectedVehicleId);
+  }, [maintenanceLogs, selectedVehicleId]);
+
+  const vehicleFuel = useMemo(() => {
+    return fuelLogs.filter(log => log.vehicleId === selectedVehicleId);
+  }, [fuelLogs, selectedVehicleId]);
+
+  const stats = useMemo(() => {
+    const totalMaintCost = vehicleMaintenance.reduce((sum, log) => sum + parseFloat(log.cost || "0"), 0);
+    const totalFuelCost = vehicleFuel.reduce((sum, log) => sum + parseFloat(log.fuelExpense || "0"), 0);
+    const totalLitres = vehicleFuel.reduce((sum, log) => sum + parseFloat(log.liters || "0"), 0);
+    
+    const odometers = vehicleFuel
+      .map(log => parseFloat(log.odometer || "0"))
+      .filter(o => o > 0);
+    const kmCovered = odometers.length > 1 ? (Math.max(...odometers) - Math.min(...odometers)) : 0;
+
+    return {
+      totalMaintCost,
+      totalFuelCost,
+      totalLitres,
+      kmCovered,
+      maintCount: vehicleMaintenance.length,
+      fuelCount: vehicleFuel.length
+    };
+  }, [vehicleMaintenance, vehicleFuel]);
+
+  if (vehicles.length === 0) {
+    return (
+      <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
+        <Truck className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+        <p className="text-sm text-slate-500">No trucks registered in the fleet registry.</p>
       </div>
-      {/* Outlets */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ maxHeight: "calc(100vh - 280px)" }}>
-        {zone.outlets.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground text-sm">No outlets in this zone</div>
-        ) : (
-          zone.outlets.map((outlet, i) => {
-            const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
-            return (
-              <OutletCard key={outlet.outletId || outlet.outletCode + i}
-                outlet={outlet} sheetId={sheetId} zones={zones}
-                isSupervisor={isSupervisor}
-                assignedTruck={assignedTruck}
-                onDeliveryUpdate={onDeliveryUpdate}
-                onOverride={onOverride}
-                onOverrideItem={onOverrideItem}
-                selectedDate={selectedDate}
-              />
-            );
-          })
-        )}
-      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="bg-white shadow-sm border border-slate-200">
+        <CardContent className="p-4 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+              <Truck className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-800">Select Truck / Vehicle</h4>
+              <p className="text-xs text-muted-foreground">Select a vehicle to view its fuel and maintenance history logs</p>
+            </div>
+          </div>
+          
+          <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}>
+            <SelectTrigger className="w-64 h-9 text-xs">
+              <SelectValue placeholder="Select Vehicle" />
+            </SelectTrigger>
+            <SelectContent>
+              {vehicles.map(v => (
+                <SelectItem key={v.id} value={v.id} className="text-xs">
+                  {v.plateNumber || "No Plate"} - {v.name || "Unnamed"} ({v.type || "Owned"})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      {selectedVehicle && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="bg-white border shadow-sm">
+              <CardContent className="p-4 flex flex-col gap-2">
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Total Maintenance</span>
+                <span className="text-2xl font-extrabold text-slate-800">BD {stats.totalMaintCost.toFixed(3)}</span>
+                <span className="text-xs text-slate-500 font-medium">{stats.maintCount} service logs recorded</span>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white border shadow-sm">
+              <CardContent className="p-4 flex flex-col gap-2">
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Total Fuel Expense</span>
+                <span className="text-2xl font-extrabold text-slate-800">BD {stats.totalFuelCost.toFixed(3)}</span>
+                <span className="text-xs text-slate-500 font-medium">{stats.fuelCount} fuel receipts logged</span>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white border shadow-sm font-sans">
+              <CardContent className="p-4 flex flex-col gap-2">
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Total Fuel Litres</span>
+                <span className="text-2xl font-extrabold text-slate-800">{stats.totalLitres.toFixed(1)} L</span>
+                <span className="text-xs text-slate-500 font-medium">Accumulated quantity logged</span>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white border shadow-sm">
+              <CardContent className="p-4 flex flex-col gap-2">
+                <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Distance Range</span>
+                <span className="text-2xl font-extrabold text-slate-800">{stats.kmCovered > 0 ? `${stats.kmCovered.toLocaleString()} km` : "N/A"}</span>
+                <span className="text-xs text-slate-500 font-medium">Logged odometer span</span>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="bg-white shadow-sm border border-slate-200">
+              <CardHeader className="py-4 border-b">
+                <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                  <Fuel className="h-4 w-4 text-primary" /> Fuel Log History
+                </CardTitle>
+                <CardDescription className="text-xs">Odometer and diesel refilling expense history</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0 max-h-[400px] overflow-y-auto">
+                <Table>
+                  <TableHeader className="bg-slate-50 sticky top-0 z-10">
+                    <TableRow>
+                      <TableHead className="text-xs">Date</TableHead>
+                      <TableHead className="text-xs">Odometer (km)</TableHead>
+                      <TableHead className="text-xs">Liters</TableHead>
+                      <TableHead className="text-xs text-right">Cost (BD)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {vehicleFuel.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-8 text-xs text-muted-foreground italic">No fuel logs found.</TableCell>
+                      </TableRow>
+                    ) : (
+                      vehicleFuel.map((log, idx) => (
+                        <TableRow key={log.id || idx}>
+                          <TableCell className="text-xs font-medium">{log.date ? format(parseISO(log.date), "dd MMM yyyy") : "-"}</TableCell>
+                          <TableCell className="text-xs font-mono">{log.odometer ? parseFloat(log.odometer).toLocaleString() : "-"}</TableCell>
+                          <TableCell className="text-xs font-mono">{log.liters ? parseFloat(log.liters).toFixed(1) : "-"}</TableCell>
+                          <TableCell className="text-xs font-mono text-right font-bold text-slate-800">{log.fuelExpense ? parseFloat(log.fuelExpense).toFixed(3) : "-"}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-white shadow-sm border border-slate-200">
+              <CardHeader className="py-4 border-b">
+                <CardTitle className="text-sm font-bold flex items-center gap-2 text-slate-800">
+                  <Wrench className="h-4 w-4 text-primary" /> Maintenance History
+                </CardTitle>
+                <CardDescription className="text-xs">Mechanical logs, service checks, and repairs history</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0 max-h-[400px] overflow-y-auto">
+                <Table>
+                  <TableHeader className="bg-slate-50 sticky top-0 z-10">
+                    <TableRow>
+                      <TableHead className="text-xs">Date</TableHead>
+                      <TableHead className="text-xs">Type</TableHead>
+                      <TableHead className="text-xs">Description</TableHead>
+                      <TableHead className="text-xs text-right">Cost (BD)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {vehicleMaintenance.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-8 text-xs text-muted-foreground italic">No maintenance logs found.</TableCell>
+                      </TableRow>
+                    ) : (
+                      vehicleMaintenance.map((log, idx) => (
+                        <TableRow key={log.id || idx}>
+                          <TableCell className="text-xs font-medium">{log.date ? format(parseISO(log.date), "dd MMM yyyy") : "-"}</TableCell>
+                          <TableCell className="text-xs capitalize font-semibold text-slate-700">{log.maintenanceType?.replace("_", " ") || "-"}</TableCell>
+                          <TableCell className="text-xs truncate max-w-[150px]" title={log.description}>{log.description || "-"}</TableCell>
+                          <TableCell className="text-xs font-mono text-right font-bold text-slate-800">{log.cost ? parseFloat(log.cost).toFixed(3) : "-"}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -546,6 +1071,24 @@ export default function DailyDispatchPage() {
   const [boardTruckFilter, setBoardTruckFilter] = useState("all");
   const [boardStatusFilter, setBoardStatusFilter] = useState("all");
 
+  const [selectedRouteForDetails, setSelectedRouteForDetails] = useState<any | null>(null);
+  const [selectedOutletForDetails, setSelectedOutletForDetails] = useState<any | null>(null);
+
+  const handleSelectRouteForDetails = (route: any) => {
+    setSelectedRouteForDetails(route);
+    setSelectedOutletForDetails(null);
+  };
+
+  const handleSelectOutletForDetails = (outlet: any) => {
+    setSelectedOutletForDetails(outlet);
+    setSelectedRouteForDetails(null);
+  };
+
+  const handleCloseDetailsPanel = () => {
+    setSelectedRouteForDetails(null);
+    setSelectedOutletForDetails(null);
+  };
+
   // Queries
   const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
   const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
@@ -570,8 +1113,12 @@ export default function DailyDispatchPage() {
     refetchInterval: 5000,
   });
 
+  const { data: vehiclesList = [] } = useQuery<any[]>({
+    queryKey: ["/api/vehicles"],
+  });
+
   const stats = useMemo(() => {
-    if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0 };
+    if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0, assignedTrucksCount: 0 };
     
     let totalOutletsSet = new Set<string>();
     let pendingOutletsSet = new Set<string>();
@@ -580,8 +1127,15 @@ export default function DailyDispatchPage() {
     let totalQtyAssigned = 0;
     let completedQty = 0;
     let pendingQty = 0;
+    let assignedTrucksSet = new Set<string>();
 
     boardData.zones.forEach(z => {
+      z.trucks?.forEach(t => {
+        if (t.vehicle?.id) {
+          assignedTrucksSet.add(t.vehicle.id);
+        }
+      });
+
       z.outlets.forEach(o => {
         const outletKey = o.outletId || o.outletCode;
         totalOutletsSet.add(outletKey);
@@ -626,9 +1180,65 @@ export default function DailyDispatchPage() {
       partiallyDelivered: partialOutletsSet.size,
       totalQtyAssigned,
       completedQty,
-      pendingQty
+      pendingQty,
+      assignedTrucksCount: assignedTrucksSet.size
     };
   }, [boardData]);
+
+  const outletOptions = useMemo(() => {
+    if (!boardData) return [{ value: "all", label: "All Outlets" }];
+    const outlets = new Map();
+    boardData.zones.forEach(z => z.outlets.forEach(o => {
+      const id = o.outletId || o.outletCode;
+      if (id) {
+        outlets.set(id, `${o.outletName || "Unnamed"} (${o.outletCode || "No Code"})`);
+      }
+    }));
+    return [
+      { value: "all", label: "All Outlets" },
+      ...Array.from(outlets.entries()).map(([id, name]) => ({ value: id, label: name }))
+    ];
+  }, [boardData]);
+
+  const routeOptions = useMemo(() => {
+    if (!boardData) return [{ value: "all", label: "All Routes" }];
+    const routes = new Map();
+    boardData.zones.forEach(z => { if (z.zoneId !== "unassigned") routes.set(z.zoneId, z.zoneName); });
+    return [
+      { value: "all", label: "All Routes" },
+      ...Array.from(routes.entries()).map(([id, name]) => ({ value: id, label: name }))
+    ];
+  }, [boardData]);
+
+  const driverOptions = useMemo(() => {
+    if (!boardData) return [{ value: "all", label: "All Drivers" }];
+    const driversMap = new Map();
+    boardData.zones.forEach(z => {
+      z.trucks?.forEach(t => { if (t.driver) driversMap.set(t.driver.id, t.driver.name); });
+      z.drivers?.forEach(d => { if (d) driversMap.set(d.id, d.name); });
+    });
+    return [
+      { value: "all", label: "All Drivers" },
+      ...Array.from(driversMap.entries()).map(([id, name]) => ({ value: id, label: name }))
+    ];
+  }, [boardData]);
+
+  const truckOptions = useMemo(() => {
+    if (!boardData) return [{ value: "all", label: "All Trucks" }];
+    const trucksMap = new Map();
+    boardData.zones.forEach(z => z.trucks?.forEach(t => { if (t.vehicle) trucksMap.set(t.vehicle.id, t.vehicle.plateNumber || t.vehicle.name); }));
+    return [
+      { value: "all", label: "All Trucks" },
+      ...Array.from(trucksMap.entries()).map(([id, name]) => ({ value: id, label: name }))
+    ];
+  }, [boardData]);
+
+  const statusOptions = [
+    { value: "all", label: "All Status" },
+    { value: "pending", label: "Pending" },
+    { value: "partial", label: "Partial Delivered" },
+    { value: "delivered", label: "Completed" }
+  ];
 
   const { data: reportData, isLoading: reportLoading } = useQuery<{ items: any[]; routeMap: Record<string, string> }>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`],
@@ -953,6 +1563,7 @@ export default function DailyDispatchPage() {
             <TabsTrigger value="transfers" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><ArrowRight className="h-3.5 w-3.5" />Transfers</TabsTrigger>
             <TabsTrigger value="summary" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />Summary</TabsTrigger>
             <TabsTrigger value="item-summary" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />Item Summary</TabsTrigger>
+            <TabsTrigger value="truck-history" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><History className="h-3.5 w-3.5" />Truck History</TabsTrigger>
           </TabsList>
         </div>
 
@@ -995,158 +1606,148 @@ export default function DailyDispatchPage() {
           {boardData && (
             <>
               {/* Supervisor Stats Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4 px-6 py-4 bg-slate-50 border-b">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 px-6 py-3 bg-slate-50 border-b">
                 <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
                   onClick={() => setBoardStatusFilter("all")}>
-                  <CardContent className="p-4 flex flex-col gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
-                      <Store className="h-5 w-5" />
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                      <Store className="h-4 w-4" />
                     </div>
-                    <div className="mt-1">
-                      <p className="text-2xl font-bold tracking-tight text-slate-900">{stats.totalOutlets}</p>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Total Outlets</p>
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">{stats.totalOutlets}</p>
+                      <p className="text-xs font-medium text-slate-500">Total Outlets</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-amber-500/30 border-amber-500' : ''}`}
                   onClick={() => setBoardStatusFilter("pending")}>
-                  <CardContent className="p-4 flex flex-col gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center flex-shrink-0">
-                      <Hourglass className="h-5 w-5" />
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center flex-shrink-0">
+                      <Hourglass className="h-4 w-4" />
                     </div>
-                    <div className="mt-1">
-                      <p className="text-2xl font-bold tracking-tight text-slate-900">{stats.pendingOutlets}</p>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Pending Outlets</p>
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">{stats.pendingOutlets}</p>
+                      <p className="text-xs font-medium text-slate-500">Pending Outlets</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className={`bg-white border shadow-sm border-t-2 border-t-blue-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'partial' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
                   onClick={() => setBoardStatusFilter("partial")}>
-                  <CardContent className="p-4 flex flex-col gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0">
-                      <Clock className="h-5 w-5" />
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0">
+                      <Clock className="h-4 w-4" />
                     </div>
-                    <div className="mt-1">
-                      <p className="text-2xl font-bold tracking-tight text-slate-900">{stats.partiallyDelivered}</p>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Partially Delivered</p>
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">{stats.partiallyDelivered}</p>
+                      <p className="text-xs font-medium text-slate-500">Partially Delivered</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className={`bg-white border shadow-sm border-t-2 border-t-indigo-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-indigo-500/30 border-indigo-500' : ''}`}
                   onClick={() => setBoardStatusFilter("all")}>
-                  <CardContent className="p-4 flex flex-col gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
-                      <Package className="h-5 w-5" />
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                      <Package className="h-4 w-4" />
                     </div>
-                    <div className="mt-1">
-                      <p className="text-2xl font-bold tracking-tight text-slate-900">
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">
                         {stats.totalQtyAssigned % 1 === 0 ? stats.totalQtyAssigned.toFixed(0) : stats.totalQtyAssigned.toFixed(1)}
                       </p>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Total Qty Assigned</p>
+                      <p className="text-xs font-medium text-slate-500">Total Qty Assigned</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className={`bg-white border shadow-sm border-t-2 border-t-emerald-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'delivered' ? 'ring-2 ring-emerald-500/30 border-emerald-500' : ''}`}
                   onClick={() => setBoardStatusFilter("delivered")}>
-                  <CardContent className="p-4 flex flex-col gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
-                      <CheckCircle2 className="h-5 w-5" />
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
+                      <CheckCircle2 className="h-4 w-4" />
                     </div>
-                    <div className="mt-1">
-                      <p className="text-2xl font-bold tracking-tight text-slate-900">
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">
                         {stats.completedQty % 1 === 0 ? stats.completedQty.toFixed(0) : stats.completedQty.toFixed(1)}
                       </p>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Completed Qty</p>
+                      <p className="text-xs font-medium text-slate-500">Completed Qty</p>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card className={`bg-white border shadow-sm border-t-2 border-t-red-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-red-500/30 border-red-500' : ''}`}
                   onClick={() => setBoardStatusFilter("pending")}>
-                  <CardContent className="p-4 flex flex-col gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
-                      <AlertCircle className="h-5 w-5" />
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
+                      <AlertCircle className="h-4 w-4" />
                     </div>
-                    <div className="mt-1">
-                      <p className="text-2xl font-bold tracking-tight text-slate-900 text-red-600">
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900 text-red-600">
                         {stats.pendingQty % 1 === 0 ? stats.pendingQty.toFixed(0) : stats.pendingQty.toFixed(1)}
                       </p>
-                      <p className="text-xs font-medium text-slate-500 mt-0.5">Pending Qty</p>
+                      <p className="text-xs font-medium text-slate-500">Pending Qty</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border shadow-sm border-t-2 border-t-purple-500 hover:shadow-md transition-all">
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+                      <Truck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">
+                        {stats.assignedTrucksCount} / {vehiclesList.length || 30}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500 leading-tight">
+                        Assigned today ({(vehiclesList.length || 30) - stats.assignedTrucksCount} pending)
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
               <div className="px-6 py-2 border-b bg-muted/20 flex items-center gap-3 flex-wrap">
-              <Select value={boardOutletFilter} onValueChange={setBoardOutletFilter}>
-                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Outlets" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  {(() => {
-                    const outlets = new Map<string, string>();
-                    boardData.zones.forEach(z => z.outlets.forEach(o => {
-                      const id = o.outletId || o.outletCode;
-                      if (id) {
-                        outlets.set(id, `${o.outletName || "Unnamed"} (${o.outletCode || "No Code"})`);
-                      }
-                    }));
-                    return Array.from(outlets.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
-                  })()}
-                </SelectContent>
-              </Select>
-              
-              <Select value={boardRouteFilter} onValueChange={setBoardRouteFilter}>
-                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Routes" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Routes</SelectItem>
-                  {(() => {
-                    const routes = new Map<string, string>();
-                    boardData.zones.forEach(z => { if (z.zoneId !== "unassigned") routes.set(z.zoneId, z.zoneName); });
-                    return Array.from(routes.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
-                  })()}
-                </SelectContent>
-              </Select>
-              
-              <Select value={boardDriverFilter} onValueChange={setBoardDriverFilter}>
-                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Drivers" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Drivers</SelectItem>
-                  {(() => {
-                    const driversMap = new Map<string, string>();
-                    boardData.zones.forEach(z => {
-                      z.trucks?.forEach(t => { if (t.driver) driversMap.set(t.driver.id, t.driver.name); });
-                      z.drivers?.forEach(d => { if (d) driversMap.set(d.id, d.name); });
-                    });
-                    return Array.from(driversMap.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
-                  })()}
-                </SelectContent>
-              </Select>
-              
-              <Select value={boardTruckFilter} onValueChange={setBoardTruckFilter}>
-                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Trucks" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Trucks</SelectItem>
-                  {(() => {
-                    const trucksMap = new Map<string, string>();
-                    boardData.zones.forEach(z => z.trucks?.forEach(t => { if (t.vehicle) trucksMap.set(t.vehicle.id, t.vehicle.plateNumber || t.vehicle.name); }));
-                    return Array.from(trucksMap.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>);
-                  })()}
-                </SelectContent>
-              </Select>
-              
-              <Select value={boardStatusFilter} onValueChange={setBoardStatusFilter}>
-                <SelectTrigger className="h-8 text-xs w-[160px]"><SelectValue placeholder="All Status" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="partial">Partial Delivered</SelectItem>
-                  <SelectItem value="delivered">Completed</SelectItem>
-                </SelectContent>
-              </Select>
+                <SearchableSelect
+                  value={boardOutletFilter}
+                  onValueChange={setBoardOutletFilter}
+                  options={outletOptions}
+                  placeholder="All Outlets"
+                  width="w-[180px]"
+                />
+
+                <SearchableSelect
+                  value={boardRouteFilter}
+                  onValueChange={setBoardRouteFilter}
+                  options={routeOptions}
+                  placeholder="All Routes"
+                  width="w-[160px]"
+                />
+
+                <SearchableSelect
+                  value={boardDriverFilter}
+                  onValueChange={setBoardDriverFilter}
+                  options={driverOptions}
+                  placeholder="All Drivers"
+                  width="w-[160px]"
+                />
+
+                <SearchableSelect
+                  value={boardTruckFilter}
+                  onValueChange={setBoardTruckFilter}
+                  options={truckOptions}
+                  placeholder="All Trucks"
+                  width="w-[160px]"
+                />
+
+                <SearchableSelect
+                  value={boardStatusFilter}
+                  onValueChange={setBoardStatusFilter}
+                  options={statusOptions}
+                  placeholder="All Status"
+                  width="w-[160px]"
+                />
               
               {(boardRouteFilter !== "all" || boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all") && (
                 <Button variant="ghost" size="sm" className="h-8 text-xs px-2 text-muted-foreground" onClick={() => {
@@ -1180,74 +1781,81 @@ export default function DailyDispatchPage() {
           ) : !boardData ? (
             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load board.</div>
           ) : (
-            <div className="flex-1 overflow-auto p-4 min-h-0">
-              <div className="flex gap-4 min-w-max pb-4">
-                {(() => {
-                  const filteredZones = boardData.zones.map(zone => {
-                    if (boardRouteFilter !== "all" && zone.zoneId !== boardRouteFilter) return null;
+            <div className="flex-1 flex min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-auto p-4 min-h-0">
+                <div className="flex gap-4 min-w-max pb-4">
+                  {(() => {
+                    const filteredZones = boardData.zones.map(zone => {
+                      if (boardRouteFilter !== "all" && zone.zoneId !== boardRouteFilter) return null;
 
-                    const filteredOutlets = zone.outlets.map(outlet => {
-                      if (boardOutletFilter !== "all" && outlet.outletId !== boardOutletFilter && outlet.outletCode !== boardOutletFilter) return null;
+                      const filteredOutlets = zone.outlets.map(outlet => {
+                        if (boardOutletFilter !== "all" && outlet.outletId !== boardOutletFilter && outlet.outletCode !== boardOutletFilter) return null;
 
-                      const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
-                      
-                      if (boardDriverFilter !== "all") {
-                        const isDriverInZone = zone.trucks?.some(t => t.driver?.id === boardDriverFilter) || zone.drivers?.some(d => d.id === boardDriverFilter);
-                        if (assignedTruck) {
-                          if (assignedTruck.driver?.id !== boardDriverFilter) return null;
-                        } else {
-                          if (!isDriverInZone) return null;
+                        const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
+                        
+                        if (boardDriverFilter !== "all") {
+                          const isDriverInZone = zone.trucks?.some(t => t.driver?.id === boardDriverFilter) || zone.drivers?.some(d => d.id === boardDriverFilter);
+                          if (assignedTruck) {
+                            if (assignedTruck.driver?.id !== boardDriverFilter) return null;
+                          } else {
+                            if (!isDriverInZone) return null;
+                          }
                         }
+
+                        if (boardTruckFilter !== "all") {
+                          const isTruckInZone = zone.trucks?.some(t => t.vehicle?.id === boardTruckFilter);
+                          if (assignedTruck) {
+                            if (assignedTruck.vehicle?.id !== boardTruckFilter) return null;
+                          } else {
+                            if (!isTruckInZone) return null;
+                          }
+                        }
+
+                        const filteredItems = outlet.items.filter(item => {
+                          const status = item.delivery?.status || "pending";
+                          if (boardStatusFilter !== "all" && status !== boardStatusFilter) return false;
+                          return true;
+                        });
+
+                        if (filteredItems.length === 0 && boardStatusFilter !== "all") return null;
+
+                        return { ...outlet, items: filteredItems };
+                      }).filter(Boolean) as OutletGroup[];
+
+                      if (filteredOutlets.length === 0 && (boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all")) {
+                        return null;
                       }
 
-                      if (boardTruckFilter !== "all") {
-                        const isTruckInZone = zone.trucks?.some(t => t.vehicle?.id === boardTruckFilter);
-                        if (assignedTruck) {
-                          if (assignedTruck.vehicle?.id !== boardTruckFilter) return null;
-                        } else {
-                          if (!isTruckInZone) return null;
-                        }
-                      }
-
-                      const filteredItems = outlet.items.filter(item => {
-                        const status = item.delivery?.status || "pending";
-                        if (boardStatusFilter !== "all" && status !== boardStatusFilter) return false;
-                        return true;
-                      });
-
-                      if (filteredItems.length === 0 && boardStatusFilter !== "all") return null;
-
-                      return { ...outlet, items: filteredItems };
-                    }).filter(Boolean) as OutletGroup[];
-
-                    if (filteredOutlets.length === 0 && (boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all")) {
-                      return null;
+                      return { ...zone, outlets: filteredOutlets };
+                    }).filter(Boolean) as ZoneGroup[];
+                    
+                    if (filteredZones.every(z => z.outlets.length === 0)) {
+                      return <div className="flex items-center justify-center w-full h-64 text-muted-foreground">No items match your filters.</div>;
                     }
 
-                    return { ...zone, outlets: filteredOutlets };
-                  }).filter(Boolean) as ZoneGroup[];
-                  
-                  if (filteredZones.every(z => z.outlets.length === 0)) {
-                    return <div className="flex items-center justify-center w-full h-64 text-muted-foreground">No items match your filters.</div>;
-                  }
-
-                  return filteredZones
-                    .filter(z => z.outlets.length > 0)
-                    .map(zone => (
-                      <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId!}
-                        zones={zones} isSupervisor={isSupervisor}
-                        onDeliveryUpdate={item => setDeliveryDialog(item)}
-                        onOverride={outlet => setOverrideDialog(outlet)}
-                        onOverrideItem={item => setItemOverrideDialog(item)}
-                        selectedDate={selectedDate}
-                      />
-                    ));
-                })()}
-                {boardData.zones.every(z => z.outlets.length === 0) && (
-                  <div className="flex items-center justify-center w-full h-64 text-muted-foreground">
-                    No items found in this sheet.
-                  </div>
-                )}
+                    return filteredZones
+                      .filter(z => z.outlets.length > 0)
+                      .map(zone => (
+                        <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId!}
+                          zones={zones} isSupervisor={isSupervisor}
+                          onDeliveryUpdate={item => setDeliveryDialog(item)}
+                          onOverride={outlet => setOverrideDialog(outlet)}
+                          onOverrideItem={item => setItemOverrideDialog(item)}
+                          selectedDate={selectedDate}
+                          onSelectRoute={() => handleSelectRouteForDetails(zone)}
+                          onSelectOutlet={handleSelectOutletForDetails}
+                          isExpanded={selectedRouteForDetails?.zoneId === zone.zoneId}
+                          selectedOutletForDetails={selectedOutletForDetails}
+                          onCloseDetails={handleCloseDetailsPanel}
+                        />
+                      ));
+                  })()}
+                  {boardData.zones.every(z => z.outlets.length === 0) && (
+                    <div className="flex items-center justify-center w-full h-64 text-muted-foreground">
+                      No items found in this sheet.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1653,6 +2261,11 @@ export default function DailyDispatchPage() {
         <TabsContent value="transfers" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
           <TruckTransfersTab zones={zones} vehicles={[]} />
         </TabsContent>
+
+        {/* ===== TRUCK HISTORY TAB ===== */}
+        <TabsContent value="truck-history" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden bg-slate-50/50">
+          <TruckHistoryTab vehicles={vehiclesList} />
+        </TabsContent>
       </Tabs>
 
       {/* Merge Confirm Dialog */}
@@ -2015,20 +2628,23 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
         }
       });
       return;
-    } else if (capCarton === 0 && cap > 0 && used + weightT > cap) {
-      setPendingAssignment({
-        title: "Capacity Exceeded!",
-        description: `Adding ${outlet.outletCode} (${weightT.toFixed(2)}) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${cap}.\nCurrent load: ${used.toFixed(2)}.\n\nDo you want to proceed anyway?`,
-        payload: {
-          outletCode: outlet.outletCode,
-          truckAssignmentId: truckAssignId,
-          outletWeight: weightT.toFixed(3),
-          sheetId: boardSheetId!,
-          storageType,
-          force: true
-        }
-      });
-      return;
+    } else if (capCarton === 0 && cap > 0) {
+      const limit = cap < 100 ? cap * 1000 : cap;
+      if (used + weightT > limit) {
+        setPendingAssignment({
+          title: "Capacity Exceeded!",
+          description: `Adding ${outlet.outletCode} (${weightT.toFixed(0)} Boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${limit.toFixed(0)} Boxes.\nCurrent load: ${used.toFixed(0)} Boxes.\n\nDo you want to proceed anyway?`,
+          payload: {
+            outletCode: outlet.outletCode,
+            truckAssignmentId: truckAssignId,
+            outletWeight: weightT.toFixed(3),
+            sheetId: boardSheetId!,
+            storageType,
+            force: true
+          }
+        });
+        return;
+      }
     }
     
     assignOutletMutation.mutate({
@@ -2198,7 +2814,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                           const taOutletCount = new Set(taAssignments.map((oa: any) => oa.outletCode)).size;
                           const taItemCount = getTruckAssignedItemsCount(ta.id);
 
-                          const displayCap = capCarton > 0 ? capCarton : cap;
+                          const limit = cap < 100 ? cap * 1000 : cap;
+                          const displayCap = capCarton > 0 ? capCarton : limit;
                           const displayUsed = capCarton > 0 ? taItemCount : used;
                           const pct = displayCap > 0 ? Math.min(100, (displayUsed / displayCap) * 100) : 0;
                           const isOver = displayUsed > displayCap && displayCap > 0;
@@ -2234,7 +2851,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     {capCarton > 0 ? (
                                       `${taItemCount} / ${capCarton} Boxes (${pct.toFixed(0)}%)`
                                     ) : (
-                                      `${used.toFixed(2)}T / ${cap.toFixed(0)}T (${pct.toFixed(0)}%)`
+                                      `${used.toFixed(0)} / ${limit.toFixed(0)} Boxes (${pct.toFixed(0)}%)`
                                     )}
                                   </p>
                                 </div>
@@ -2308,8 +2925,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     </div>
                                   </TableCell>
                                   <TableCell className="text-right">
-                                    <span className={`font-mono text-sm font-semibold ${outletWeightT > 50 ? "text-amber-600" : "text-foreground"}`}>
-                                      {Number(outletWeightT.toFixed(3))}
+                                    <span className={`font-mono text-sm font-semibold ${outletWeightT > 100 ? "text-amber-600" : "text-foreground"}`}>
+                                      {outletWeightT.toFixed(0)} Boxes
                                     </span>
                                   </TableCell>
                                   <TableCell className="text-right pr-4">
@@ -2365,16 +2982,17 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                               const used = parseFloat(ta.usedCapacity || "0");
                                               const taItemCount = getTruckAssignedItemsCount(ta.id);
                                               
-                                              const remainingTons = cap > 0 ? cap - used : null;
+                                              const limit = cap < 100 ? cap * 1000 : cap;
+                                              const remainingBoxes = limit > 0 ? limit - used : null;
                                               const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
                                               const wouldOverflow = capCarton > 0 
                                                 ? (taItemCount + outlet.items.length > capCarton)
-                                                : (cap > 0 && used + outletWeightT > cap);
+                                                : (limit > 0 && used + outletWeightT > limit);
 
                                               return (
                                                 <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
                                                   {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
-                                                  {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingTons !== null ? ` - ${remainingTons.toFixed(1)}T free` : ""}
+                                                  {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
                                                   {wouldOverflow ? " ⚠" : ""}
                                                 </SelectItem>
                                               );
@@ -2392,9 +3010,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                   const stItems = outlet.items.filter((i: any) => i.storageType === st);
                                   const isStCompleted = stItems.length > 0 && stItems.every((i: any) => ["delivered", "damaged"].includes(i.delivery?.status));
                                   const stWeightT = stItems.reduce((sum: number, item: any) => {
-                                    const qty = parseFloat(item.quantity) || 0;
-                                    const unitWeight = parseFloat(item.itemWeightKg) || 0;
-                                    return sum + ((qty * unitWeight) / 1000);
+                                    return sum + parseFloat(item.weight || item.requestedQty || "0");
                                   }, 0);
 
                                   const stAssignment = outletAssignments.find(
@@ -2418,7 +3034,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                           ↳ {st} Items ({stItems.length})
                                         </TableCell>
                                         <TableCell className="text-right text-xs font-mono text-muted-foreground border-t-0 py-2">
-                                          {stWeightT.toFixed(3)}
+                                          {stWeightT.toFixed(0)} Boxes
                                         </TableCell>
                                         <TableCell className="text-right pr-4 border-t-0 py-2">
                                           {isStCompleted ? (
@@ -2477,16 +3093,17 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                                     const used = parseFloat(ta.usedCapacity || "0");
                                                     const taItemCount = getTruckAssignedItemsCount(ta.id);
                                                     
-                                                    const remainingTons = cap > 0 ? cap - used : null;
+                                                    const limit = cap < 100 ? cap * 1000 : cap;
+                                                    const remainingBoxes = limit > 0 ? limit - used : null;
                                                     const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
                                                     const wouldOverflow = capCarton > 0 
                                                       ? (taItemCount + stItems.length > capCarton)
-                                                      : (cap > 0 && used + stWeightT > cap);
+                                                      : (limit > 0 && used + stWeightT > limit);
 
                                                     return (
                                                       <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
                                                         {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
-                                                        {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingTons !== null ? ` - ${remainingTons.toFixed(1)}T free` : ""}
+                                                        {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
                                                         {wouldOverflow ? " ⚠" : ""}
                                                       </SelectItem>
                                                     );
@@ -2499,9 +3116,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                       </TableRow>
                                       
                                       {isExpanded && stItems.map((item: any, itemIdx: number) => {
-                                        const iQty = parseFloat(item.quantity) || parseFloat(item.requestedQty) || 0;
-                                        const iWeight = parseFloat(item.itemWeightKg || item.weight || "0");
-                                        const totalIWeight = (iQty * iWeight) / 1000;
+                                        const boxCount = parseFloat(item.weight || item.requestedQty || "0");
                                         
                                         return (
                                           <TableRow key={item.id || itemIdx} className="bg-muted/10 border-t-0">
@@ -2509,7 +3124,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                               {item.itemCode} - {item.description}
                                             </TableCell>
                                             <TableCell className="text-right text-[10px] font-mono text-muted-foreground/80 border-t-0 py-1.5">
-                                              {totalIWeight.toFixed(3)} T
+                                              {boxCount.toFixed(0)} Boxes
                                             </TableCell>
                                             <TableCell className="border-t-0 py-1.5">
                                             </TableCell>
