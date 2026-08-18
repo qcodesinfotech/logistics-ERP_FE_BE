@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Truck, Plus, Calendar, Wrench, Fuel, DollarSign, PenTool, CheckCircle, ShieldAlert, Upload, X, Edit, FileText, Image as ImageIcon } from "lucide-react";
+import { Truck, Plus, Calendar, Wrench, Fuel, DollarSign, PenTool, CheckCircle, ShieldAlert, Upload, X, Edit, FileText, Image as ImageIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -360,6 +360,17 @@ export default function FleetPage() {
     },
   });
 
+  const deleteVehicleMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("DELETE", `/api/vehicles/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      toast({ title: "Vehicle deleted successfully from registry!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
   // Derived stats
   const totalVehicles = vehiclesList?.length || 0;
   const ownedCount = vehiclesList?.filter(v => v.type === "owned").length || 0;
@@ -457,7 +468,7 @@ export default function FleetPage() {
                       <TableHead>Insurance Expiry</TableHead>
                       <TableHead>Permit Expiry</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="w-10"></TableHead>
+                      <TableHead className="w-24 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -484,9 +495,21 @@ export default function FleetPage() {
                           <TableCell>
                             <StatusBadge status={vehicle.status} />
                           </TableCell>
-                          <TableCell>
+                           <TableCell className="text-right space-x-1">
                             <Button variant="ghost" size="icon" onClick={() => editVehicle(vehicle)}>
                               <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to delete vehicle ${vehicle.plateNumber}?`)) {
+                                  deleteVehicleMutation.mutate(vehicle.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </TableCell>
                         </TableRow>
