@@ -82,6 +82,11 @@ export default function RfqPage() {
   const [isLocationDialogOpen, setIsLocationDialogOpen] = useState(false);
   const [selectedRfq, setSelectedRfq] = useState<Rfq | null>(null);
   const [isViewOnly, setIsViewOnly] = useState(false);
+  const [isQuickClientDialogOpen, setIsQuickClientDialogOpen] = useState(false);
+  const [quickClientName, setQuickClientName] = useState("");
+  const [quickClientCompany, setQuickClientCompany] = useState("");
+  const [quickClientPhone, setQuickClientPhone] = useState("");
+  const [quickClientEmail, setQuickClientEmail] = useState("");
 
   const { toast } = useToast();
 
@@ -100,6 +105,23 @@ export default function RfqPage() {
 
   const { data: locationsList } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
+  });
+
+  const quickAddClientMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/clients", data),
+    onSuccess: (newClient: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
+      toast({ title: "Customer added successfully!" });
+      form.setValue("customerId", newClient.id);
+      setIsQuickClientDialogOpen(false);
+      setQuickClientName("");
+      setQuickClientCompany("");
+      setQuickClientPhone("");
+      setQuickClientEmail("");
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
   });
 
   // Forms
@@ -453,7 +475,7 @@ export default function RfqPage() {
                                   variant="outline" 
                                   size="sm" 
                                   className="h-8 text-xs text-primary border-primary/20 hover:bg-primary/5"
-                                  onClick={() => convertRfqToQuotationMutation.mutate(rfq.id)}
+                                  onClick={() => convertToQuotationMutation.mutate(rfq.id)}
                                 >
                                   Convert to Quotation
                                 </Button>
@@ -647,7 +669,17 @@ export default function RfqPage() {
                   name="customerId"
                   render={({ field }) => (
                     <FormItem className="col-span-2">
-                      <FormLabel>Client / Customer *</FormLabel>
+                      <div className="flex justify-between items-center mb-1">
+                        <FormLabel className="text-sm font-medium">Client / Customer *</FormLabel>
+                        <Button 
+                          type="button" 
+                          variant="link" 
+                          className="h-auto p-0 text-xs text-primary font-medium hover:underline"
+                          onClick={() => setIsQuickClientDialogOpen(true)}
+                        >
+                          + Quick Add Customer
+                        </Button>
+                      </div>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
@@ -1194,6 +1226,77 @@ export default function RfqPage() {
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Customer Dialog */}
+      <Dialog open={isQuickClientDialogOpen} onOpenChange={setIsQuickClientDialogOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Quick Add Customer</DialogTitle>
+            <DialogDescription>
+              Quickly register a new client account to select in rate worksheets.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Customer/Client Name *</label>
+              <Input 
+                value={quickClientName} 
+                onChange={(e) => setQuickClientName(e.target.value)} 
+                placeholder="e.g. Abdullah Salem"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Company Name (Optional)</label>
+              <Input 
+                value={quickClientCompany} 
+                onChange={(e) => setQuickClientCompany(e.target.value)} 
+                placeholder="e.g. Hidd Trading W.L.L"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Phone Number (Optional)</label>
+              <Input 
+                value={quickClientPhone} 
+                onChange={(e) => setQuickClientPhone(e.target.value)} 
+                placeholder="e.g. +973 33445566"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email Address (Optional)</label>
+              <Input 
+                type="email"
+                value={quickClientEmail} 
+                onChange={(e) => setQuickClientEmail(e.target.value)} 
+                placeholder="e.g. accounts@hiddtrading.com"
+              />
+            </div>
+          </div>
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsQuickClientDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="button" 
+              onClick={() => {
+                if (!quickClientName.trim()) {
+                  toast({ title: "Customer Name is required", variant: "destructive" });
+                  return;
+                }
+                quickAddClientMutation.mutate({
+                  name: quickClientName,
+                  companyName: quickClientCompany || null,
+                  phone: quickClientPhone || null,
+                  email: quickClientEmail || null,
+                  status: "active"
+                });
+              }}
+              disabled={quickAddClientMutation.isPending}
+            >
+              {quickAddClientMutation.isPending ? "Adding..." : "Add Customer"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

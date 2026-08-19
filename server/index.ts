@@ -93,6 +93,14 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
     console.error("Failed to seed default menus:", error);
   }
 
+  // Seed default Chart of Accounts for all shops/branches on startup
+  try {
+    const seedResult = await storage.seedMissingAccountsToAllShops();
+    console.log("[accounting] Seeded COA accounts on startup:", seedResult);
+  } catch (error) {
+    console.error("Failed to seed chart of accounts on startup:", error);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

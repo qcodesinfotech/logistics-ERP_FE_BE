@@ -8142,6 +8142,11 @@ export async function registerRoutes(
       const rfq = await storage.getRfq(req.params.id);
       if (!rfq) return res.status(404).json({ error: "RFQ not found" });
 
+      const scope = getScopeFromRequest(req);
+      const shopId = scope.shopId || rfq.shopId || "";
+      const branchId = scope.branchId || rfq.branchId || null;
+      const companyId = scope.companyId || rfq.companyId || null;
+
       const quotations = await storage.getQuotations();
       const quotationCount = quotations.length;
       const quotationNumber = `QT-${(quotationCount + 1).toString().padStart(6, "0")}-v1`;
@@ -8151,6 +8156,9 @@ export async function registerRoutes(
         customerId: rfq.customerId,
         rfqId: rfq.id,
         status: "pending",
+        shopId,
+        branchId,
+        companyId,
         cargoDetails: rfq.cargoDetails || `Transit Route: ${rfq.transitRoute}`,
         weight: rfq.weight || "0.000",
         volume: rfq.volume || "0.000",
@@ -8298,7 +8306,18 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Driver is already assigned to another active trip" });
       }
 
-      const trip = await storage.createTrip({ ...tripData, orderIds: orderIds || [] });
+      const trips = await storage.getTrips();
+      const tripCount = trips.length;
+      const tripNumber = tripData.tripNumber || `TR-${(tripCount + 1).toString().padStart(6, "0")}`;
+
+      const parsedTripData = {
+        ...tripData,
+        tripNumber,
+        startTime: tripData.startTime ? new Date(tripData.startTime) : new Date(),
+        endTime: tripData.endTime ? new Date(tripData.endTime) : null,
+      };
+
+      const trip = await storage.createTrip({ ...parsedTripData, orderIds: orderIds || [] });
       await storage.updateVehicle(tripData.vehicleId, { status: "in_transit" });
 
       res.status(201).json(trip);
@@ -8310,7 +8329,11 @@ export async function registerRoutes(
 
   app.put("/api/trips/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const trip = await storage.updateTrip(req.params.id, req.body);
+      const updateData = { ...req.body };
+      if (updateData.startTime) updateData.startTime = new Date(updateData.startTime);
+      if (updateData.endTime) updateData.endTime = new Date(updateData.endTime);
+
+      const trip = await storage.updateTrip(req.params.id, updateData);
       if (!trip) return res.status(404).json({ error: "Trip not found" });
 
       if (req.body.status === "completed" || req.body.status === "cancelled") {
@@ -8352,9 +8375,9 @@ export async function registerRoutes(
       }
       const delivery = await storage.recordDeliveryPOD(req.params.id, orderId, podUrl, status, issueLog);
       res.json(delivery);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Update delivery error:", error);
-      res.status(500).json({ error: "Failed to update delivery status" });
+      res.status(500).json({ error: "Failed to update delivery status: " + error.message });
     }
   });
 
@@ -8510,7 +8533,10 @@ export async function registerRoutes(
       const invoiceCount = (await storage.getInvoices()).length;
       const invoiceNumber = `INV-${(invoiceCount + 1).toString().padStart(6, "0")}`;
 
-      const sellingRate = parseFloat(trip.sellingRate || "0");
+      let sellingRate = parseFloat(trip.sellingRate || "0");
+      if (sellingRate === 0) {
+        sellingRate = parseFloat(order.grandTotal || "0");
+      }
       const additionalCharges = parseFloat(trip.additionalCharges || "0");
       const totalAmount = sellingRate + additionalCharges;
 

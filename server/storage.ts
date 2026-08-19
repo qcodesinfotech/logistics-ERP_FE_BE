@@ -5153,12 +5153,23 @@ export class DatabaseStorage implements IStorage {
 
   // Seed default Chart of Accounts if not present
   async seedDefaultChartOfAccounts(shopId?: string, branchId?: string): Promise<{ created: number; existing: number }> {
+    if (branchId) {
+      return await this.seedChartOfAccountsForBranch(branchId);
+    }
     return { created: 0, existing: 0 };
   }
 
   // Seed missing account codes to ALL existing shops/branches (idempotent)
   async seedMissingAccountsToAllShops(): Promise<{ totalCreated: number; shopsProcessed: number }> {
-    return { totalCreated: 0, shopsProcessed: 0 };
+    const allBranches = await db.select().from(branches);
+    let totalCreated = 0;
+    let shopsProcessed = 0;
+    for (const branch of allBranches) {
+      const res = await this.seedChartOfAccountsForBranch(branch.id);
+      totalCreated += res.created;
+      shopsProcessed++;
+    }
+    return { totalCreated, shopsProcessed };
   }
 
   // Record project expense with accounting entries
@@ -6618,6 +6629,7 @@ export class DatabaseStorage implements IStorage {
       const [insertedPayment] = await tx.insert(invoicePayments).values({
         ...payment,
         orderId: invoice.orderId,
+        customerId: invoice.customerId,
       }).returning();
 
       const currentOutstanding = parseFloat(invoice.outstandingAmount || invoice.total || "0");
@@ -6649,10 +6661,45 @@ export class DatabaseStorage implements IStorage {
       }
 
       // Financial journals
-      const client = await tx.select().from(clients).where(eq(clients.id, payment.customerId)).limit(1);
-      const activeClient = client[0];
-      const branchId = activeClient?.branchId || "1";
-      const shopId = activeClient?.shopId || "1";
+      let branchId = "1";
+      let shopId = "";
+
+      if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
+        if (payment.bankAccountId) {
+          const [bankAcc] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, payment.bankAccountId)).limit(1);
+          if (bankAcc) {
+            branchId = bankAcc.branchId || "1";
+            shopId = bankAcc.shopId || "";
+          }
+        }
+      } else if (payment.paymentMethod === 'cash') {
+        if (payment.pettyCashId) {
+          const [pc] = await tx.select().from(pettyCash).where(eq(pettyCash.id, payment.pettyCashId)).limit(1);
+          if (pc) {
+            branchId = pc.branchId || "1";
+            shopId = pc.shopId || "";
+          }
+        }
+      }
+
+      // Fallback: Check active client
+      if (branchId === "1") {
+        const client = await tx.select().from(clients).where(eq(clients.id, payment.customerId)).limit(1);
+        const activeClient = client[0];
+        if (activeClient) {
+          branchId = activeClient.branchId || "1";
+          shopId = activeClient.shopId || "";
+        }
+      }
+
+      // Final Fallback: First branch from database to ensure seeding works
+      if (branchId === "1") {
+        const [firstBranch] = await tx.select().from(branches).limit(1);
+        if (firstBranch) {
+          branchId = firstBranch.id;
+          shopId = firstBranch.shopId || "";
+        }
+      }
 
       if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
         if (payment.bankAccountId) {
@@ -6755,8 +6802,19 @@ export class DatabaseStorage implements IStorage {
     const [trip] = await db.select().from(trips).where(eq(trips.id, tripId));
     if (!trip) throw new Error("Trip not found");
 
-    const sellingRate = parseFloat(trip.sellingRate || "0");
-    const additionalCharges = parseFloat(trip.additionalCharges || "0");
+    let sellingRate = parseFloat(trip.sellingRate || "0");
+    let additionalCharges = parseFloat(trip.additionalCharges || "0");
+
+    // Fallback: Resolve sellingRate from order grandTotal if not set
+    if (sellingRate === 0) {
+      const tripOrdersList = await this.getTripOrders(tripId);
+      const totalOrdersRevenue = tripOrdersList.reduce((sum, order) => sum + parseFloat(order.grandTotal || "0"), 0);
+      if (totalOrdersRevenue > 0) {
+        sellingRate = totalOrdersRevenue;
+        await db.update(trips).set({ sellingRate: sellingRate.toFixed(3) }).where(eq(trips.id, tripId));
+      }
+    }
+
     const totalRevenue = sellingRate + additionalCharges;
 
     const driverCost = parseFloat(trip.driverEntitlement || "0");

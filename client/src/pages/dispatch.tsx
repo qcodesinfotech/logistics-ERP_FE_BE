@@ -219,20 +219,19 @@ export default function DispatchPage() {
     formData.append("documents", file);
 
     try {
-      const res = await fetch("/api/upload/contracts", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error("Upload failed");
-
+      const res = await apiRequest("POST", "/api/upload/contracts", formData);
       const data = await res.json();
       if (data.documents && data.documents.length > 0) {
         setPodUrl(data.documents[0].url);
         toast({ title: "POD uploaded successfully!" });
       }
-    } catch (err) {
-      toast({ title: "Failed to upload POD document", variant: "destructive" });
+    } catch (err: any) {
+      console.error(err);
+      toast({ 
+        title: "Failed to upload POD document", 
+        description: getErrorMessage(err) || "An unexpected error occurred",
+        variant: "destructive" 
+      });
     } finally {
       setIsUploading(false);
     }
@@ -418,7 +417,7 @@ export default function DispatchPage() {
                           <TableCell>
                             <StatusBadge status={trip.status} />
                           </TableCell>
-                          <TableCell className="text-right space-x-1">
+                           <TableCell className="text-right space-x-1">
                             {trip.status === "in_transit" && (
                               <Button
                                 size="sm"
@@ -426,14 +425,20 @@ export default function DispatchPage() {
                                 className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
                                 onClick={async () => {
                                   try {
-                                    const res = await fetch(`/api/trips/${trip.id}/orders`);
-                                    if (res.ok) {
-                                      const orderData = await res.json();
-                                      setSelectedTrip({ ...trip, orderIds: orderData.map((o: any) => o.id) } as any);
-                                      setIsPODDialogOpen(true);
+                                    const res = await apiRequest("GET", `/api/trips/${trip.id}/orders`);
+                                    const orderData = await res.json();
+                                    setSelectedTrip({ ...trip, orderIds: orderData.map((o: any) => o.id) } as any);
+                                    if (orderData.length > 0) {
+                                      setSelectedOrderIdForPOD(orderData[0].id);
                                     }
-                                  } catch (err) {
+                                    setIsPODDialogOpen(true);
+                                  } catch (err: any) {
                                     console.error(err);
+                                    toast({
+                                      title: "Error opening dialog",
+                                      description: getErrorMessage(err) || "An unexpected error occurred",
+                                      variant: "destructive"
+                                    });
                                   }
                                 }}
                               >

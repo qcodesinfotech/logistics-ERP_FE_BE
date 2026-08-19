@@ -10,6 +10,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,50 @@ export default function InvoicesPage() {
 
   const { data: bankAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/bank-accounts"] });
   const { data: pettyCashAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/petty-cash"] });
+
+  const [isQuickBankDialogOpen, setIsQuickBankDialogOpen] = useState(false);
+  const [quickBankName, setQuickBankName] = useState("");
+  const [quickBankAccountName, setQuickBankAccountName] = useState("");
+  const [quickBankAccountNumber, setQuickBankAccountNumber] = useState("");
+  const [quickBankIban, setQuickBankIban] = useState("");
+  const [quickBankBalance, setQuickBankBalance] = useState("0");
+
+  const [isQuickCashDialogOpen, setIsQuickCashDialogOpen] = useState(false);
+  const [quickCashName, setQuickCashName] = useState("");
+  const [quickCashBalance, setQuickCashBalance] = useState("0");
+
+  const quickAddBankMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/bank-accounts", data),
+    onSuccess: (newAccount: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-accounts"] });
+      toast({ title: "Bank account registered successfully!" });
+      setPaymentAccountId(newAccount.id);
+      setIsQuickBankDialogOpen(false);
+      setQuickBankName("");
+      setQuickBankAccountName("");
+      setQuickBankAccountNumber("");
+      setQuickBankIban("");
+      setQuickBankBalance("0");
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const quickAddCashMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/petty-cash", data),
+    onSuccess: (newAccount: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash"] });
+      toast({ title: "Cash Box registered successfully!" });
+      setPaymentAccountId(newAccount.id);
+      setIsQuickCashDialogOpen(false);
+      setQuickCashName("");
+      setQuickCashBalance("0");
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
 
   const paymentMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -261,13 +306,13 @@ export default function InvoicesPage() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={invoice.paymentStatus || "unpaid"} />
+                        <StatusBadge status={invoice.status || "unpaid"} />
                       </TableCell>
                       <TableCell className="font-semibold text-primary">
                         {formatCurrency(invoice.total)}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
-                        {invoice.paymentStatus !== "paid" && (
+                        {invoice.status !== "paid" && (
                           <Button variant="outline" size="sm" onClick={() => handlePayClick(invoice)}>
                             <CreditCard className="h-4 w-4 mr-1" /> Pay
                           </Button>
@@ -332,7 +377,17 @@ export default function InvoicesPage() {
 
             {(paymentMethod === "bank_transfer" || paymentMethod === "cheque") && (
               <div className="space-y-2">
-                <Label>Select Bank Account</Label>
+                <div className="flex justify-between items-center mb-1">
+                  <Label>Select Bank Account</Label>
+                  <Button 
+                    type="button" 
+                    variant="link" 
+                    className="h-auto p-0 text-xs text-primary font-medium hover:underline"
+                    onClick={() => setIsQuickBankDialogOpen(true)}
+                  >
+                    + Quick Add Bank Account
+                  </Button>
+                </div>
                 <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select an account" />
@@ -350,7 +405,17 @@ export default function InvoicesPage() {
 
             {paymentMethod === "cash" && (
               <div className="space-y-2">
-                <Label>Select Petty Cash Account</Label>
+                <div className="flex justify-between items-center mb-1">
+                  <Label>Select Petty Cash Account</Label>
+                  <Button 
+                    type="button" 
+                    variant="link" 
+                    className="h-auto p-0 text-xs text-primary font-medium hover:underline"
+                    onClick={() => setIsQuickCashDialogOpen(true)}
+                  >
+                    + Quick Add Cash Box
+                  </Button>
+                </div>
                 <Select value={paymentAccountId} onValueChange={setPaymentAccountId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select an account" />
@@ -382,6 +447,132 @@ export default function InvoicesPage() {
               disabled={paymentMutation.isPending}
             >
               {paymentMutation.isPending ? "Processing..." : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Bank Account Dialog */}
+      <Dialog open={isQuickBankDialogOpen} onOpenChange={setIsQuickBankDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quick Register Bank Account</DialogTitle>
+            <DialogDescription>
+              Add a new bank account to the ERP registry to record transactions.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Bank Name *</Label>
+              <Input
+                value={quickBankName}
+                onChange={(e) => setQuickBankName(e.target.value)}
+                placeholder="e.g. Bank Muscat"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Account Name *</Label>
+              <Input
+                value={quickBankAccountName}
+                onChange={(e) => setQuickBankAccountName(e.target.value)}
+                placeholder="e.g. Globe Link Logistics B.H.D"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Account Number *</Label>
+              <Input
+                value={quickBankAccountNumber}
+                onChange={(e) => setQuickBankAccountNumber(e.target.value)}
+                placeholder="e.g. 1029384756"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>IBAN (Optional)</Label>
+              <Input
+                value={quickBankIban}
+                onChange={(e) => setQuickBankIban(e.target.value)}
+                placeholder="e.g. OM98BANK123456789012"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Opening Balance *</Label>
+              <Input
+                type="number"
+                value={quickBankBalance}
+                onChange={(e) => setQuickBankBalance(e.target.value)}
+                placeholder="0.000"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsQuickBankDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!quickBankName || !quickBankAccountName || !quickBankAccountNumber) {
+                  toast({ title: "Please fill in all required fields", variant: "destructive" });
+                  return;
+                }
+                quickAddBankMutation.mutate({
+                  bankName: quickBankName,
+                  name: quickBankAccountName,
+                  accountNumber: quickBankAccountNumber,
+                  openingBalance: quickBankBalance,
+                  currentBalance: quickBankBalance,
+                });
+              }}
+              disabled={quickAddBankMutation.isPending}
+            >
+              {quickAddBankMutation.isPending ? "Saving..." : "Add Bank Account"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Petty Cash Box Dialog */}
+      <Dialog open={isQuickCashDialogOpen} onOpenChange={setIsQuickCashDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quick Register Cash Box</DialogTitle>
+            <DialogDescription>
+              Add a new cash box/petty cash ledger to register cash receipts.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Cash Box / Ledger Name *</Label>
+              <Input
+                value={quickCashName}
+                onChange={(e) => setQuickCashName(e.target.value)}
+                placeholder="e.g. Main Safe, Branch Cash Drawer"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Opening Balance *</Label>
+              <Input
+                type="number"
+                value={quickCashBalance}
+                onChange={(e) => setQuickCashBalance(e.target.value)}
+                placeholder="0.000"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsQuickCashDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!quickCashName) {
+                  toast({ title: "Ledger name is required", variant: "destructive" });
+                  return;
+                }
+                quickAddCashMutation.mutate({
+                  name: quickCashName,
+                  openingBalance: quickCashBalance,
+                  currentBalance: quickCashBalance,
+                });
+              }}
+              disabled={quickAddCashMutation.isPending}
+            >
+              {quickAddCashMutation.isPending ? "Saving..." : "Add Cash Box"}
             </Button>
           </DialogFooter>
         </DialogContent>

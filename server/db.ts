@@ -268,6 +268,40 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "additional_charges" numeric(12, 3) DEFAULT 0.000;
       ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "payment_terms" text;
       ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "outstanding_amount" numeric(12, 3) DEFAULT 0.000;
+
+      -- deliveries and delivery attachments
+      CREATE TABLE IF NOT EXISTS "deliveries" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "trip_id" varchar NOT NULL,
+        "order_id" varchar NOT NULL,
+        "status" text NOT NULL DEFAULT 'pending',
+        "pod_url" text,
+        "issue_log" text,
+        "delivery_timestamp" timestamp,
+        "created_at" timestamp DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS "delivery_docs" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "delivery_id" varchar NOT NULL,
+        "order_id" varchar NOT NULL,
+        "trip_id" varchar NOT NULL,
+        "outlet_id" varchar,
+        "pod_url" text NOT NULL,
+        "status" text NOT NULL,
+        "issue_log" text,
+        "created_at" timestamp DEFAULT now()
+      );
+
+      -- Backfill existing 0-amount invoices from their orders
+      UPDATE invoices
+      SET 
+        subtotal = orders.grand_total,
+        rate = orders.grand_total,
+        total = orders.grand_total,
+        outstanding_amount = orders.grand_total
+      FROM orders
+      WHERE invoices.order_id = orders.id AND (invoices.total = '0.000' OR invoices.total IS NULL);
     `);
     schemaCheckDone = true;
     console.log("[db] Driver tables schema verified and updated successfully");
