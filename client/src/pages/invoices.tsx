@@ -25,12 +25,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CreditCard } from "lucide-react";
 
 export default function InvoicesPage() {
-  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const [paymentOrder, setPaymentOrder] = useState<any | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<any | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [paymentAccountId, setPaymentAccountId] = useState("");
@@ -41,23 +41,21 @@ export default function InvoicesPage() {
 
   const paymentMutation = useMutation({
     mutationFn: async (data: any) => {
-      return apiRequest("POST", `/api/orders/${paymentOrder.id}/pay`, data);
+      return apiRequest("POST", `/api/invoices/${paymentInvoice.id}/pay`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Payment recorded successfully" });
-      setPaymentOrder(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      toast({ title: "Payment recorded successfully and accounting ledger entries posted!" });
+      setPaymentInvoice(null);
     },
     onError: (error) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
     }
   });
 
-  const handlePayClick = (order: any) => {
-    setPaymentOrder(order);
-    // Initial guess, will be updated by useEffect when orderDetails loads
-    const balance = Number(order.grandTotal || 0) - Number(order.paidAmount || 0);
-    setPaymentAmount(balance.toFixed(3));
+  const handlePayClick = (invoice: any) => {
+    setPaymentInvoice(invoice);
+    setPaymentAmount(parseFloat(invoice.outstandingAmount || "0").toFixed(3));
     setPaymentMethod("bank_transfer");
     setPaymentAccountId("");
     setPaymentReference("");
@@ -78,7 +76,6 @@ export default function InvoicesPage() {
     }
     
     paymentMutation.mutate({
-      customerId: paymentOrder.customerId,
       amount: paymentAmount,
       paymentMethod,
       reference: paymentReference,
@@ -95,9 +92,9 @@ export default function InvoicesPage() {
     }).format(parseFloat(val || "0"));
   };
 
-  // Fetch orders
-  const { data: orders = [], isLoading: loadingOrders } = useQuery<Order[]>({
-    queryKey: ["/api/orders"],
+  // Fetch invoices
+  const { data: invoicesList = [], isLoading: loadingInvoices } = useQuery<any[]>({
+    queryKey: ["/api/invoices"],
   });
 
   // Fetch clients for mapping
@@ -105,50 +102,22 @@ export default function InvoicesPage() {
     queryKey: ["/api/clients"],
   });
 
-  // Fetch specific order details (including charges) when viewing invoice or paying
-  const activeOrderId = selectedOrder?.id || paymentOrder?.id;
-  const { data: orderDetails, isLoading: loadingDetails } = useQuery<{ order: any, charges: any[] }>({
-    queryKey: [activeOrderId ? `/api/orders/${activeOrderId}` : null],
-    enabled: !!activeOrderId,
+  // Fetch trips for description lookup
+  const { data: tripsList = [] } = useQuery<any[]>({
+    queryKey: ["/api/trips"],
   });
 
-  // Dynamically calculate the accurate grand total and payment amount when orderDetails load
-  useEffect(() => {
-    if (paymentOrder && orderDetails?.charges) {
-      const charges = orderDetails.charges.filter((c: any) => !c.isProfit);
-      const invoiceSubtotal = charges.reduce((acc: number, curr: any) => {
-        return acc + (parseFloat(curr.qty || 1) * parseFloat(curr.unitRate || 0));
-      }, 0);
-      
-      const detention = parseFloat(paymentOrder.detentionChargesPerDay || 0); // Note: Should ideally be precise detention
-      const dynamicGrandTotal = invoiceSubtotal; // Just use subtotal for now as detention isn't dynamically easily calculable without route iteration here, but this works for most cases
-      
-      const balance = dynamicGrandTotal - Number(paymentOrder.paidAmount || 0);
-      setPaymentAmount(balance.toFixed(3));
-      
-      // We temporarily update paymentOrder state so the modal displays the right total
-      setPaymentOrder({ ...paymentOrder, grandTotal: dynamicGrandTotal.toFixed(3) });
-    }
-  }, [orderDetails, paymentOrder?.id]);
-
-  const handleViewInvoice = (order: Order) => {
-    setSelectedOrder(order);
+  const handleViewInvoice = (invoice: any) => {
+    setSelectedInvoice(invoice);
     setIsInvoiceDialogOpen(true);
   };
 
   const renderInvoiceModal = () => {
-    if (!selectedOrder) return null;
+    if (!selectedInvoice) return null;
 
-    const orderData = orderDetails?.order || selectedOrder;
-    const client = clients.find(c => c.id === orderData.customerId);
+    const client = clients.find(c => c.id === selectedInvoice.customerId);
+    const trip = tripsList.find(t => t.id === selectedInvoice.tripId);
     
-    // Crucial Logic: Filter out company profit
-    const charges = (orderDetails?.charges || []).filter((c: any) => !c.isProfit);
-    
-    const invoiceSubtotal = charges.reduce((acc: number, curr: any) => {
-      return acc + (parseFloat(curr.qty || 1) * parseFloat(curr.unitRate || 0));
-    }, 0);
-
     return (
       <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -156,91 +125,80 @@ export default function InvoicesPage() {
             <DialogTitle>Trucking Invoice</DialogTitle>
           </DialogHeader>
           
-          {loadingDetails ? (
-            <div className="flex justify-center p-12">Loading invoice details...</div>
-          ) : (
-            <div className="space-y-8 bg-white text-black p-8 border rounded-md">
-              <div className="flex justify-between items-start border-b pb-6">
-                <div>
-                  <h1 className="text-3xl font-bold uppercase text-gray-800">Invoice</h1>
-                  <p className="text-gray-500 mt-1">Invoice #: {orderData.orderNumber}</p>
-                  <p className="text-gray-500">Date: {orderData.orderDate ? format(new Date(orderData.orderDate), 'PPP') : 'N/A'}</p>
-                  <p className="text-gray-500">Due Date: {orderData.paymentDueDate ? format(new Date(orderData.paymentDueDate), 'PPP') : 'N/A'}</p>
-                </div>
-                <div className="text-right">
-                  <h2 className="font-semibold text-lg text-gray-800">Logistics ERP</h2>
-                  <p className="text-gray-600 text-sm">Bahrain</p>
-                </div>
+          <div className="space-y-8 bg-white text-black p-8 border rounded-md">
+            <div className="flex justify-between items-start border-b pb-6">
+              <div>
+                <h1 className="text-3xl font-bold uppercase text-gray-800">Invoice</h1>
+                <p className="text-gray-500 mt-1">Invoice #: {selectedInvoice.invoiceNumber}</p>
+                <p className="text-gray-500">Date: {selectedInvoice.createdAt ? format(new Date(selectedInvoice.createdAt), 'PPP') : 'N/A'}</p>
+                <p className="text-gray-500">Due Date: {selectedInvoice.paymentDueDate ? format(new Date(selectedInvoice.paymentDueDate), 'PPP') : 'N/A'}</p>
               </div>
-
-              <div className="flex justify-between">
-                <div className="space-y-1">
-                  <p className="font-semibold text-gray-600 uppercase text-xs">Bill To</p>
-                  <p className="font-bold text-gray-800">{client?.companyName || client?.name}</p>
-                  <p className="text-gray-600 text-sm">{client?.address}</p>
-                  <p className="text-gray-600 text-sm">{client?.phone}</p>
-                </div>
-                <div className="space-y-1 text-right">
-                  <p className="font-semibold text-gray-600 uppercase text-xs">Trip Details</p>
-                  <p className="text-gray-800 text-sm"><span className="font-semibold">Origin:</span> {
-                    (Array.isArray(orderData.routeLegs) && orderData.routeLegs.length > 0)
-                      ? `${orderData.routeLegs[0].originCity || ""}, ${orderData.routeLegs[0].originCountry || ""}`
-                      : `${orderData.originCity || "N/A"}, ${orderData.originCountry || ""}`
-                  }</p>
-                  <p className="text-gray-800 text-sm">
-                    <span className="font-semibold">Destinations:</span>{' '}
-                    {
-                      (Array.isArray(orderData.routeLegs) && orderData.routeLegs.length > 0)
-                        ? orderData.routeLegs.map((leg: any) => `${leg.destinationCity || ""}, ${leg.destinationCountry || ""}`).join(' | ')
-                        : (orderData.destinations?.map((d: any) => `${d.city}, ${d.country}`).join(' | ') || 'N/A')
-                    }
-                  </p>
-                  <p className="text-gray-800 text-sm"><span className="font-semibold">Cargo:</span> {orderData.cargoDetails} ({orderData.weight} Tons)</p>
-                  <p className="text-gray-800 text-sm"><span className="font-semibold">Truck Type:</span> {orderData.truckType}</p>
-                </div>
+              <div className="text-right">
+                <h2 className="font-semibold text-lg text-gray-800">Logistics ERP</h2>
+                <p className="text-gray-600 text-sm">Bahrain</p>
               </div>
+            </div>
 
-              <div className="pt-4">
-                <Table className="border">
-                  <TableHeader className="bg-gray-50">
-                    <TableRow>
-                      <TableHead className="w-[50px] font-bold text-gray-800">#</TableHead>
-                      <TableHead className="font-bold text-gray-800">Description</TableHead>
-                      <TableHead className="text-right font-bold text-gray-800">Qty</TableHead>
-                      <TableHead className="text-right font-bold text-gray-800">Unit Price</TableHead>
-                      <TableHead className="text-right font-bold text-gray-800">Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {charges.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center text-gray-500 py-6">No charge items found.</TableCell>
-                      </TableRow>
-                    ) : (
-                      charges.map((charge: any, idx: number) => (
-                        <TableRow key={idx}>
-                          <TableCell className="font-medium text-gray-800">{idx + 1}</TableCell>
-                          <TableCell className="text-gray-800">{charge.description}</TableCell>
-                          <TableCell className="text-right text-gray-800">{parseFloat(charge.qty || 1)}</TableCell>
-                          <TableCell className="text-right text-gray-800">{formatCurrency(charge.unitRate || 0)}</TableCell>
-                          <TableCell className="text-right text-gray-800">{formatCurrency(parseFloat(charge.qty || 1) * parseFloat(charge.unitRate || 0))}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+            <div className="flex justify-between">
+              <div className="space-y-1">
+                <p className="font-semibold text-gray-600 uppercase text-xs">Bill To</p>
+                <p className="font-bold text-gray-800">{client?.companyName || client?.name}</p>
+                <p className="text-gray-600 text-sm">{client?.address}</p>
+                <p className="text-gray-600 text-sm">{client?.phone}</p>
               </div>
+              <div className="space-y-1 text-right">
+                <p className="font-semibold text-gray-600 uppercase text-xs">Trip Details</p>
+                {trip ? (
+                  <>
+                    <p className="text-gray-800 text-sm"><span className="font-semibold">Route:</span> {trip.route}</p>
+                    <p className="text-gray-800 text-sm"><span className="font-semibold">Truck Model/Plates:</span> {trip.truckPlateNumber || "N/A"}</p>
+                    <p className="text-gray-800 text-sm"><span className="font-semibold">Driver:</span> {trip.driverName || "N/A"}</p>
+                  </>
+                ) : (
+                  <p className="text-gray-500 text-sm">Trip ID: {selectedInvoice.tripId}</p>
+                )}
+              </div>
+            </div>
 
-              <div className="flex justify-end pt-4">
-                <div className="w-64 space-y-3">
-                  <div className="flex justify-between font-bold text-lg border-t-2 pt-2 border-gray-800 text-gray-800">
-                    <span>Total:</span>
-                    <span>{formatCurrency(invoiceSubtotal)}</span>
-                  </div>
+            <div className="pt-4">
+              <Table className="border">
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="w-[50px] font-bold text-gray-800">#</TableHead>
+                    <TableHead className="font-bold text-gray-800">Description</TableHead>
+                    <TableHead className="text-right font-bold text-gray-800">Qty</TableHead>
+                    <TableHead className="text-right font-bold text-gray-800">Unit Price</TableHead>
+                    <TableHead className="text-right font-bold text-gray-800">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-800">1</TableCell>
+                    <TableCell className="text-gray-800">
+                      Freight Transportation Service
+                      {trip && <span className="text-xs text-muted-foreground block">Route: {trip.route}</span>}
+                    </TableCell>
+                    <TableCell className="text-right text-gray-800">1</TableCell>
+                    <TableCell className="text-right text-gray-800">{formatCurrency(selectedInvoice.total)}</TableCell>
+                    <TableCell className="text-right text-gray-800">{formatCurrency(selectedInvoice.total)}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="flex justify-end pt-4">
+              <div className="w-64 space-y-3">
+                <div className="flex justify-between font-bold text-lg border-t-2 pt-2 border-gray-800 text-gray-800">
+                  <span>Total Invoice Amount:</span>
+                  <span>{formatCurrency(selectedInvoice.total)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>Outstanding Balance:</span>
+                  <span>{formatCurrency(selectedInvoice.outstandingAmount)}</span>
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
           <DialogFooter className="mt-6 flex gap-2 sm:justify-end">
             <Button variant="outline" onClick={() => setIsInvoiceDialogOpen(false)}>Close</Button>
@@ -280,42 +238,41 @@ export default function InvoicesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loadingOrders ? (
+              {loadingInvoices ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">Loading invoices...</TableCell>
+                  <TableCell colSpan={7} className="text-center py-8">Loading invoices...</TableCell>
                 </TableRow>
-              ) : orders.length === 0 ? (
+              ) : invoicesList.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No invoices found.</TableCell>
+                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No invoices found.</TableCell>
                 </TableRow>
               ) : (
-                orders.map((order) => {
-                  const client = clients.find(c => c.id === order.customerId);
+                invoicesList.map((invoice) => {
+                  const client = clients.find(c => c.id === invoice.customerId);
+                  const trip = tripsList.find(t => t.id === invoice.tripId);
                   return (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.orderNumber}</TableCell>
+                    <TableRow key={invoice.id}>
+                      <TableCell className="font-semibold">{invoice.invoiceNumber}</TableCell>
                       <TableCell>{client?.companyName || client?.name || "Unknown"}</TableCell>
-                      <TableCell>{order.orderDate ? format(new Date(order.orderDate), 'MMM dd, yyyy') : 'N/A'}</TableCell>
+                      <TableCell>{invoice.createdAt ? format(new Date(invoice.createdAt), 'MMM dd, yyyy') : 'N/A'}</TableCell>
                       <TableCell>
                         <span className="text-xs">
-                          {Array.isArray(order.routeLegs) && order.routeLegs.length > 0 
-                            ? `${(order.routeLegs[0] as any).originCity || ""} \u2192 ${(order.routeLegs[order.routeLegs.length - 1] as any).destinationCity || ""}`
-                            : `${order.originCity || "N/A"} \u2192 ${(order.destinations as any)?.[0]?.city || "N/A"}`}
+                          {trip?.route || "Freight service charges"}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={order.status} />
+                        <StatusBadge status={invoice.paymentStatus || "unpaid"} />
                       </TableCell>
-                      <TableCell>
-                        <StatusBadge status={order.paymentStatus || "unpaid"} />
+                      <TableCell className="font-semibold text-primary">
+                        {formatCurrency(invoice.total)}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
-                        {order.paymentStatus !== "paid" && (
-                          <Button variant="outline" size="sm" onClick={() => handlePayClick(order)}>
+                        {invoice.paymentStatus !== "paid" && (
+                          <Button variant="outline" size="sm" onClick={() => handlePayClick(invoice)}>
                             <CreditCard className="h-4 w-4 mr-1" /> Pay
                           </Button>
                         )}
-                        <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(order)}>
+                        <Button variant="ghost" size="sm" onClick={() => handleViewInvoice(invoice)}>
                           <Receipt className="h-4 w-4 mr-1" /> View
                         </Button>
                       </TableCell>
@@ -331,20 +288,20 @@ export default function InvoicesPage() {
       {renderInvoiceModal()}
 
       {/* Payment Modal */}
-      <Dialog open={!!paymentOrder} onOpenChange={(open) => !open && setPaymentOrder(null)}>
+      <Dialog open={!!paymentInvoice} onOpenChange={(open) => !open && setPaymentInvoice(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Record Payment for {paymentOrder?.orderNumber}</DialogTitle>
+            <DialogTitle>Record Payment for {paymentInvoice?.invoiceNumber}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex justify-between bg-gray-50 p-3 rounded border">
               <div className="flex flex-col text-sm">
                 <span className="text-muted-foreground">Invoice Total</span>
-                <span className="font-semibold">{formatCurrency(paymentOrder?.grandTotal || 0)}</span>
+                <span className="font-semibold">{formatCurrency(paymentInvoice?.total || 0)}</span>
               </div>
               <div className="flex flex-col text-sm">
-                <span className="text-muted-foreground">Amount Paid</span>
-                <span className="font-semibold">{formatCurrency(paymentOrder?.paidAmount || 0)}</span>
+                <span className="text-muted-foreground">Outstanding Balance</span>
+                <span className="font-semibold">{formatCurrency(paymentInvoice?.outstandingAmount || 0)}</span>
               </div>
             </div>
 
@@ -381,7 +338,7 @@ export default function InvoicesPage() {
                     <SelectValue placeholder="Select an account" />
                   </SelectTrigger>
                   <SelectContent>
-                    {bankAccounts.map((account) => (
+                    {bankAccounts.map((account: any) => (
                       <SelectItem key={account.id} value={account.id}>
                         {account.bankName} - {account.accountNumber}
                       </SelectItem>
@@ -399,7 +356,7 @@ export default function InvoicesPage() {
                     <SelectValue placeholder="Select an account" />
                   </SelectTrigger>
                   <SelectContent>
-                    {pettyCashAccounts.map((account) => (
+                    {pettyCashAccounts.map((account: any) => (
                       <SelectItem key={account.id} value={account.id}>
                         {account.name}
                       </SelectItem>
@@ -419,7 +376,7 @@ export default function InvoicesPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPaymentOrder(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setPaymentInvoice(null)}>Cancel</Button>
             <Button 
               onClick={handlePaymentSubmit} 
               disabled={paymentMutation.isPending}

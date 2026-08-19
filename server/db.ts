@@ -176,6 +176,98 @@ export async function ensureDriverTablesSchema() {
         "sequence" integer NOT NULL DEFAULT 0,
         "created_at" timestamp DEFAULT now()
       );
+
+      -- rfqs
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "cargo_details" text;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "temperature_requirement" text;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "weight" numeric(10, 3) DEFAULT 0.000;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "volume" numeric(10, 3) DEFAULT 0.000;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "requested_pickup_date" timestamp;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "requested_delivery_date" timestamp;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "additional_requirements" text;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "notes" text;
+
+      -- quotations
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "rfq_id" varchar;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "origin_location_id" varchar;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "destination_location_id" varchar;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "cargo_details" text;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "weight" numeric(10, 3) DEFAULT 0.000;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "volume" numeric(10, 3) DEFAULT 0.000;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "temperature_requirement" text;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "selling_rate" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "additional_charges" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "payment_terms" text;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "version" integer DEFAULT 1;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "parent_id" varchar;
+
+      -- orders
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "quotation_id" varchar;
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "volume" numeric(10, 3) DEFAULT 0.000;
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "temperature_requirement" text;
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "special_instructions" text;
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "customer_reference" text;
+
+      -- trips
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "order_id" varchar;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "trailer_number" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "planned_pickup_date" timestamp;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "planned_delivery_date" timestamp;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "actual_pickup_date" date;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "actual_pickup_time" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "loaded_quantity" numeric(10, 3);
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "cargo_condition" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "loading_notes" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "loading_documents" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "loading_images" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "current_location" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "gps_location" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "delays" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "incidents" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "additional_expenses" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "actual_delivery_date" date;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "actual_delivery_time" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "delivered_quantity" numeric(10, 3);
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "received_quantity" numeric(10, 3);
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "shortage_quantity" numeric(10, 3);
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "damaged_quantity" numeric(10, 3);
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "damage_reason" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "receiver_name" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "receiver_contact" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "signed_pod_url" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "pod_images" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "delivery_notes" text;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "pod_verification_status" text DEFAULT 'pending';
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "verified_by" varchar;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "verified_at" timestamp;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_entitlement" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_advance" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_tolls" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_fuel" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_other_expenses" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_total_expenses" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_deductions" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_balance_payable" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_settlement_receipts" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "driver_settlement_status" text DEFAULT 'pending';
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "selling_rate" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "additional_charges" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "total_revenue" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "maintenance_cost" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "other_trip_expenses" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "total_trip_cost" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "gross_profit" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "profit_margin" numeric(5, 2) DEFAULT 0.00;
+
+      -- invoices
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "origin" text;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "destination" text;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "service_details" text;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "quantity" numeric(12, 3) DEFAULT 1.000;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "rate" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "additional_charges" numeric(12, 3) DEFAULT 0.000;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "payment_terms" text;
+      ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "outstanding_amount" numeric(12, 3) DEFAULT 0.000;
     `);
     schemaCheckDone = true;
     console.log("[db] Driver tables schema verified and updated successfully");

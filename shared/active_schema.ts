@@ -74,7 +74,11 @@ import {
   invoicePayments,
   routes,
   fmcgInvoices,
-  fmcgInvoiceItems
+  fmcgInvoiceItems,
+  quotations,
+  quotationItems,
+  invoices,
+  dispatchOutletSequences
 } from "./schema";
 
 export {
@@ -153,5 +157,9 @@ export {
   invoicePayments,
   routes,
   fmcgInvoices,
-  fmcgInvoiceItems
+  fmcgInvoiceItems,
+  quotations,
+  quotationItems,
+  invoices,
+  dispatchOutletSequences
 };

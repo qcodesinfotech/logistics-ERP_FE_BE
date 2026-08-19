@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db, ensureDriverTablesSchema } from "./db";
-import { eq, and, or, inArray, desc, isNull } from "drizzle-orm";
+import { eq, and, or, inArray, desc, isNull, ne } from "drizzle-orm";
 import PDFDocument from "pdfkit";
 import * as schema from "@shared/schema";
 import { z } from "zod";
@@ -8137,6 +8137,42 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/rfqs/:id/convert-to-quotation", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const rfq = await storage.getRfq(req.params.id);
+      if (!rfq) return res.status(404).json({ error: "RFQ not found" });
+
+      const quotations = await storage.getQuotations();
+      const quotationCount = quotations.length;
+      const quotationNumber = `QT-${(quotationCount + 1).toString().padStart(6, "0")}-v1`;
+
+      const quotation = await storage.createQuotation({
+        quotationNumber,
+        customerId: rfq.customerId,
+        rfqId: rfq.id,
+        status: "pending",
+        cargoDetails: rfq.cargoDetails || `Transit Route: ${rfq.transitRoute}`,
+        weight: rfq.weight || "0.000",
+        volume: rfq.volume || "0.000",
+        temperatureRequirement: rfq.temperatureRequirement,
+        sellingRate: rfq.transportationCharges || "0.000",
+        additionalCharges: (rfq.extraCharges as any[]) || [],
+        paymentTerms: "Net 30",
+        version: 1,
+        total: (parseFloat(rfq.transportationCharges || "0") + 
+                ((rfq.extraCharges as any[]) || []).reduce((sum, c) => sum + parseFloat(c.cost || "0"), 0)).toFixed(3),
+        validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        currency: "BHD",
+      });
+
+      await storage.updateRfq(rfq.id, { status: "approved" });
+      res.status(201).json(quotation);
+    } catch (error: any) {
+      console.error("Convert RFQ to Quotation error:", error);
+      res.status(500).json({ error: "Failed to convert RFQ to Quotation: " + error.message });
+    }
+  });
+
   // Logistics Orders API
   app.get("/api/orders", authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -8233,18 +8269,54 @@ export async function registerRoutes(
       if (!tripData.vehicleId || !tripData.driverId) {
         return res.status(400).json({ error: "vehicleId and driverId are required" });
       }
+
+      const truck = await storage.getVehicle(tripData.vehicleId);
+      if (!truck) return res.status(404).json({ error: "Truck not found" });
+      if (truck.status === 'maintenance') {
+        return res.status(400).json({ error: "Selected truck is in maintenance" });
+      }
+
+      const activeVehicleTrips = await db.select().from(schema.trips).where(
+        and(
+          eq(schema.trips.vehicleId, tripData.vehicleId),
+          ne(schema.trips.status, 'completed'),
+          ne(schema.trips.status, 'cancelled')
+        )
+      );
+      if (activeVehicleTrips.length > 0) {
+        return res.status(400).json({ error: "Truck is already assigned to another active trip" });
+      }
+
+      const activeDriverTrips = await db.select().from(schema.trips).where(
+        and(
+          eq(schema.trips.driverId, tripData.driverId),
+          ne(schema.trips.status, 'completed'),
+          ne(schema.trips.status, 'cancelled')
+        )
+      );
+      if (activeDriverTrips.length > 0) {
+        return res.status(400).json({ error: "Driver is already assigned to another active trip" });
+      }
+
       const trip = await storage.createTrip({ ...tripData, orderIds: orderIds || [] });
+      await storage.updateVehicle(tripData.vehicleId, { status: "in_transit" });
+
       res.status(201).json(trip);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Create trip error:", error);
-      res.status(500).json({ error: "Failed to create trip" });
+      res.status(500).json({ error: "Failed to create trip: " + error.message });
     }
   });
 
-  app.put("/api/trips/:id", authMiddleware, validateBody(insertTripSchema.partial()), async (req: AuthRequest, res) => {
+  app.put("/api/trips/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const trip = await storage.updateTrip(req.params.id, req.body);
       if (!trip) return res.status(404).json({ error: "Trip not found" });
+
+      if (req.body.status === "completed" || req.body.status === "cancelled") {
+        await storage.updateVehicle(trip.vehicleId, { status: "available" });
+      }
+
       res.json(trip);
     } catch (error) {
       console.error("Update trip error:", error);
@@ -8283,6 +8355,347 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Update delivery error:", error);
       res.status(500).json({ error: "Failed to update delivery status" });
+    }
+  });
+
+  // Quotation Convert & Revise API
+  app.post("/api/quotations/:id/convert-to-booking", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const quotation = await storage.getQuotation(req.params.id);
+      if (!quotation) return res.status(404).json({ error: "Quotation not found" });
+      if (quotation.status !== "approved") {
+        return res.status(400).json({ error: "Only approved quotations can be converted to bookings" });
+      }
+
+      const origin = quotation.originLocationId ? await storage.getLocation(quotation.originLocationId) : null;
+      const destination = quotation.destinationLocationId ? await storage.getLocation(quotation.destinationLocationId) : null;
+      const bookingNumber = `ORD-${Date.now()}`;
+
+      const order = await storage.createOrder({
+        orderNumber: bookingNumber,
+        customerId: quotation.customerId!,
+        rfqId: quotation.rfqId,
+        quotationId: quotation.id,
+        cargoDetails: quotation.cargoDetails || `Transit from ${origin?.name || 'Origin'} to ${destination?.name || 'Destination'}`,
+        weight: quotation.weight || "0.000",
+        volume: quotation.volume || "0.000",
+        loadType: "FTL",
+        pickupLocationId: quotation.originLocationId,
+        deliveryLocationId: quotation.destinationLocationId,
+        status: "pending",
+        cargoType: "general",
+        truckType: quotation.temperatureRequirement ? "Reefer" : "Flatbed",
+        freightType: "FTL",
+        detentionChargesPerDay: "0.000",
+        grandTotal: quotation.total || "0.000",
+        temperatureRequirement: quotation.temperatureRequirement,
+        orderDate: new Date(),
+        paymentDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        charges: [
+          {
+            description: "Transportation Rate",
+            qty: 1,
+            unitRate: parseFloat(quotation.sellingRate || "0"),
+            total: parseFloat(quotation.sellingRate || "0").toFixed(3)
+          },
+          ...((quotation.additionalCharges as any[]) || []).map(c => ({
+            description: c.name || "Additional Charge",
+            qty: 1,
+            unitRate: parseFloat(c.cost || "0"),
+            total: parseFloat(c.cost || "0").toFixed(3)
+          }))
+        ]
+      });
+
+      await storage.updateQuotation(quotation.id, { status: "converted" });
+      res.status(201).json(order);
+    } catch (error: any) {
+      console.error("Convert quotation error:", error);
+      res.status(500).json({ error: "Failed to convert quotation to booking: " + error.message });
+    }
+  });
+
+  app.post("/api/quotations/:id/revise", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const parentId = req.params.id;
+      const parent = await storage.getQuotation(parentId);
+      if (!parent) return res.status(404).json({ error: "Quotation not found" });
+
+      await storage.updateQuotation(parentId, { status: "expired" });
+
+      const newVersion = (parent.version || 1) + 1;
+      const baseNum = parent.quotationNumber.split("-v")[0];
+      const quotationNumber = `${baseNum}-v${newVersion}`;
+
+      const revised = await storage.createQuotation({
+        ...parent,
+        ...req.body,
+        id: undefined,
+        quotationNumber,
+        version: newVersion,
+        parentId,
+        status: "pending",
+        createdAt: new Date(),
+      });
+
+      res.status(201).json(revised);
+    } catch (error: any) {
+      console.error("Revise quotation error:", error);
+      res.status(500).json({ error: "Failed to revise quotation: " + error.message });
+    }
+  });
+
+  // Trip POD Verification & Settlement API
+  app.post("/api/trips/:id/verify-pod", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const verifiedBy = req.user?.name || "System Admin";
+      const trip = await storage.verifyTripPod(req.params.id, verifiedBy);
+      res.json(trip);
+    } catch (error: any) {
+      console.error("Verify POD error:", error);
+      res.status(500).json({ error: "Failed to verify POD: " + error.message });
+    }
+  });
+
+  app.post("/api/trips/:id/settlement", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      let trip = await storage.saveDriverSettlement(req.params.id, req.body);
+      trip = await storage.calculateTripCosting(req.params.id);
+      res.json(trip);
+    } catch (error: any) {
+      console.error("Driver settlement error:", error);
+      res.status(500).json({ error: "Failed to save driver settlement: " + error.message });
+    }
+  });
+
+  // Invoices & Payments API
+  app.get("/api/invoices", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const customerId = req.query.customerId as string | undefined;
+      const status = req.query.status as string | undefined;
+      const list = await storage.getInvoices(customerId, status);
+      res.json(list);
+    } catch (error) {
+      console.error("Get invoices error:", error);
+      res.status(500).json({ error: "Failed to fetch invoices" });
+    }
+  });
+
+  app.get("/api/invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      console.error("Get invoice error:", error);
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.post("/api/invoices", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { tripId } = req.body;
+      if (!tripId) return res.status(400).json({ error: "tripId is required" });
+
+      const trip = await storage.getTrip(tripId);
+      if (!trip) return res.status(404).json({ error: "Trip not found" });
+      if (trip.status !== "completed" || trip.podVerificationStatus !== "verified") {
+        return res.status(400).json({ error: "Invoice can only be generated after Trip is Completed and POD is Verified" });
+      }
+
+      const tripOrdersList = await storage.getTripOrders(tripId);
+      const order = tripOrdersList[0];
+      if (!order) return res.status(404).json({ error: "Order details not found for this trip" });
+
+      const invoiceCount = (await storage.getInvoices()).length;
+      const invoiceNumber = `INV-${(invoiceCount + 1).toString().padStart(6, "0")}`;
+
+      const sellingRate = parseFloat(trip.sellingRate || "0");
+      const additionalCharges = parseFloat(trip.additionalCharges || "0");
+      const totalAmount = sellingRate + additionalCharges;
+
+      const invoice = await storage.createInvoice({
+        invoiceNumber,
+        type: "delivery",
+        customerId: order.customerId,
+        orderId: order.id,
+        tripId: trip.id,
+        subtotal: sellingRate.toFixed(3),
+        vatAmount: "0.000",
+        discount: "0.000",
+        total: totalAmount.toFixed(3),
+        status: "draft",
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        origin: trip.route ? trip.route.split(" → ")[0] : "Origin",
+        destination: trip.route ? trip.route.split(" → ").pop() : "Destination",
+        serviceDetails: `Trucking cargo hauling. Job Ref: ${order.orderNumber}`,
+        quantity: "1.000",
+        rate: sellingRate.toFixed(3),
+        additionalCharges: additionalCharges.toFixed(3),
+        paymentTerms: "Net 30",
+        outstandingAmount: totalAmount.toFixed(3)
+      });
+
+      res.status(201).json(invoice);
+    } catch (error: any) {
+      console.error("Create invoice error:", error);
+      res.status(500).json({ error: "Failed to generate invoice: " + error.message });
+    }
+  });
+
+  app.post("/api/invoices/:id/pay", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.payInvoice(req.params.id, req.body);
+      res.json(invoice);
+    } catch (error: any) {
+      console.error("Pay invoice error:", error);
+      res.status(500).json({ error: "Failed to process payment: " + error.message });
+    }
+  });
+
+  // Profitability & Receivables Report APIs
+  app.get("/api/reports/trip-profitability", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const allTrips = await storage.getTrips();
+      const report = allTrips.map(trip => ({
+        tripNumber: trip.tripNumber,
+        orderId: trip.orderId,
+        driverId: trip.driverId,
+        vehicleId: trip.vehicleId,
+        revenue: parseFloat(trip.totalRevenue || "0"),
+        cost: parseFloat(trip.totalTripCost || "0"),
+        profit: parseFloat(trip.grossProfit || "0"),
+        margin: parseFloat(trip.profitMargin || "0"),
+        date: trip.createdAt,
+      }));
+      res.json(report);
+    } catch (error) {
+      console.error("Trip profitability report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  app.get("/api/reports/vehicle-profitability", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const allTrips = await storage.getTrips();
+      const allVehicles = await storage.getVehicles();
+
+      const report = allVehicles.map(vehicle => {
+        const vehicleTrips = allTrips.filter(t => t.vehicleId === vehicle.id);
+        const revenue = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.totalRevenue || "0"), 0);
+        const driverCost = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.driverEntitlement || "0"), 0);
+        const fuelCost = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.driverFuel || "0"), 0);
+        const tollsCost = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.driverTolls || "0"), 0);
+        const otherExpensesCost = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.driverOtherExpenses || "0"), 0);
+        const otherTripExpenses = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.otherTripExpenses || "0"), 0);
+        const maintenanceCost = vehicleTrips.reduce((sum, t) => sum + parseFloat(t.maintenanceCost || "0"), 0);
+        
+        const totalCost = driverCost + fuelCost + tollsCost + otherExpensesCost + otherTripExpenses + maintenanceCost;
+        const profit = revenue - totalCost;
+        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+        return {
+          vehicleId: vehicle.id,
+          name: vehicle.name,
+          plateNumber: vehicle.plateNumber,
+          tripsCount: vehicleTrips.length,
+          revenue,
+          driverCost,
+          fuelCost,
+          tollsCost,
+          otherCost: otherExpensesCost + otherTripExpenses,
+          maintenanceCost,
+          totalCost,
+          profit,
+          margin,
+        };
+      });
+      res.json(report);
+    } catch (error) {
+      console.error("Vehicle profitability report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  app.get("/api/reports/customer-profitability", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const allTrips = await storage.getTrips();
+      const allOrders = await storage.getOrders();
+      const clientsList = await db.select().from(schema.clients);
+
+      const report = clientsList.map(client => {
+        const customerOrders = allOrders.filter(o => o.customerId === client.id);
+        const customerOrderIds = customerOrders.map(o => o.id);
+        const customerTrips = allTrips.filter(t => t.orderId && customerOrderIds.includes(t.orderId));
+        
+        const revenue = customerTrips.reduce((sum, t) => sum + parseFloat(t.totalRevenue || "0"), 0);
+        const totalCost = customerTrips.reduce((sum, t) => sum + parseFloat(t.totalTripCost || "0"), 0);
+        const profit = revenue - totalCost;
+        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+        return {
+          customerId: client.id,
+          name: client.companyName || client.name,
+          tripsCount: customerTrips.length,
+          revenue,
+          totalCost,
+          profit,
+          margin,
+        };
+      });
+      res.json(report);
+    } catch (error) {
+      console.error("Customer profitability report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  app.get("/api/reports/receivables", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const allInvoices = await storage.getInvoices();
+      const clientsList = await db.select().from(schema.clients);
+
+      const report = allInvoices.map(invoice => {
+        const client = clientsList.find(c => c.id === invoice.customerId);
+        const total = parseFloat(invoice.total || "0");
+        const outstanding = parseFloat(invoice.outstandingAmount || "0");
+        const received = total - outstanding;
+        
+        const daysOutstanding = invoice.createdAt 
+          ? Math.floor((Date.now() - new Date(invoice.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+          : 0;
+
+        let agingStatus = "current";
+        if (outstanding > 0) {
+          const dueDate = invoice.dueDate ? new Date(invoice.dueDate).getTime() : 0;
+          if (Date.now() > dueDate) {
+            agingStatus = "overdue";
+          } else {
+            agingStatus = "due";
+          }
+        } else {
+          agingStatus = "paid";
+        }
+
+        return {
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          customerId: invoice.customerId,
+          customerName: client?.companyName || client?.name || "Unknown",
+          date: invoice.createdAt,
+          dueDate: invoice.dueDate,
+          amount: total,
+          amountReceived: received,
+          outstandingAmount: outstanding,
+          paymentTerms: invoice.paymentTerms,
+          daysOutstanding,
+          status: agingStatus,
+        };
+      });
+      res.json(report);
+    } catch (error) {
+      console.error("Receivables report error:", error);
+      res.status(500).json({ error: "Failed to generate report" });
     }
   });
 

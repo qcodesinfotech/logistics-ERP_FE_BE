@@ -53,6 +53,17 @@ export default function DispatchPage() {
   const [podStatus, setPodStatus] = useState<string>("delivered");
   const [podUrl, setPodUrl] = useState<string>("");
   const [issueLog, setIssueLog] = useState<string>("");
+
+  // Driver Settlement States
+  const [isSettlementDialogOpen, setIsSettlementDialogOpen] = useState(false);
+  const [settlementTrip, setSettlementTrip] = useState<any | null>(null);
+  const [settlementEntitlement, setSettlementEntitlement] = useState("0");
+  const [settlementAdvance, setSettlementAdvance] = useState("0");
+  const [settlementTolls, setSettlementTolls] = useState("0");
+  const [settlementFuel, setSettlementFuel] = useState("0");
+  const [settlementOther, setSettlementOther] = useState("0");
+  const [settlementDeductions, setSettlementDeductions] = useState("0");
+  const [settlementStatus, setSettlementStatus] = useState("pending");
   const [isUploading, setIsUploading] = useState(false);
 
   const { toast } = useToast();
@@ -157,6 +168,42 @@ export default function DispatchPage() {
       setSelectedOrderIdForPOD("");
       setPodUrl("");
       setIssueLog("");
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const verifyPODMutation = useMutation({
+    mutationFn: (tripId: string) => apiRequest("POST", `/api/trips/${tripId}/verify-pod`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({ title: "POD verified successfully! Status marked as Completed." });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const saveDriverSettlementMutation = useMutation({
+    mutationFn: ({ tripId, data }: { tripId: string; data: any }) => 
+      apiRequest("POST", `/api/trips/${tripId}/settlement`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({ title: "Driver settlement recorded and trip costing calculated successfully!" });
+      setIsSettlementDialogOpen(false);
+      setSettlementTrip(null);
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const generateInvoiceMutation = useMutation({
+    mutationFn: (tripId: string) => apiRequest("POST", `/api/invoices`, { tripId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      toast({ title: "Invoice generated successfully! Go to Trucking Invoices to view/collect payment." });
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -378,7 +425,6 @@ export default function DispatchPage() {
                                 variant="outline"
                                 className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
                                 onClick={async () => {
-                                  // Fetch order list for this trip to enable POD modal selection
                                   try {
                                     const res = await fetch(`/api/trips/${trip.id}/orders`);
                                     if (res.ok) {
@@ -414,6 +460,49 @@ export default function DispatchPage() {
                                 onClick={() => updateTripStatusMutation.mutate({ id: trip.id, status: "completed", endTime: new Date() })}
                               >
                                 Complete Trip
+                              </Button>
+                            )}
+
+                            {trip.podVerificationStatus === "pending" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                                onClick={() => verifyPODMutation.mutate(trip.id)}
+                              >
+                                Verify POD
+                              </Button>
+                            )}
+
+                            {trip.status === "completed" && trip.podVerificationStatus === "verified" && trip.driverSettlementStatus !== "paid" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
+                                onClick={() => {
+                                  setSettlementTrip(trip);
+                                  setSettlementEntitlement(trip.driverEntitlement || "0");
+                                  setSettlementAdvance(trip.driverAdvance || "0");
+                                  setSettlementTolls(trip.driverTolls || "0");
+                                  setSettlementFuel(trip.driverFuel || "0");
+                                  setSettlementOther(trip.driverOtherExpenses || "0");
+                                  setSettlementDeductions(trip.driverDeductions || "0");
+                                  setSettlementStatus(trip.driverSettlementStatus || "pending");
+                                  setIsSettlementDialogOpen(true);
+                                }}
+                              >
+                                Settle Driver
+                              </Button>
+                            )}
+
+                            {trip.status === "completed" && trip.podVerificationStatus === "verified" && !trip.invoiceGenerated && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50"
+                                onClick={() => generateInvoiceMutation.mutate(trip.id)}
+                              >
+                                Generate Invoice
                               </Button>
                             )}
                           </TableCell>
@@ -652,6 +741,131 @@ export default function DispatchPage() {
           </div>
           <DialogFooter className="pt-4 border-t mt-auto">
             <Button type="button" onClick={() => setIsHistoryDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Driver Settlement Dialog */}
+      <Dialog open={isSettlementDialogOpen} onOpenChange={setIsSettlementDialogOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Driver Settlement & Trip Costing</DialogTitle>
+            <DialogDescription>
+              Record payouts, advances, fuel/toll expenses, and calculate profitability margins.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Driver Entitlement *</label>
+                <Input 
+                  type="number" 
+                  value={settlementEntitlement} 
+                  onChange={(e) => setSettlementEntitlement(e.target.value)} 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Driver Advance Paid</label>
+                <Input 
+                  type="number" 
+                  value={settlementAdvance} 
+                  onChange={(e) => setSettlementAdvance(e.target.value)} 
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium">Fuel Expenses</label>
+                <Input 
+                  type="number" 
+                  value={settlementFuel} 
+                  onChange={(e) => setSettlementFuel(e.target.value)} 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium">Tolls / Border Fees</label>
+                <Input 
+                  type="number" 
+                  value={settlementTolls} 
+                  onChange={(e) => setSettlementTolls(e.target.value)} 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium">Other Expenses</label>
+                <Input 
+                  type="number" 
+                  value={settlementOther} 
+                  onChange={(e) => setSettlementOther(e.target.value)} 
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Deductions / Fines</label>
+                <Input 
+                  type="number" 
+                  value={settlementDeductions} 
+                  onChange={(e) => setSettlementDeductions(e.target.value)} 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Settlement Status</label>
+                <Select onValueChange={setSettlementStatus} value={settlementStatus}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="submitted">Submitted</SelectItem>
+                    <SelectItem value="verified">Verified</SelectItem>
+                    <SelectItem value="paid">Settled / Paid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="bg-muted/40 p-3 rounded-md border text-xs space-y-1">
+              <div className="flex justify-between">
+                <span>Total Expenses:</span>
+                <span className="font-semibold">{(parseFloat(settlementFuel || "0") + parseFloat(settlementTolls || "0") + parseFloat(settlementOther || "0")).toFixed(3)} BD</span>
+              </div>
+              <div className="flex justify-between border-t pt-1 font-medium text-primary">
+                <span>Net Balance Payable:</span>
+                <span>{(parseFloat(settlementEntitlement || "0") + parseFloat(settlementFuel || "0") + parseFloat(settlementTolls || "0") + parseFloat(settlementOther || "0") - parseFloat(settlementAdvance || "0") - parseFloat(settlementDeductions || "0")).toFixed(3)} BD</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsSettlementDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="button" 
+              onClick={() => {
+                const totalExp = parseFloat(settlementFuel || "0") + parseFloat(settlementTolls || "0") + parseFloat(settlementOther || "0");
+                const balance = parseFloat(settlementEntitlement || "0") + totalExp - parseFloat(settlementAdvance || "0") - parseFloat(settlementDeductions || "0");
+
+                saveDriverSettlementMutation.mutate({
+                  tripId: settlementTrip?.id || "",
+                  data: {
+                    driverEntitlement: settlementEntitlement,
+                    driverAdvance: settlementAdvance,
+                    driverFuel: settlementFuel,
+                    driverTolls: settlementTolls,
+                    driverOtherExpenses: settlementOther,
+                    driverTotalExpenses: totalExp.toString(),
+                    driverDeductions: settlementDeductions,
+                    driverBalancePayable: balance.toString(),
+                    driverSettlementStatus: settlementStatus,
+                  }
+                });
+              }}
+              disabled={saveDriverSettlementMutation.isPending}
+            >
+              {saveDriverSettlementMutation.isPending ? "Saving..." : "Save & Cost Trip"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

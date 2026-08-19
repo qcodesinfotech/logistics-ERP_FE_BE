@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Rfq, Location, Client } from "@shared/schema";
 
 // Form Schema
@@ -87,6 +88,10 @@ export default function RfqPage() {
   // Queries
   const { data: rfqsList, isLoading: isRfqsLoading } = useQuery<Rfq[]>({
     queryKey: ["/api/rfqs"],
+  });
+
+  const { data: quotationsList, isLoading: isQuotationsLoading } = useQuery<any[]>({
+    queryKey: ["/api/quotations"],
   });
 
   const { data: clientsList } = useQuery<Client[]>({
@@ -216,6 +221,51 @@ export default function RfqPage() {
     },
   });
 
+  const convertToQuotationMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/rfqs/${id}/convert-to-quotation`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rfqs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/quotations"] });
+      toast({ title: "RFQ converted to Quotation successfully!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const approveQuotationMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/quotations/${id}/approve`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/quotations"] });
+      toast({ title: "Quotation approved successfully!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const convertQuotationToBookingMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/quotations/${id}/convert-to-booking`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/quotations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Quotation converted to Customer Booking Order!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const reviseQuotationMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => apiRequest("POST", `/api/quotations/${id}/revise`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/quotations"] });
+      toast({ title: "Quotation revised, new version generated!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
   const convertToOrderMutation = useMutation({
     mutationFn: (rfq: Rfq) => {
       // Find origin and destination location details to populate cargo route
@@ -315,160 +365,258 @@ export default function RfqPage() {
         </Button>
       </PageHeader>
 
-      <div>
-        <div className="space-y-6">
+      <Tabs defaultValue="rfq" className="space-y-6">
+        <TabsList className="grid w-[400px] grid-cols-2 bg-muted/60">
+          <TabsTrigger value="rfq">RFQ Pipeline</TabsTrigger>
+          <TabsTrigger value="quotation">Customer Quotations</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="rfq">
+          <div className="space-y-6">
+            <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
+              <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Calculator className="h-5 w-5 text-primary" /> Active Rate Quotations
+                  </CardTitle>
+                  <CardDescription>
+                    Transit costing worksheets for active sales/bidding pipelines.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {isRfqsLoading ? (
+                  <div className="p-8 text-center text-muted-foreground">Loading RFQs...</div>
+                ) : !rfqsList || rfqsList.length === 0 ? (
+                  <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
+                    <FileText className="h-8 w-8 text-muted-foreground/50" />
+                    <span>No RFQs created yet. Create one to begin rate worksheets.</span>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>RFQ Number</TableHead>
+                        <TableHead>Customer</TableHead>
+                        <TableHead>Route</TableHead>
+                        <TableHead>Charges Summary</TableHead>
+                        <TableHead>Profit Margin</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rfqsList.map((rfq) => {
+                        const client = clientsList?.find(c => c.id === rfq.customerId);
+                        const trans = parseFloat(String(rfq.transportationCharges)) || 0;
+                        const extraTotal = (rfq.extraCharges as any[])?.reduce((sum: number, item: any) => sum + (Number(item.cost) || 0), 0) || 0;
+                        const out = parseFloat(String(rfq.outsourcedTruckCost)) || 0;
+                        const total = parseFloat(String(rfq.totalCharges)) || 0;
+                        const margin = total - out;
+
+                        return (
+                          <TableRow key={rfq.id}>
+                            <TableCell className="font-semibold">{rfq.rfqNumber}</TableCell>
+                            <TableCell>{client?.companyName || client?.name || "Unknown"}</TableCell>
+                            <TableCell>
+                              <div className="font-medium">{rfq.transitRoute}</div>
+                              {rfq.freightType && <div className="text-xs text-muted-foreground">Type: {rfq.freightType} | Truck: {rfq.truckType}</div>}
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-semibold text-primary">{formatCurrency(total)}</div>
+                              <div className="text-xs text-muted-foreground">Base: {formatCurrency(trans)} | Extra: {formatCurrency(extraTotal)}</div>
+                            </TableCell>
+                            <TableCell>
+                              <div className={`font-semibold ${margin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                {formatCurrency(margin)}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Select 
+                                defaultValue={rfq.status} 
+                                onValueChange={(val) => updateStatusMutation.mutate({ id: rfq.id, status: val })}
+                              >
+                                <SelectTrigger className={`h-8 w-[130px] text-xs ${rfq.status === 'approved' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : rfq.status === 'rejected' ? 'text-red-600 bg-red-50 border-red-200' : rfq.status === 'converted' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="pending">Pending Review</SelectItem>
+                                  <SelectItem value="approved">Approved / Won</SelectItem>
+                                  <SelectItem value="rejected">Rejected / Lost</SelectItem>
+                                  <SelectItem value="converted">Converted to Order</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell className="text-right space-x-1">
+                              {rfq.status !== "converted" && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-8 text-xs text-primary border-primary/20 hover:bg-primary/5"
+                                  onClick={() => convertRfqToQuotationMutation.mutate(rfq.id)}
+                                >
+                                  Convert to Quotation
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" title="View Details" onClick={() => {
+                                setSelectedRfq(rfq);
+                                form.reset({
+                                  customerId: rfq.customerId,
+                                  transitRoute: rfq.transitRoute || "",
+                                  transportationCharges: String(rfq.transportationCharges),
+                                  outsourcedTruckCost: String(rfq.outsourcedTruckCost),
+                                  status: rfq.status as any,
+                                  cargoType: rfq.cargoType || "",
+                                  truckType: rfq.truckType || "",
+                                  freightType: rfq.freightType || "",
+                                  routeLegs: (rfq.origins as any[]) || [],
+                                  detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
+                                  extraCharges: (rfq.extraCharges as any[]) || [],
+                                });
+                                setIsViewOnly(true);
+                                setIsRfqDialogOpen(true);
+                              }}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => {
+                                setSelectedRfq(rfq);
+                                form.reset({
+                                  customerId: rfq.customerId,
+                                  transitRoute: rfq.transitRoute || "",
+                                  transportationCharges: String(rfq.transportationCharges),
+                                  outsourcedTruckCost: String(rfq.outsourcedTruckCost),
+                                  status: rfq.status as any,
+                                  cargoType: rfq.cargoType || "",
+                                  truckType: rfq.truckType || "",
+                                  freightType: rfq.freightType || "",
+                                  routeLegs: (rfq.origins as any[]) || [],
+                                  detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
+                                  extraCharges: (rfq.extraCharges as any[]) || [],
+                                });
+                                setIsViewOnly(false);
+                                setIsRfqDialogOpen(true);
+                              }}>
+                                Edit
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-red-500 hover:text-red-600"
+                                onClick={() => {
+                                  if (confirm("Are you sure you want to delete this RFQ?")) {
+                                    deleteRfqMutation.mutate(rfq.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="quotation">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
             <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Calculator className="h-5 w-5 text-primary" /> Active Rate Quotations
+                  <FileText className="h-5 w-5 text-primary" /> Active Quotations & Proposals
                 </CardTitle>
                 <CardDescription>
-                  Transit costing worksheets for active sales/bidding pipelines.
+                  Customer-facing pricing proposals converted from RFQ worksheets.
                 </CardDescription>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {isRfqsLoading ? (
-                <div className="p-8 text-center text-muted-foreground">Loading RFQs...</div>
-              ) : !rfqsList || rfqsList.length === 0 ? (
+              {isQuotationsLoading ? (
+                <div className="p-8 text-center text-muted-foreground">Loading Quotations...</div>
+              ) : !quotationsList || quotationsList.length === 0 ? (
                 <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
                   <FileText className="h-8 w-8 text-muted-foreground/50" />
-                  <span>No RFQs created yet. Create one to begin rate worksheets.</span>
+                  <span>No Quotations converted yet. Convert an RFQ to create a Quotation.</span>
                 </div>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>RFQ Number</TableHead>
+                      <TableHead>Quotation No</TableHead>
                       <TableHead>Customer</TableHead>
-                      <TableHead>Route</TableHead>
-                      <TableHead>Charges Summary</TableHead>
-                      <TableHead>Profit Margin</TableHead>
+                      <TableHead>Cargo details</TableHead>
+                      <TableHead>Rate & Charges</TableHead>
+                      <TableHead>Valid Until</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rfqsList.map((rfq) => {
-                      const client = clientsList?.find(c => c.id === rfq.customerId);
-                      const trans = parseFloat(String(rfq.transportationCharges)) || 0;
-                      const extraTotal = (rfq.extraCharges as any[])?.reduce((sum: number, item: any) => sum + (Number(item.cost) || 0), 0) || 0;
-                      const out = parseFloat(String(rfq.outsourcedTruckCost)) || 0;
-                      const total = parseFloat(String(rfq.totalCharges)) || 0;
-                      const margin = total - out;
+                    {quotationsList.map((q) => {
+                      const client = clientsList?.find(c => c.id === q.customerId);
+                      const sellingRate = parseFloat(q.sellingRate || "0");
+                      const total = parseFloat(q.total || "0");
+                      const validity = q.validUntil ? new Date(q.validUntil).toLocaleDateString() : 'N/A';
 
                       return (
-                        <TableRow key={rfq.id} className="hover:bg-accent/40 transition-colors">
-                          <TableCell className="font-semibold text-foreground">{rfq.rfqNumber}</TableCell>
-                          <TableCell className="text-sm">
-                            <div className="font-medium">{client?.name || "Unknown"}</div>
-                            <div className="text-xs text-muted-foreground">{client?.companyName}</div>
+                        <TableRow key={q.id}>
+                          <TableCell className="font-medium">
+                            {q.quotationNumber}
+                            {q.version > 1 && <span className="text-xs text-muted-foreground ml-1">(v{q.version})</span>}
                           </TableCell>
-                          <TableCell className="text-xs">
-                            <div className="flex items-center gap-1 font-medium">
-                              <span className="text-blue-600 dark:text-blue-400">
-                                {rfq.origins && (rfq.origins as any[]).length > 0 ? `${(rfq.origins as any[])[0].originCity}, ${(rfq.origins as any[])[0].originCountry}` + ((rfq.origins as any[]).length > 1 ? ` (+${(rfq.origins as any[]).length - 1})` : '') : "Start"}
-                              </span>
-                              <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                              <span className="text-emerald-600 dark:text-emerald-400">
-                                {rfq.origins && (rfq.origins as any[]).length > 0 ? `${(rfq.origins as any[])[0].destinationCity}, ${(rfq.origins as any[])[0].destinationCountry}` + ((rfq.origins as any[]).length > 1 ? ` (+${(rfq.origins as any[]).length - 1})` : '') : "End"}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-muted-foreground max-w-[150px] truncate" title={rfq.transitRoute || ""}>
-                              Route: {rfq.transitRoute || "Direct"}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs space-y-0.5">
-                            <div>Base: <span className="font-semibold">{formatCurrency(trans)}</span></div>
-                            <div>Extra Charges: <span className="text-muted-foreground">{formatCurrency(extraTotal)}</span></div>
-                            <div className="font-bold border-t pt-0.5">Total: {formatCurrency(total)}</div>
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            <div>Outsourced Cost: <span className="text-red-500 font-semibold">{formatCurrency(out)}</span></div>
-                            <div className={`font-bold mt-0.5 ${margin >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600"}`}>
-                              Margin: {formatCurrency(margin)}
-                            </div>
-                          </TableCell>
+                          <TableCell>{client?.companyName || client?.name || "Unknown"}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{q.cargoDetails}</TableCell>
                           <TableCell>
-                            <Select 
-                              defaultValue={rfq.status} 
-                              onValueChange={(val) => updateStatusMutation.mutate({ id: rfq.id, status: val })}
-                            >
-                              <SelectTrigger className={`h-8 w-[130px] text-xs ${rfq.status === 'approved' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : rfq.status === 'rejected' ? 'text-red-600 bg-red-50 border-red-200' : rfq.status === 'converted' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="pending">Pending Review</SelectItem>
-                                <SelectItem value="approved">Approved / Won</SelectItem>
-                                <SelectItem value="rejected">Rejected / Lost</SelectItem>
-                                <SelectItem value="converted">Converted to Order</SelectItem>
-                              </SelectContent>
-                            </Select>
+                            <div className="font-semibold text-primary">{formatCurrency(total)}</div>
+                            <div className="text-xs text-muted-foreground">Rate: {formatCurrency(sellingRate)}</div>
+                          </TableCell>
+                          <TableCell>{validity}</TableCell>
+                          <TableCell>
+                            <StatusBadge status={q.status} />
                           </TableCell>
                           <TableCell className="text-right space-x-1">
-                            {rfq.status === "approved" && (
+                            {q.status === "pending" && (
                               <Button 
                                 variant="outline" 
                                 size="sm" 
-                                className="h-8 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                                onClick={() => convertToOrderMutation.mutate(rfq)}
+                                className="h-8 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                onClick={() => approveQuotationMutation.mutate(q.id)}
                               >
-                                Convert to Order
+                                Approve
                               </Button>
                             )}
-                            <Button variant="ghost" size="sm" title="View Details" onClick={() => {
-                              setSelectedRfq(rfq);
-                              form.reset({
-                                customerId: rfq.customerId,
-                                transitRoute: rfq.transitRoute || "",
-                                transportationCharges: String(rfq.transportationCharges),
-                                outsourcedTruckCost: String(rfq.outsourcedTruckCost),
-                                status: rfq.status as any,
-                                cargoType: rfq.cargoType || "",
-                                truckType: rfq.truckType || "",
-                                freightType: rfq.freightType || "",
-                                routeLegs: (rfq.origins as any[]) || [],
-                                detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
-                                extraCharges: (rfq.extraCharges as any[]) || [],
-                              });
-                              setIsViewOnly(true);
-                              setIsRfqDialogOpen(true);
-                            }}>
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="sm" onClick={() => {
-                              setSelectedRfq(rfq);
-                              form.reset({
-                                customerId: rfq.customerId,
-                                transitRoute: rfq.transitRoute || "",
-                                transportationCharges: String(rfq.transportationCharges),
-                                outsourcedTruckCost: String(rfq.outsourcedTruckCost),
-                                status: rfq.status as any,
-                                cargoType: rfq.cargoType || "",
-                                truckType: rfq.truckType || "",
-                                freightType: rfq.freightType || "",
-                                routeLegs: (rfq.origins as any[]) || [],
-                                detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
-                                extraCharges: (rfq.extraCharges as any[]) || [],
-                              });
-                              setIsViewOnly(false);
-                              setIsRfqDialogOpen(true);
-                            }}>
-                              Edit
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="text-red-500 hover:text-red-600"
-                              onClick={() => {
-                                if (confirm("Are you sure you want to delete this RFQ?")) {
-                                  deleteRfqMutation.mutate(rfq.id);
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {q.status === "approved" && (
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-8 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+                                onClick={() => convertQuotationToBookingMutation.mutate(q.id)}
+                              >
+                                Convert to Booking
+                              </Button>
+                            )}
+                            {q.status === "pending" && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-8 text-xs text-amber-600"
+                                onClick={() => {
+                                  const newRate = prompt("Enter revised selling rate amount (BD):", q.sellingRate);
+                                  if (newRate !== null) {
+                                    const parsed = parseFloat(newRate);
+                                    if (!isNaN(parsed)) {
+                                      reviseQuotationMutation.mutate({ id: q.id, data: { sellingRate: parsed.toFixed(3), total: parsed.toFixed(3) } });
+                                    }
+                                  }
+                                }}
+                              >
+                                Revise
+                              </Button>
+                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -478,10 +626,8 @@ export default function RfqPage() {
               )}
             </CardContent>
           </Card>
-        </div>
-
-
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* RFQ Creation / Modification Dialog */}
       <Dialog open={isRfqDialogOpen} onOpenChange={setIsRfqDialogOpen}>

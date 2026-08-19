@@ -184,6 +184,26 @@ export default function Reports() {
     enabled: activeReport === "driver-attendance" || activeReport === "driver-delivery",
   });
 
+  const { data: tripProfitabilityReport = [] } = useQuery<any[]>({
+    queryKey: ["/api/reports/trip-profitability"],
+    enabled: activeReport === "trip-profitability",
+  });
+
+  const { data: vehicleProfitabilityReport = [] } = useQuery<any[]>({
+    queryKey: ["/api/reports/vehicle-profitability"],
+    enabled: activeReport === "vehicle-profitability",
+  });
+
+  const { data: customerProfitabilityReport = [] } = useQuery<any[]>({
+    queryKey: ["/api/reports/customer-profitability"],
+    enabled: activeReport === "customer-profitability",
+  });
+
+  const { data: receivablesReport = [] } = useQuery<any[]>({
+    queryKey: ["/api/reports/receivables"],
+    enabled: activeReport === "receivables-aging",
+  });
+
   const filterByDateAndScope = <T extends { shopId?: string | null; branchId?: string | null }>(
     items: T[],
     dateField: keyof T
@@ -229,6 +249,10 @@ export default function Reports() {
     { id: "driver-attendance", label: "Driver Attendance Report", icon: Users },
     { id: "driver-delivery", label: "Driver Delivery Report", icon: Truck },
     { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck },
+    { id: "trip-profitability", label: "Trip Profitability", icon: TrendingUp },
+    { id: "vehicle-profitability", label: "Vehicle Profitability", icon: Truck },
+    { id: "customer-profitability", label: "Customer Profitability", icon: Users },
+    { id: "receivables-aging", label: "Receivables Aging", icon: Scale },
   ];
 
   const filteredBranches = shopId ? branches.filter(b => b.shopId === shopId) : branches;
@@ -320,6 +344,186 @@ export default function Reports() {
             </Table>
           </CardContent>
         </Card>
+      </div>
+    );
+  };
+
+  const renderTripProfitability = () => {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center no-print">
+          <h2 className="text-xl font-bold">Trip Profitability Report</h2>
+          <Button onClick={() => exportToCSV("trip-profitability", tripProfitabilityReport)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Trip Number</TableHead>
+              <TableHead>Route</TableHead>
+              <TableHead>Driver</TableHead>
+              <TableHead>Truck</TableHead>
+              <TableHead className="text-right">Revenue (BD)</TableHead>
+              <TableHead className="text-right">Expenses (BD)</TableHead>
+              <TableHead className="text-right">Profit (BD)</TableHead>
+              <TableHead className="text-right">Margin (%)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {tripProfitabilityReport.length === 0 ? (
+              <TableRow><TableCell colSpan={8} className="text-center py-6 text-muted-foreground">No data found</TableCell></TableRow>
+            ) : (
+              tripProfitabilityReport.map((t, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="font-semibold">{t.tripNumber}</TableCell>
+                  <TableCell>{t.route}</TableCell>
+                  <TableCell>{t.driverName}</TableCell>
+                  <TableCell>{t.truckPlateNumber}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(t.revenue)}</TableCell>
+                  <TableCell className="text-right font-mono text-red-500">{formatCurrency(t.expenses)}</TableCell>
+                  <TableCell className={`text-right font-mono font-semibold ${parseFloat(t.profit) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(t.profit)}
+                  </TableCell>
+                  <TableCell className={`text-right font-semibold ${parseFloat(t.margin) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {parseFloat(t.margin).toFixed(1)}%
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  };
+
+  const renderVehicleProfitability = () => {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center no-print">
+          <h2 className="text-xl font-bold">Vehicle / Fleet Profitability Report</h2>
+          <Button onClick={() => exportToCSV("vehicle-profitability", vehicleProfitabilityReport)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Plate Number</TableHead>
+              <TableHead>Vehicle Name</TableHead>
+              <TableHead className="text-right">Trips Executed</TableHead>
+              <TableHead className="text-right">Total Revenue (BD)</TableHead>
+              <TableHead className="text-right">Total Expenses (BD)</TableHead>
+              <TableHead className="text-right">Net Profit (BD)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {vehicleProfitabilityReport.length === 0 ? (
+              <TableRow><TableCell colSpan={6} className="text-center py-6 text-muted-foreground">No data found</TableCell></TableRow>
+            ) : (
+              vehicleProfitabilityReport.map((v, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="font-semibold">{v.plateNumber}</TableCell>
+                  <TableCell>{v.name}</TableCell>
+                  <TableCell className="text-right">{v.tripsCount}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(v.totalRevenue)}</TableCell>
+                  <TableCell className="text-right font-mono text-red-500">{formatCurrency(v.totalExpenses)}</TableCell>
+                  <TableCell className={`text-right font-mono font-semibold ${parseFloat(v.netProfit) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(v.netProfit)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  };
+
+  const renderCustomerProfitability = () => {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center no-print">
+          <h2 className="text-xl font-bold">Customer Account Profitability Report</h2>
+          <Button onClick={() => exportToCSV("customer-profitability", customerProfitabilityReport)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Customer Company</TableHead>
+              <TableHead>Contact Name</TableHead>
+              <TableHead className="text-right">Trips Completed</TableHead>
+              <TableHead className="text-right">Total Revenue (BD)</TableHead>
+              <TableHead className="text-right">Total Expenses (BD)</TableHead>
+              <TableHead className="text-right">Net Profit Margin (BD)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {customerProfitabilityReport.length === 0 ? (
+              <TableRow><TableCell colSpan={6} className="text-center py-6 text-muted-foreground">No data found</TableCell></TableRow>
+            ) : (
+              customerProfitabilityReport.map((c, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="font-semibold">{c.companyName || c.name}</TableCell>
+                  <TableCell>{c.name}</TableCell>
+                  <TableCell className="text-right">{c.tripsCount}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(c.totalRevenue)}</TableCell>
+                  <TableCell className="text-right font-mono text-red-500">{formatCurrency(c.totalExpenses)}</TableCell>
+                  <TableCell className={`text-right font-mono font-semibold ${parseFloat(c.netProfit) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(c.netProfit)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  };
+
+  const renderReceivablesAging = () => {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center no-print">
+          <h2 className="text-xl font-bold">Receivables Aging Report</h2>
+          <Button onClick={() => exportToCSV("receivables-aging", receivablesReport)} variant="outline">
+            <Printer className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Customer</TableHead>
+              <TableHead className="text-right">Total Owed (BD)</TableHead>
+              <TableHead className="text-right">Current (0-30 days)</TableHead>
+              <TableHead className="text-right">31 - 60 days</TableHead>
+              <TableHead className="text-right">61 - 90 days</TableHead>
+              <TableHead className="text-right">Over 90 days</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {receivablesReport.length === 0 ? (
+              <TableRow><TableCell colSpan={6} className="text-center py-6 text-muted-foreground">No data found</TableCell></TableRow>
+            ) : (
+              receivablesReport.map((r, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="font-semibold">{r.companyName || r.name}</TableCell>
+                  <TableCell className="text-right font-mono font-semibold text-primary">{formatCurrency(r.totalOutstanding)}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(r.agingSegments.current)}</TableCell>
+                  <TableCell className="text-right font-mono text-amber-600">{formatCurrency(r.agingSegments.days30to60)}</TableCell>
+                  <TableCell className="text-right font-mono text-orange-600">{formatCurrency(r.agingSegments.days60to90)}</TableCell>
+                  <TableCell className="text-right font-mono text-red-600">{formatCurrency(r.agingSegments.daysOver90)}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
       </div>
     );
   };
@@ -1445,6 +1649,10 @@ export default function Reports() {
       case "driver-attendance": return renderDriverAttendanceReport();
       case "driver-delivery": return renderDriverDeliveryReport();
       case "logistics-kpi": return renderLogisticsKPIs();
+      case "trip-profitability": return renderTripProfitability();
+      case "vehicle-profitability": return renderVehicleProfitability();
+      case "customer-profitability": return renderCustomerProfitability();
+      case "receivables-aging": return renderReceivablesAging();
       case "service-tickets": return renderServiceReport();
       default: return renderTrialBalance();
     }

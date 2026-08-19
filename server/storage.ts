@@ -36,8 +36,8 @@ import {
   type CrmLead, type CrmDeal, type CrmActivity, type CrmLeadNote, type CrmCalendarEvent, type CrmReminder, type CrmCustomerContact, type CrmNotification, type CrmTask,
   type InsertCrmLead, type InsertCrmDeal, type InsertCrmActivity, type InsertCrmLeadNote, type InsertCrmCalendarEvent, type InsertCrmReminder, type InsertCrmCustomerContact, type InsertCrmNotification, type InsertCrmTask,
   userScopes, type UserScope,
-  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, orderExpenses, invoicePayments, trips, tripOrders, deliveries, deliveryAttachments, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
-  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type OrderExpense, type InsertOrderExpense, type InvoicePayment, type InsertInvoicePayment, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone, routes, type Route, type InsertRoute,
+  zones, supervisorZones, contracts, vehicles, locations, rfqs, orders, orderCharges, orderExpenses, invoices, invoicePayments, trips, tripOrders, deliveries, deliveryAttachments, driverActivities, driverAttendance, vehicleMaintenance, fuelLogs, userActivityLogs,
+  type Zone, type InsertZone, type SupervisorZone, type InsertSupervisorZone, type Contract, type InsertContract, type Vehicle, type InsertVehicle, type Location, type InsertLocation, type Rfq, type InsertRfq, type Order, type InsertOrder, type OrderExpense, type InsertOrderExpense, type Invoice, type InsertInvoice, type InvoicePayment, type InsertInvoicePayment, type Trip, type InsertTrip, type TripOrder, type InsertTripOrder, type Delivery, type InsertDelivery, type DriverActivity, type InsertDriverActivity, type DriverAttendance, type InsertDriverAttendance, type VehicleMaintenance, type InsertVehicleMaintenance, type FuelLog, type InsertFuelLog, type UserActivityLog, type InsertUserActivityLog, drivers, type Driver, type InsertDriver, outlets, outletZones, type Outlet, type InsertOutlet, type OutletZone, type InsertOutletZone, routes, type Route, type InsertRoute,
   driverZones, dispatchSheets, dispatchItems, dispatchOutletZoneOverrides, dispatchDeliveries, dispatchOutletSequences,
   dispatchTruckAssignments, dispatchOutletTruckAssignments, dispatchPendingQuantities, truckTransfers,
   contractInvoices, contractMonthlyUsage,
@@ -582,6 +582,16 @@ export interface IStorage {
   updateTrip(id: string, data: Partial<InsertTrip>): Promise<Trip | undefined>;
   deleteTrip(id: string): Promise<void>;
   getTripOrders(tripId: string): Promise<Order[]>;
+  verifyTripPod(tripId: string, verifiedBy: string): Promise<Trip>;
+  saveDriverSettlement(tripId: string, settlementData: any): Promise<Trip>;
+  calculateTripCosting(tripId: string): Promise<Trip>;
+
+  // Logistics Invoices
+  getInvoices(customerId?: string, status?: string): Promise<Invoice[]>;
+  getInvoice(id: string): Promise<Invoice | undefined>;
+  createInvoice(data: InsertInvoice): Promise<Invoice>;
+  updateInvoice(id: string, data: Partial<InsertInvoice>): Promise<Invoice | undefined>;
+  payInvoice(id: string, payment: InsertInvoicePayment): Promise<Invoice>;
 
   // Logistics Deliveries
   getDeliveries(tripId?: string, orderId?: string): Promise<Delivery[]>;
@@ -3953,7 +3963,7 @@ export class DatabaseStorage implements IStorage {
     return `QT-${(count + 1).toString().padStart(6, "0")}`;
   }
 
-  async createQuotation(data: any, items: any[]): Promise<Quotation> {
+  async createQuotation(data: any, items: any[] = []): Promise<Quotation> {
     const quotationNumber = await this.getNextQuotationNumber();
 
     return await db.transaction(async (tx) => {
@@ -3979,6 +3989,18 @@ export class DatabaseStorage implements IStorage {
         discount: data.discount?.toString() || "0.000",
         total: data.total?.toString() || "0.000",
         notes: data.notes,
+        rfqId: data.rfqId,
+        originLocationId: data.originLocationId,
+        destinationLocationId: data.destinationLocationId,
+        cargoDetails: data.cargoDetails,
+        weight: data.weight?.toString(),
+        volume: data.volume?.toString(),
+        temperatureRequirement: data.temperatureRequirement,
+        sellingRate: data.sellingRate?.toString(),
+        additionalCharges: data.additionalCharges || [],
+        paymentTerms: data.paymentTerms,
+        version: data.version || 1,
+        parentId: data.parentId,
       }).returning();
 
       for (const item of items) {
@@ -6559,6 +6581,205 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(orders, eq(tripOrders.orderId, orders.id))
       .where(eq(tripOrders.tripId, tripId));
     return rows.map(r => r.order);
+  }
+
+  // Logistics Invoices
+  async getInvoices(customerId?: string, status?: string): Promise<Invoice[]> {
+    const conditions = [];
+    if (customerId) conditions.push(eq(invoices.customerId, customerId));
+    if (status) conditions.push(eq(invoices.status, status));
+    if (conditions.length > 0) {
+      return db.select().from(invoices).where(and(...conditions)).orderBy(desc(invoices.createdAt));
+    }
+    return db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  }
+
+  async getInvoice(id: string): Promise<Invoice | undefined> {
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, id));
+    return row || undefined;
+  }
+
+  async createInvoice(data: InsertInvoice): Promise<Invoice> {
+    const [row] = await db.insert(invoices).values(data as any).returning();
+    return row;
+  }
+
+  async updateInvoice(id: string, data: Partial<InsertInvoice>): Promise<Invoice | undefined> {
+    const [row] = await db.update(invoices).set(data as any).where(eq(invoices.id, id)).returning();
+    return row || undefined;
+  }
+
+  async payInvoice(id: string, payment: InsertInvoicePayment): Promise<Invoice> {
+    return await db.transaction(async (tx) => {
+      const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, id));
+      if (!invoice) throw new Error("Invoice not found");
+
+      // Insert payment record
+      const [insertedPayment] = await tx.insert(invoicePayments).values({
+        ...payment,
+        orderId: invoice.orderId,
+      }).returning();
+
+      const currentOutstanding = parseFloat(invoice.outstandingAmount || invoice.total || "0");
+      const paidAmount = parseFloat(payment.amount);
+      const newOutstanding = Math.max(0, currentOutstanding - paidAmount);
+      
+      const totalPaid = parseFloat(invoice.total || "0") - newOutstanding;
+      const status = newOutstanding <= 0 ? "paid" : (totalPaid > 0 ? "partial" : "draft");
+
+      const [updatedInvoice] = await tx.update(invoices)
+        .set({ 
+          outstandingAmount: newOutstanding.toFixed(3), 
+          status 
+        })
+        .where(eq(invoices.id, id))
+        .returning();
+
+      // Update linked order payment status
+      if (invoice.orderId) {
+        const [order] = await tx.select().from(orders).where(eq(orders.id, invoice.orderId));
+        if (order) {
+          const orderPaidAmount = parseFloat(order.paidAmount || "0") + paidAmount;
+          const orderTotal = parseFloat(order.grandTotal || "0");
+          const orderPaymentStatus = orderPaidAmount >= orderTotal ? "paid" : "partial";
+          await tx.update(orders)
+            .set({ paidAmount: orderPaidAmount.toFixed(3), paymentStatus: orderPaymentStatus })
+            .where(eq(orders.id, invoice.orderId));
+        }
+      }
+
+      // Financial journals
+      const client = await tx.select().from(clients).where(eq(clients.id, payment.customerId)).limit(1);
+      const activeClient = client[0];
+      const branchId = activeClient?.branchId || "1";
+      const shopId = activeClient?.shopId || "1";
+
+      if (payment.paymentMethod === 'bank_transfer' || payment.paymentMethod === 'cheque') {
+        if (payment.bankAccountId) {
+          await tx.insert(bankTransactions).values({
+            bankAccountId: payment.bankAccountId,
+            branchId: branchId,
+            type: "deposit",
+            amount: String(payment.amount),
+            reference: payment.reference || null,
+            description: `Logistics Invoice Payment for Invoice ${invoice.invoiceNumber}`,
+            relatedType: "logistics_invoice",
+            relatedId: id,
+          });
+
+          await this.createJournalEntryInTx(tx, {
+            sourceType: "logistics_invoice",
+            sourceId: id,
+            shopId: shopId,
+            branchId: branchId,
+            reference: payment.reference || `INV-PAY-${invoice.invoiceNumber}`,
+            description: `Payment received for Logistics Invoice ${invoice.invoiceNumber}`,
+            lines: [
+              { accountCode: "1000", debit: Number(payment.amount), description: `Bank Deposit - Invoice ${invoice.invoiceNumber}` },
+              { accountCode: "1100", credit: Number(payment.amount), description: `Accounts Receivable Payment - Invoice ${invoice.invoiceNumber}` }
+            ],
+          });
+        }
+      } else if (payment.paymentMethod === 'cash') {
+        if (payment.pettyCashId) {
+          const [pc] = await tx.select().from(pettyCash).where(eq(pettyCash.id, payment.pettyCashId!));
+          if (pc) {
+            await tx.insert(pettyCashTransactions).values({
+              pettyCashId: payment.pettyCashId!,
+              branchId: pc.branchId || branchId,
+              type: "receipt",
+              amount: String(payment.amount),
+              reference: payment.reference || null,
+              description: `Logistics Cash Receipt for Invoice ${invoice.invoiceNumber}`,
+            });
+
+            const currentBalance = parseFloat(pc.currentBalance || "0");
+            const newBalance = currentBalance + Number(payment.amount);
+            await tx.update(pettyCash)
+              .set({ currentBalance: newBalance.toFixed(3) })
+               .where(eq(pettyCash.id, payment.pettyCashId!));
+
+            await this.createJournalEntryInTx(tx, {
+              sourceType: "logistics_invoice",
+              sourceId: id,
+              shopId: pc.shopId || shopId,
+              branchId: pc.branchId || branchId,
+              reference: payment.reference || `CASH-PAY-${invoice.invoiceNumber}`,
+              description: `Cash Payment received for Logistics Invoice ${invoice.invoiceNumber}`,
+              lines: [
+                { accountCode: "1010", debit: Number(payment.amount), description: `Cash Receipt - Invoice ${invoice.invoiceNumber}` },
+                { accountCode: "1100", credit: Number(payment.amount), description: `Accounts Receivable Payment - Invoice ${invoice.invoiceNumber}` }
+              ],
+            });
+          }
+        }
+      }
+
+      return updatedInvoice;
+    });
+  }
+
+  async verifyTripPod(tripId: string, verifiedBy: string): Promise<Trip> {
+    const [trip] = await db.update(trips)
+      .set({ 
+        podVerificationStatus: "verified", 
+        status: "completed", 
+        verifiedBy, 
+        verifiedAt: new Date() 
+      })
+      .where(eq(trips.id, tripId))
+      .returning();
+    return trip;
+  }
+
+  async saveDriverSettlement(tripId: string, settlementData: any): Promise<Trip> {
+    const [trip] = await db.update(trips)
+      .set({
+        driverEntitlement: settlementData.driverEntitlement?.toString(),
+        driverAdvance: settlementData.driverAdvance?.toString(),
+        driverTolls: settlementData.driverTolls?.toString(),
+        driverFuel: settlementData.driverFuel?.toString(),
+        driverOtherExpenses: settlementData.driverOtherExpenses?.toString(),
+        driverTotalExpenses: settlementData.driverTotalExpenses?.toString(),
+        driverDeductions: settlementData.driverDeductions?.toString(),
+        driverBalancePayable: settlementData.driverBalancePayable?.toString(),
+        driverSettlementReceipts: settlementData.driverSettlementReceipts || [],
+        driverSettlementStatus: settlementData.driverSettlementStatus || "pending",
+      })
+      .where(eq(trips.id, tripId))
+      .returning();
+    return trip;
+  }
+
+  async calculateTripCosting(tripId: string): Promise<Trip> {
+    const [trip] = await db.select().from(trips).where(eq(trips.id, tripId));
+    if (!trip) throw new Error("Trip not found");
+
+    const sellingRate = parseFloat(trip.sellingRate || "0");
+    const additionalCharges = parseFloat(trip.additionalCharges || "0");
+    const totalRevenue = sellingRate + additionalCharges;
+
+    const driverCost = parseFloat(trip.driverEntitlement || "0");
+    const fuelCost = parseFloat(trip.driverFuel || "0");
+    const tollsCost = parseFloat(trip.driverTolls || "0");
+    const otherExpensesCost = parseFloat(trip.driverOtherExpenses || "0");
+    const maintenanceCost = parseFloat(trip.maintenanceCost || "0");
+    const otherTripExpenses = parseFloat(trip.otherTripExpenses || "0");
+
+    const totalTripCost = driverCost + fuelCost + tollsCost + otherExpensesCost + maintenanceCost + otherTripExpenses;
+    const grossProfit = totalRevenue - totalTripCost;
+    const profitMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+
+    const [updated] = await db.update(trips)
+      .set({
+        totalRevenue: totalRevenue.toFixed(3),
+        totalTripCost: totalTripCost.toFixed(3),
+        grossProfit: grossProfit.toFixed(3),
+        profitMargin: profitMargin.toFixed(2),
+      })
+      .where(eq(trips.id, tripId))
+      .returning();
+    return updated;
   }
 
   // Logistics Deliveries

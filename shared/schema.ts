@@ -1082,6 +1082,18 @@ export const quotations = pgTable("quotations", {
   managerSignature: text("manager_signature"),
   companyStamp: text("company_stamp"),
   convertedSaleId: varchar("converted_sale_id"),
+  rfqId: varchar("rfq_id"),
+  originLocationId: varchar("origin_location_id"),
+  destinationLocationId: varchar("destination_location_id"),
+  cargoDetails: text("cargo_details"),
+  weight: decimal("weight", { precision: 10, scale: 3 }).default("0.000"),
+  volume: decimal("volume", { precision: 10, scale: 3 }).default("0.000"),
+  temperatureRequirement: text("temperature_requirement"),
+  sellingRate: decimal("selling_rate", { precision: 12, scale: 3 }).default("0.000"),
+  additionalCharges: jsonb("additional_charges").$type<{ name: string; cost: number }[]>().default([]),
+  paymentTerms: text("payment_terms"),
+  version: integer("version").default(1),
+  parentId: varchar("parent_id"),
 });
 
 export const quotationItems = pgTable("quotation_items", {
@@ -1497,7 +1509,9 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true, refre
 export const insertChartOfAccountsSchema = createInsertSchema(chartOfAccounts).omit({ id: true });
 export const insertJournalEntrySchema = createInsertSchema(journalEntries).omit({ id: true });
 export const insertJournalLineSchema = createInsertSchema(journalLines).omit({ id: true });
-export const insertQuotationSchema = createInsertSchema(quotations).omit({ id: true });
+export const insertQuotationSchema = createInsertSchema(quotations).extend({
+  additionalCharges: z.any().optional(),
+}).omit({ id: true });
 export const insertQuotationItemSchema = createInsertSchema(quotationItems).omit({ id: true });
 export const insertEmployeeDocumentSchema = createInsertSchema(employeeDocuments).omit({ id: true });
 export const insertComplianceDocumentSchema = createInsertSchema(complianceDocuments).omit({ id: true, createdAt: true, updatedAt: true });
@@ -1796,6 +1810,14 @@ export const rfqs = pgTable("rfqs", {
   origins: jsonb("origins").$type<{ originCountry: string; originCity: string; destinationCountry: string; destinationCity: string; loadingDate?: string; offloadingDate?: string; transitDays?: number }[]>().default([]),
   detentionChargesPerDay: decimal("detention_charges_per_day", { precision: 12, scale: 3 }).default("0.000"),
   extraCharges: jsonb("extra_charges").$type<{ name: string; cost: number }[]>().default([]),
+  cargoDetails: text("cargo_details"),
+  temperatureRequirement: text("temperature_requirement"),
+  weight: decimal("weight", { precision: 10, scale: 3 }).default("0.000"),
+  volume: decimal("volume", { precision: 10, scale: 3 }).default("0.000"),
+  requestedPickupDate: timestamp("requested_pickup_date"),
+  requestedDeliveryDate: timestamp("requested_delivery_date"),
+  additionalRequirements: text("additional_requirements"),
+  notes: text("notes"),
 
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1836,6 +1858,11 @@ export const orders = pgTable("orders", {
   paymentStatus: text("payment_status").notNull().default("unpaid"), // "unpaid", "partial", "paid"
   paidAmount: decimal("paid_amount", { precision: 12, scale: 3 }).default("0.000"),
   zoneId: varchar("zone_id"), // points to zones.id
+  quotationId: varchar("quotation_id"),
+  volume: decimal("volume", { precision: 10, scale: 3 }).default("0.000"),
+  temperatureRequirement: text("temperature_requirement"),
+  specialInstructions: text("special_instructions"),
+  customerReference: text("customer_reference"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1885,6 +1912,55 @@ export const trips = pgTable("trips", {
   route: text("route"),
   startTime: timestamp("start_time"),
   endTime: timestamp("end_time"),
+  orderId: varchar("order_id"),
+  trailerNumber: text("trailer_number"),
+  plannedPickupDate: timestamp("planned_pickup_date"),
+  plannedDeliveryDate: timestamp("planned_delivery_date"),
+  actualPickupDate: date("actual_pickup_date"),
+  actualPickupTime: text("actual_pickup_time"),
+  loadedQuantity: decimal("loaded_quantity", { precision: 10, scale: 3 }),
+  cargoCondition: text("cargo_condition"),
+  loadingNotes: text("loading_notes"),
+  loadingDocuments: jsonb("loading_documents").$type<string[]>().default([]),
+  loadingImages: jsonb("loading_images").$type<string[]>().default([]),
+  currentLocation: text("current_location"),
+  gpsLocation: text("gps_location"),
+  delays: jsonb("delays").$type<{ reason: string; durationHours: number; date: string }[]>().default([]),
+  incidents: jsonb("incidents").$type<{ description: string; date: string; cost?: number }[]>().default([]),
+  additionalExpenses: jsonb("additional_expenses").$type<{ name: string; cost: number; receiptUrl?: string }[]>().default([]),
+  actualDeliveryDate: date("actual_delivery_date"),
+  actualDeliveryTime: text("actual_delivery_time"),
+  deliveredQuantity: decimal("delivered_quantity", { precision: 10, scale: 3 }),
+  receivedQuantity: decimal("received_quantity", { precision: 10, scale: 3 }),
+  shortageQuantity: decimal("shortage_quantity", { precision: 10, scale: 3 }),
+  damagedQuantity: decimal("damaged_quantity", { precision: 10, scale: 3 }),
+  damageReason: text("damage_reason"),
+  receiverName: text("receiver_name"),
+  receiverContact: text("receiver_contact"),
+  signedPodUrl: text("signed_pod_url"),
+  podImages: jsonb("pod_images").$type<string[]>().default([]),
+  deliveryNotes: text("delivery_notes"),
+  podVerificationStatus: text("pod_verification_status").default("pending"),
+  verifiedBy: varchar("verified_by"),
+  verifiedAt: timestamp("verified_at"),
+  driverEntitlement: decimal("driver_entitlement", { precision: 12, scale: 3 }).default("0.000"),
+  driverAdvance: decimal("driver_advance", { precision: 12, scale: 3 }).default("0.000"),
+  driverTolls: decimal("driver_tolls", { precision: 12, scale: 3 }).default("0.000"),
+  driverFuel: decimal("driver_fuel", { precision: 12, scale: 3 }).default("0.000"),
+  driverOtherExpenses: decimal("driver_other_expenses", { precision: 12, scale: 3 }).default("0.000"),
+  driverTotalExpenses: decimal("driver_total_expenses", { precision: 12, scale: 3 }).default("0.000"),
+  driverDeductions: decimal("driver_deductions", { precision: 12, scale: 3 }).default("0.000"),
+  driverBalancePayable: decimal("driver_balance_payable", { precision: 12, scale: 3 }).default("0.000"),
+  driverSettlementReceipts: jsonb("driver_settlement_receipts").$type<{ name: string; url: string }[]>().default([]),
+  driverSettlementStatus: text("driver_settlement_status").default("pending"),
+  sellingRate: decimal("selling_rate", { precision: 12, scale: 3 }).default("0.000"),
+  additionalCharges: decimal("additional_charges", { precision: 12, scale: 3 }).default("0.000"),
+  totalRevenue: decimal("total_revenue", { precision: 12, scale: 3 }).default("0.000"),
+  maintenanceCost: decimal("maintenance_cost", { precision: 12, scale: 3 }).default("0.000"),
+  otherTripExpenses: decimal("other_trip_expenses", { precision: 12, scale: 3 }).default("0.000"),
+  totalTripCost: decimal("total_trip_cost", { precision: 12, scale: 3 }).default("0.000"),
+  grossProfit: decimal("gross_profit", { precision: 12, scale: 3 }).default("0.000"),
+  profitMargin: decimal("profit_margin", { precision: 5, scale: 2 }).default("0.00"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2039,6 +2115,14 @@ export const invoices = pgTable("invoices", {
   total: decimal("total", { precision: 12, scale: 3 }).default("0.000"),
   status: text("status").notNull().default("draft"), // draft, sent, paid, overdue
   dueDate: timestamp("due_date"),
+  origin: text("origin"),
+  destination: text("destination"),
+  serviceDetails: text("service_details"),
+  quantity: decimal("quantity", { precision: 12, scale: 3 }).default("1.000"),
+  rate: decimal("rate", { precision: 12, scale: 3 }).default("0.000"),
+  additionalCharges: decimal("additional_charges", { precision: 12, scale: 3 }).default("0.000"),
+  paymentTerms: text("payment_terms"),
+  outstandingAmount: decimal("outstanding_amount", { precision: 12, scale: 3 }).default("0.000"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -2084,7 +2168,15 @@ export const insertVehicleSchema = createInsertSchema(vehicles).omit({ id: true,
 export const insertLocationSchema = createInsertSchema(locations).omit({ id: true, createdAt: true });
 export const insertRfqSchema = createInsertSchema(rfqs).omit({ id: true, createdAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true });
-export const insertTripSchema = createInsertSchema(trips).omit({ id: true, createdAt: true });
+export const insertTripSchema = createInsertSchema(trips).extend({
+  loadingDocuments: z.any().optional(),
+  loadingImages: z.any().optional(),
+  delays: z.any().optional(),
+  incidents: z.any().optional(),
+  additionalExpenses: z.any().optional(),
+  podImages: z.any().optional(),
+  driverSettlementReceipts: z.any().optional(),
+}).omit({ id: true, createdAt: true });
 export const insertTripOrderSchema = createInsertSchema(tripOrders).omit({ id: true, createdAt: true });
 export const insertDeliverySchema = createInsertSchema(deliveries).omit({ id: true, createdAt: true });
 export const insertDriverActivitySchema = createInsertSchema(driverActivities).omit({ id: true, createdAt: true });
