@@ -92,6 +92,8 @@ const orderFormSchema = z.object({
   status: z.enum(["pending", "confirmed", "cancelled", "incomplete", "completed"]),
   zoneId: z.string().optional().nullable(),
   operationalZone: z.string().optional(),
+  customerReference: z.string().optional(),
+  specialInstructions: z.string().optional(),
 });
 
 type OrderFormData = z.input<typeof orderFormSchema>;
@@ -161,6 +163,8 @@ export default function OrdersPage() {
       status: "pending",
       zoneId: "",
       operationalZone: "",
+      customerReference: "",
+      specialInstructions: "",
     },
   });
 
@@ -453,6 +457,8 @@ export default function OrdersPage() {
             status: "pending",
             zoneId: "",
             operationalZone: "",
+            customerReference: "",
+            specialInstructions: "",
           });
           setIsOrderDialogOpen(true);
         }} className="gap-2">
@@ -601,6 +607,8 @@ export default function OrdersPage() {
                                   status: orderData.status as any,
                                   zoneId: orderData.zoneId || "",
                                   operationalZone: orderData.operationalZone || "",
+                                  customerReference: orderData.customerReference || "",
+                                  specialInstructions: orderData.specialInstructions || "",
                                 });
                                 setIsOrderDialogOpen(true);
                               } catch (e) {
@@ -936,6 +944,32 @@ export default function OrdersPage() {
                         <FormLabel>Detention Charges (per day)</FormLabel>
                         <FormControl>
                           <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="customerReference"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Customer Reference / PO No</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. PO-89012" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="specialInstructions"
+                    render={({ field }) => (
+                      <FormItem className="col-span-2">
+                        <FormLabel>Special Instructions / Service Requirements</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g. Check temperature, double drivers needed" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

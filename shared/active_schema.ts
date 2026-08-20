@@ -78,7 +78,19 @@ import {
   quotations,
   quotationItems,
   invoices,
-  dispatchOutletSequences
+  dispatchOutletSequences,
+  suppliers,
+  purchases,
+  purchaseItems,
+  purchasePayments,
+  products,
+  inventory,
+  purchaseOrders,
+  purchaseOrderItems,
+  purchaseReturns,
+  purchaseReturnItems,
+  supplierRefunds,
+  serialNumbers
 } from "./schema";
 
 export {
@@ -161,5 +173,17 @@ export {
   quotations,
   quotationItems,
   invoices,
-  dispatchOutletSequences
+  dispatchOutletSequences,
+  suppliers,
+  purchases,
+  purchaseItems,
+  purchasePayments,
+  products,
+  inventory,
+  purchaseOrders,
+  purchaseOrderItems,
+  purchaseReturns,
+  purchaseReturnItems,
+  supplierRefunds,
+  serialNumbers
 };

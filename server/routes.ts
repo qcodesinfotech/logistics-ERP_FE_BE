@@ -490,7 +490,7 @@ export async function registerRoutes(
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
-      const fileUrl = `/uploads/${req.file.filename}`;
+      const fileUrl = `/uploads/invoices/${req.file.filename}`;
       res.json({
         url: fileUrl,
         filename: req.file.originalname,
@@ -2547,6 +2547,20 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/purchases/:id/approve", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const userRole = req.user?.role;
+      if (userRole !== "super_admin" && userRole !== "admin") {
+        return res.status(403).json({ error: "Only admins can approve purchases" });
+      }
+      const purchase = await storage.approvePurchase(req.params.id);
+      res.json(purchase);
+    } catch (error: any) {
+      console.error("Purchase approve error:", error);
+      res.status(400).json({ error: error.message || "Failed to approve purchase" });
+    }
+  });
+
   // Purchase Payments - fetch from purchasePayments table by purchase ID
   app.get("/api/purchases/:id/payments", authMiddleware, permissionMiddleware("purchases"), async (req: AuthRequest, res) => {
     try {
@@ -3289,6 +3303,7 @@ export async function registerRoutes(
       const scope = getScopeFromRequest(req);
       const client = await storage.createClient({
         ...req.body,
+        brandId: scope.companyId || req.body.brandId,
         shopId: scope.shopId || req.body.shopId,
         branchId: scope.branchId || req.body.branchId,
       });
@@ -8369,11 +8384,40 @@ export async function registerRoutes(
 
   app.post("/api/trips/:id/update-delivery", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { orderId, status, podUrl, issueLog } = req.body;
+      const { 
+        orderId, 
+        status, 
+        podUrl, 
+        issueLog,
+        actualDeliveryDate,
+        actualDeliveryTime,
+        receivedQuantity,
+        shortageQuantity,
+        damagedQuantity,
+        damageReason,
+        receiverName,
+        receiverContact
+      } = req.body;
       if (!orderId || !status) {
         return res.status(400).json({ error: "orderId and status are required" });
       }
-      const delivery = await storage.recordDeliveryPOD(req.params.id, orderId, podUrl, status, issueLog);
+      const delivery = await storage.recordDeliveryPOD(
+        req.params.id, 
+        orderId, 
+        podUrl, 
+        status, 
+        issueLog,
+        {
+          actualDeliveryDate,
+          actualDeliveryTime,
+          receivedQuantity,
+          shortageQuantity,
+          damagedQuantity,
+          damageReason,
+          receiverName,
+          receiverContact
+        }
+      );
       res.json(delivery);
     } catch (error: any) {
       console.error("Update delivery error:", error);

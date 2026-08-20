@@ -64,7 +64,15 @@ const rfqFormSchema = z.object({
     qty: z.number().min(0).default(1),
     unitRate: z.number().min(0).default(0),
     cost: z.number().min(0)
-  })).default([])
+  })).default([]),
+  cargoDetails: z.string().optional(),
+  temperatureRequirement: z.string().optional(),
+  weight: z.string().optional(),
+  volume: z.string().optional(),
+  requestedPickupDate: z.string().optional(),
+  requestedDeliveryDate: z.string().optional(),
+  additionalRequirements: z.string().optional(),
+  notes: z.string().optional(),
 });
 
 type RfqFormData = z.input<typeof rfqFormSchema>;
@@ -139,6 +147,14 @@ export default function RfqPage() {
       routeLegs: [],
       detentionChargesPerDay: "0",
       extraCharges: [],
+      cargoDetails: "",
+      temperatureRequirement: "",
+      weight: "0.000",
+      volume: "0.000",
+      requestedPickupDate: "",
+      requestedDeliveryDate: "",
+      additionalRequirements: "",
+      notes: "",
     },
   });
 
@@ -188,11 +204,15 @@ export default function RfqPage() {
       const payload = {
         ...data,
         origins: data.routeLegs,
-        rfqNumber: `RFQ-${Date.now()}`,
+        rfqNumber: data.rfqNumber || `RFQ-${Date.now()}`,
         totalCharges: total.toFixed(3),
         transportationCharges: parseFloat(data.transportationCharges).toFixed(3),
         outsourcedTruckCost: parseFloat(data.outsourcedTruckCost).toFixed(3),
         detentionChargesPerDay: parseFloat(data.detentionChargesPerDay || 0).toFixed(3),
+        weight: data.weight ? parseFloat(data.weight).toFixed(3) : "0.000",
+        volume: data.volume ? parseFloat(data.volume).toFixed(3) : "0.000",
+        requestedPickupDate: data.requestedPickupDate ? new Date(data.requestedPickupDate).toISOString() : null,
+        requestedDeliveryDate: data.requestedDeliveryDate ? new Date(data.requestedDeliveryDate).toISOString() : null,
       };
       return apiRequest(selectedRfq ? "PUT" : "POST", selectedRfq ? `/api/rfqs/${selectedRfq.id}` : "/api/rfqs", payload);
     },
@@ -316,8 +336,12 @@ export default function RfqPage() {
         orderNumber: `ORD-${Date.now()}`,
         customerId: rfq.customerId,
         rfqId: rfq.id,
-        cargoDetails: `Cargo transit from ${origin?.name || 'Origin'} to ${destination?.name || 'Destination'} (via ${rfq.transitRoute || 'direct'})`,
-        weight: "0.000",
+        cargoDetails: rfq.cargoDetails || `Cargo transit from ${origin?.name || 'Origin'} to ${destination?.name || 'Destination'} (via ${rfq.transitRoute || 'direct'})`,
+        weight: rfq.weight || "0.000",
+        volume: rfq.volume || "0.000",
+        temperatureRequirement: rfq.temperatureRequirement || "",
+        customerReference: rfq.additionalRequirements || "",
+        specialInstructions: rfq.notes || "",
         loadType: rfq.freightType || "FTL",
         documents: [],
         pickupLocationId: rfq.originLocationId,
@@ -379,6 +403,14 @@ export default function RfqPage() {
             routeLegs: [],
             detentionChargesPerDay: "0",
             extraCharges: [],
+            cargoDetails: "",
+            temperatureRequirement: "",
+            weight: "0.000",
+            volume: "0.000",
+            requestedPickupDate: "",
+            requestedDeliveryDate: "",
+            additionalRequirements: "",
+            notes: "",
           });
           setIsViewOnly(false);
           setIsRfqDialogOpen(true);
@@ -494,6 +526,14 @@ export default function RfqPage() {
                                   routeLegs: (rfq.origins as any[]) || [],
                                   detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
                                   extraCharges: (rfq.extraCharges as any[]) || [],
+                                  cargoDetails: rfq.cargoDetails || "",
+                                  temperatureRequirement: rfq.temperatureRequirement || "",
+                                  weight: String(rfq.weight || "0.000"),
+                                  volume: String(rfq.volume || "0.000"),
+                                  requestedPickupDate: rfq.requestedPickupDate ? new Date(rfq.requestedPickupDate).toISOString().split('T')[0] : "",
+                                  requestedDeliveryDate: rfq.requestedDeliveryDate ? new Date(rfq.requestedDeliveryDate).toISOString().split('T')[0] : "",
+                                  additionalRequirements: rfq.additionalRequirements || "",
+                                  notes: rfq.notes || "",
                                 });
                                 setIsViewOnly(true);
                                 setIsRfqDialogOpen(true);
@@ -514,6 +554,14 @@ export default function RfqPage() {
                                   routeLegs: (rfq.origins as any[]) || [],
                                   detentionChargesPerDay: String(rfq.detentionChargesPerDay || "0"),
                                   extraCharges: (rfq.extraCharges as any[]) || [],
+                                  cargoDetails: rfq.cargoDetails || "",
+                                  temperatureRequirement: rfq.temperatureRequirement || "",
+                                  weight: String(rfq.weight || "0.000"),
+                                  volume: String(rfq.volume || "0.000"),
+                                  requestedPickupDate: rfq.requestedPickupDate ? new Date(rfq.requestedPickupDate).toISOString().split('T')[0] : "",
+                                  requestedDeliveryDate: rfq.requestedDeliveryDate ? new Date(rfq.requestedDeliveryDate).toISOString().split('T')[0] : "",
+                                  additionalRequirements: rfq.additionalRequirements || "",
+                                  notes: rfq.notes || "",
                                 });
                                 setIsViewOnly(false);
                                 setIsRfqDialogOpen(true);
@@ -817,6 +865,112 @@ export default function RfqPage() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="cargoDetails"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Cargo Details / Description</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Palletized cargo, heavy machinery" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="temperatureRequirement"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Temperature Requirement</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. -18C, Frozen, Ambient" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <FormField
+                    control={form.control}
+                    name="weight"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Weight (Tons)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="volume"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Volume (CBM)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="requestedPickupDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Requested Pickup Date</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="requestedDeliveryDate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Requested Delivery Date</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="additionalRequirements"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Quotation Terms / Special Requirements</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. GPS tracking, border escort required" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Internal Notes</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Internal notes or comments" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               {/* Dynamic Lists */}
@@ -1048,15 +1202,22 @@ export default function RfqPage() {
                   </div>
                   <div>
                     <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Cargo Specifications</h3>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Cargo Details:</span> {form.getValues().cargoDetails || "N/A"}</p>
                     <p className="mb-1"><span className="font-semibold inline-block w-24">Cargo Type:</span> {form.getValues().cargoType || "N/A"}</p>
                     <p className="mb-1"><span className="font-semibold inline-block w-24">Truck Type:</span> {form.getValues().truckType || "N/A"}</p>
                     <p className="mb-1"><span className="font-semibold inline-block w-24">Freight Type:</span> {form.getValues().freightType || "N/A"}</p>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Temperature:</span> {form.getValues().temperatureRequirement || "N/A"}</p>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Weight/Vol:</span> {form.getValues().weight || "0.000"} Tons / {form.getValues().volume || "0.000"} CBM</p>
                   </div>
                 </div>
 
                 <div className="mb-8">
                   <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Transit Route & Legs</h3>
-                  <p className="mb-3"><span className="font-semibold">Main Route Summary:</span> {form.getValues().transitRoute}</p>
+                  <p className="mb-1"><span className="font-semibold">Main Route Summary:</span> {form.getValues().transitRoute}</p>
+                  <p className="mb-1"><span className="font-semibold">Requested Dates:</span> Pickup: {form.getValues().requestedPickupDate ? new Date(form.getValues().requestedPickupDate).toLocaleDateString() : 'N/A'} | Delivery: {form.getValues().requestedDeliveryDate ? new Date(form.getValues().requestedDeliveryDate).toLocaleDateString() : 'N/A'}</p>
+                  {form.getValues().additionalRequirements && (
+                    <p className="mb-3"><span className="font-semibold">Special Terms:</span> {form.getValues().additionalRequirements}</p>
+                  )}
                   
                   {form.getValues().routeLegs && form.getValues().routeLegs.length > 0 && (
                     <table className="w-full border-collapse text-xs mt-2">
@@ -1117,6 +1278,10 @@ export default function RfqPage() {
                   
                   {form.getValues().detentionChargesPerDay && parseFloat(String(form.getValues().detentionChargesPerDay)) > 0 && (
                     <p className="text-xs text-red-600 mt-4 italic font-medium">* Note: Detention charges apply at {formatCurrency(parseFloat(String(form.getValues().detentionChargesPerDay)))} per day after allowed free time.</p>
+                  )}
+
+                  {form.getValues().notes && (
+                    <p className="text-xs text-muted-foreground mt-4 italic font-medium">* Notes: {form.getValues().notes}</p>
                   )}
                 </div>
               </div>

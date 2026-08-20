@@ -2166,7 +2166,18 @@ export const insertSupervisorZoneSchema = createInsertSchema(supervisorZones).om
 export const insertContractSchema = createInsertSchema(contracts).omit({ id: true, createdAt: true });
 export const insertVehicleSchema = createInsertSchema(vehicles).omit({ id: true, createdAt: true });
 export const insertLocationSchema = createInsertSchema(locations).omit({ id: true, createdAt: true });
-export const insertRfqSchema = createInsertSchema(rfqs).omit({ id: true, createdAt: true });
+export const insertRfqSchema = createInsertSchema(rfqs).extend({
+  requestedPickupDate: z.preprocess((val) => {
+    if (!val || val === "") return undefined;
+    const d = new Date(val as string);
+    return isNaN(d.getTime()) ? undefined : d;
+  }, z.date().optional()),
+  requestedDeliveryDate: z.preprocess((val) => {
+    if (!val || val === "") return undefined;
+    const d = new Date(val as string);
+    return isNaN(d.getTime()) ? undefined : d;
+  }, z.date().optional()),
+}).omit({ id: true, createdAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true });
 export const insertTripSchema = createInsertSchema(trips).extend({
   loadingDocuments: z.any().optional(),

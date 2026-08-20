@@ -169,6 +169,7 @@ export interface IStorage {
   getPurchase(id: string): Promise<Purchase | undefined>;
   getPurchaseWithItems(id: string): Promise<{ purchase: Purchase; items: PurchaseItem[] } | undefined>;
   createPurchase(data: InsertPurchase, items: any[]): Promise<Purchase>;
+  approvePurchase(id: string): Promise<Purchase>;
   getPurchasePayments(purchaseId: string): Promise<any[]>;
   createPurchasePayment(data: { purchaseId: string; amount: number; paymentMethod: string; bankAccountId: string; notes?: string }): Promise<any>;
   getPurchaseInvoiceSummary(purchaseId: string): Promise<any>;
@@ -598,7 +599,7 @@ export interface IStorage {
   getDelivery(id: string): Promise<Delivery | undefined>;
   createDelivery(data: InsertDelivery): Promise<Delivery>;
   updateDelivery(id: string, data: Partial<InsertDelivery>): Promise<Delivery | undefined>;
-  recordDeliveryPOD(tripId: string, orderId: string, podUrl: string, status: string, issueLog?: string): Promise<Delivery>;
+  recordDeliveryPOD(tripId: string, orderId: string, podUrl: string, status: string, issueLog?: string, deliveryDetails?: any): Promise<Delivery>;
   getOutletDeliveryAttachments(outletId: string): Promise<any[]>;
 
   // Logistics Driver Management
@@ -682,13 +683,140 @@ export class DatabaseStorage implements IStorage {
     outstandingAmount: number;
     paymentStatus: 'unpaid' | 'partial' | 'paid' | 'credit_adjusted';
   }> {
-    return { invoiceTotal: 0, totalPaid: 0, creditApplied: 0, outstandingAmount: 0, paymentStatus: 'unpaid' };
+    const [purchase] = await db.select().from(purchases).where(eq(purchases.id, purchaseId));
+    if (!purchase) throw new Error("Purchase not found");
+
+    const invoiceTotal = parseFloat(purchase.total || "0");
+    const creditApplied = parseFloat(purchase.creditApplied || "0");
+
+    // Get all payments for this purchase from payment records (ledger-driven)
+    const payments = await db.select().from(purchasePayments).where(eq(purchasePayments.purchaseId, purchaseId));
+    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+
+    // Outstanding = Invoice Total - Payments - Credit Applied
+    const outstandingAmount = Math.max(0, invoiceTotal - totalPaid - creditApplied);
+
+    let paymentStatus: 'unpaid' | 'partial' | 'paid' | 'credit_adjusted';
+    const totalSettled = totalPaid + creditApplied;
+    if (totalSettled >= invoiceTotal - 0.001) {
+      paymentStatus = 'paid';
+    } else if (totalPaid > 0) {
+      paymentStatus = 'partial';
+    } else if (creditApplied > 0) {
+      paymentStatus = 'credit_adjusted';
+    } else {
+      paymentStatus = 'unpaid';
+    }
+
+    return { invoiceTotal, totalPaid, creditApplied, outstandingAmount, paymentStatus };
   }
 
   // Get comprehensive purchase invoice summary with all transaction history (ledger-driven)
   // Mirrors getSaleInvoiceSummary for consistency
   async getPurchaseInvoiceSummary(purchaseId: string): Promise<any> {
-    return {};
+    // Get the purchase
+    const [purchase] = await db.select().from(purchases).where(eq(purchases.id, purchaseId));
+    if (!purchase) return null;
+
+    // Get purchase items with product names
+    const rawItems = await db.select().from(purchaseItems).where(eq(purchaseItems.purchaseId, purchaseId));
+    const items = await Promise.all(
+      rawItems.map(async (item) => {
+        const [product] = await db.select({ name: products.name, sku: products.sku }).from(products).where(eq(products.id, item.productId));
+        return {
+          ...item,
+          productName: product?.name || "Unknown Product",
+          productSku: product?.sku || "",
+        };
+      })
+    );
+
+    // Get returns for this purchase with product names
+    const returns = await db.select().from(purchaseReturns).where(eq(purchaseReturns.purchaseId, purchaseId));
+    let returnItems: any[] = [];
+    for (const ret of returns) {
+      const retItems = await db.select().from(purchaseReturnItems).where(eq(purchaseReturnItems.returnId, ret.id));
+      const retItemsWithNames = await Promise.all(
+        retItems.map(async (item) => {
+          const [product] = await db.select({ name: products.name, sku: products.sku }).from(products).where(eq(products.id, item.productId));
+          return {
+            ...item,
+            productName: product?.name || "Unknown Product",
+            productSku: product?.sku || "",
+          };
+        })
+      );
+      returnItems = returnItems.concat(retItemsWithNames);
+    }
+
+    // Get payments for this purchase
+    const payments = await db.select().from(purchasePayments)
+      .where(eq(purchasePayments.purchaseId, purchaseId))
+      .orderBy(desc(purchasePayments.paidAt));
+
+    // Get supplier refunds (cash received back from supplier for returns)
+    const refunds = await db.select().from(supplierRefunds)
+      .where(eq(supplierRefunds.purchaseId, purchaseId))
+      .orderBy(desc(supplierRefunds.refundDate));
+
+    // Calculate totals - purchase total = subtotal + VAT - discount
+    const subtotal = parseFloat(purchase.subtotal || "0");
+    const vat = parseFloat(purchase.vatAmount || "0");
+    const discount = parseFloat(purchase.discount || "0");
+    const originalTotal = subtotal + vat - discount;
+
+    // Returns reduce invoice value - track credits (applied to future purchases) and refunds (cash received back)
+    const totalCreditsApplied = returns.reduce((sum, r) => sum + parseFloat(r.creditApplied || "0"), 0);
+    const totalReturnRefunds = returns.reduce((sum, r) => sum + parseFloat(r.refundAmount || "0"), 0);
+    const totalReturns = totalCreditsApplied + totalReturnRefunds;
+
+    // Supplier refunds received (cash back from supplier)
+    const totalRefundsReceived = refunds.reduce((sum, r) => sum + parseFloat(r.amount || "0"), 0);
+
+    // Total payments made to supplier
+    const totalPayments = payments.reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+
+    // Net amount = originalTotal - totalReturns
+    // Balance = netAmount - totalPayments + totalRefundsReceived
+    const netAmount = originalTotal - totalReturns;
+
+    // Balance = what we still owe supplier
+    // Positive = we owe supplier
+    // Negative = supplier owes us (overpayment or excess credits)
+    const balanceRemaining = netAmount - totalPayments + totalRefundsReceived;
+
+    // Determine invoice status
+    let status = "pending";
+    if (balanceRemaining <= 0.001) {
+      status = "paid";
+    } else if (totalPayments > 0) {
+      status = "partial";
+    }
+
+    const refundDueFromSupplier = balanceRemaining < 0 ? Math.abs(balanceRemaining) : 0;
+    const supplierOwesUs = refundDueFromSupplier > 0;
+
+    return {
+      purchase,
+      items,
+      returns,
+      returnItems,
+      payments,
+      refunds,
+      summary: {
+        originalTotal: originalTotal.toFixed(3),
+        totalReturns: totalReturns.toFixed(3),
+        totalCreditsApplied: totalCreditsApplied.toFixed(3),
+        totalReturnRefunds: totalReturnRefunds.toFixed(3),
+        totalRefundsReceived: totalRefundsReceived.toFixed(3),
+        netAmount: netAmount.toFixed(3),
+        totalPayments: totalPayments.toFixed(3),
+        balanceRemaining: Math.max(0, balanceRemaining).toFixed(3),
+        refundDueFromSupplier: refundDueFromSupplier.toFixed(3),
+        supplierOwesUs,
+        status,
+      },
+    };
   }
 
   // ==================== CUSTOMER LEDGER HELPERS ====================
@@ -1172,54 +1300,500 @@ export class DatabaseStorage implements IStorage {
 
   // Purchase Orders
   async getPurchaseOrders(): Promise<PurchaseOrder[]> {
-    return [];
+    return db.select().from(purchaseOrders).orderBy(desc(purchaseOrders.orderDate));
   }
 
   async getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined> {
-    return undefined;
+    const [order] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+    return order || undefined;
   }
 
   async getPurchaseOrderWithItems(id: string): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] } | undefined> {
-    return undefined;
+    const [order] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+    if (!order) return undefined;
+
+    const items = await db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, id));
+    return { order, items };
   }
 
   async createPurchaseOrder(data: any, items: any[]): Promise<PurchaseOrder> {
-    return {} as any;
+    const orderNumber = await this.getNextNumber("PO");
+
+    return await db.transaction(async (tx) => {
+      const orderData = {
+        orderNumber,
+        supplierId: data.supplierId,
+        shopId: data.shopId || null,
+        branchId: data.branchId || null,
+        warehouseId: data.warehouseId || null,
+        status: data.status || "pending",
+        subtotal: data.subtotal?.toString() || "0.000",
+        vatAmount: data.vatAmount?.toString() || "0.000",
+        discount: data.discount?.toString() || "0.000",
+        freight: data.freight?.toString() || "0.000",
+        total: data.total?.toString() || "0.000",
+        notes: data.notes || null,
+      };
+
+      const [order] = await tx.insert(purchaseOrders).values(orderData).returning();
+
+      for (const item of items) {
+        await tx.insert(purchaseOrderItems).values({
+          purchaseOrderId: order.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice?.toString() || "0.000",
+          vatRate: item.vatRate?.toString() || "5.00",
+          discount: item.discount?.toString() || "0.000",
+          total: item.total?.toString() || "0.000",
+          warehouseId: item.warehouseId || null,
+          salesRate: item.salesRate?.toString() || null,
+          boxSalesRate: item.boxSalesRate?.toString() || null,
+          manufacturingDate: item.manufacturingDate || null,
+          expiryDate: item.expiryDate || null,
+          warrantyMonths: item.warrantyMonths || null,
+          storageType: item.storageType || null,
+        });
+      }
+
+      return order;
+    });
   }
 
   async updatePurchaseOrderStatus(id: string, status: string): Promise<PurchaseOrder | undefined> {
-    return undefined;
+    const [order] = await db.update(purchaseOrders).set({ status }).where(eq(purchaseOrders.id, id)).returning();
+    return order || undefined;
   }
 
   // Purchases
   async getPurchases(scope?: { companyId?: string | null; shopId?: string | null; branchId?: string | null } | null): Promise<Purchase[]> {
-    return [];
+    const conditions = [];
+
+    if (scope?.companyId) {
+      const companyBranches = await db.select({ id: branches.id }).from(branches).where(eq(branches.companyId, scope.companyId));
+      const branchIds = companyBranches.map(b => b.id);
+      if (branchIds.length > 0) {
+        conditions.push(or(inArray(purchases.branchId, branchIds), sql`${purchases.branchId} IS NULL`));
+      } else {
+        return [];
+      }
+    }
+    if (scope?.branchId) {
+      conditions.push(or(eq(purchases.branchId, scope.branchId), sql`${purchases.branchId} IS NULL`));
+    }
+    if (conditions.length > 0) {
+      return db.select().from(purchases).where(and(...conditions)).orderBy(desc(purchases.purchaseDate));
+    }
+    return db.select().from(purchases).orderBy(desc(purchases.purchaseDate));
   }
 
   async getPurchase(id: string): Promise<Purchase | undefined> {
-    return undefined;
+    const [purchase] = await db.select().from(purchases).where(eq(purchases.id, id));
+    return purchase || undefined;
   }
 
   async getPurchaseWithItems(id: string): Promise<{ purchase: Purchase; items: any[] } | undefined> {
-    return undefined;
+    const [purchase] = await db.select().from(purchases).where(eq(purchases.id, id));
+    if (!purchase) return undefined;
+
+    const items = await db.select({
+      id: purchaseItems.id,
+      purchaseId: purchaseItems.purchaseId,
+      productId: purchaseItems.productId,
+      quantity: purchaseItems.quantity,
+      unitPrice: purchaseItems.unitPrice,
+      vatRate: purchaseItems.vatRate,
+      discount: purchaseItems.discount,
+      total: purchaseItems.total,
+      warrantyMonths: purchaseItems.warrantyMonths,
+      serialNumbers: purchaseItems.serialNumber,
+      productName: products.name,
+      productSku: products.sku,
+    }).from(purchaseItems)
+      .leftJoin(products, eq(purchaseItems.productId, products.id))
+      .where(eq(purchaseItems.purchaseId, id));
+    return { purchase, items };
   }
 
-  
   async deletePurchase(id: string): Promise<void> {
-    return;
-  }
+    await db.transaction(async (tx) => {
+      const [purchase] = await tx.select().from(purchases).where(eq(purchases.id, id));
+      if (!purchase) return;
 
+      const items = await tx.select().from(purchaseItems).where(eq(purchaseItems.purchaseId, id));
+      const totalAmount  = parseFloat(purchase.total || "0");
+      const vatAmount    = parseFloat(purchase.vatAmount || "0");
+      const paidAmount   = parseFloat(purchase.paidAmount || "0");
+      const netCost      = totalAmount - vatAmount;
+
+      if (paidAmount > 0 && purchase.bankAccountId) {
+        const [account] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, purchase.bankAccountId));
+        if (account) {
+          const newBalance = parseFloat(account.currentBalance || "0") + paidAmount;
+          await tx.update(bankAccounts)
+            .set({ currentBalance: newBalance.toFixed(3) })
+            .where(eq(bankAccounts.id, purchase.bankAccountId));
+
+          await tx.insert(bankTransactions).values({
+            bankAccountId: purchase.bankAccountId,
+            shopId: account.shopId,
+            branchId: account.branchId || account.shopId,
+            type: "deposit",
+            amount: paidAmount.toFixed(3),
+            reference: purchase.purchaseNumber,
+            description: `Reversal: Purchase deleted ${purchase.purchaseNumber}`,
+            relatedType: "purchase_deletion",
+            relatedId: purchase.id,
+          });
+        }
+      }
+
+      const creditAmount = totalAmount - paidAmount;
+      if (purchase.supplierId && creditAmount > 0 && purchase.status === "approved") {
+        const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, purchase.supplierId));
+        if (supplier) {
+          const newBalance = parseFloat(String(supplier.currentBalance || "0")) - creditAmount;
+          await tx.update(suppliers)
+            .set({ currentBalance: newBalance.toFixed(3) })
+            .where(eq(suppliers.id, purchase.supplierId));
+        }
+      }
+
+      if (purchase.status === "approved") {
+        const reversalLines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string }> = [];
+
+        if (paidAmount > 0) {
+          reversalLines.push({ accountCode: "1000", debit: paidAmount, description: "Reverse: Cash paid on deleted purchase" });
+        }
+        if (creditAmount > 0) {
+          reversalLines.push({ accountCode: "2100", debit: creditAmount, description: "Reverse: Accounts payable on deleted purchase" });
+        }
+        if (netCost > 0) {
+          reversalLines.push({ accountCode: "1200", credit: netCost, description: "Reverse: Inventory asset on deleted purchase" });
+        }
+        if (vatAmount > 0) {
+          reversalLines.push({ accountCode: "2160", credit: vatAmount, description: "Reverse: VAT input on deleted purchase" });
+        }
+
+        if (reversalLines.length > 0) {
+          await this.createJournalEntryInTx(tx, {
+            sourceType: "purchase_deletion",
+            sourceId: purchase.id,
+            shopId: purchase.shopId,
+            branchId: purchase.branchId || purchase.shopId,
+            reference: purchase.purchaseNumber,
+            description: `Reversal: Purchase deleted ${purchase.purchaseNumber}`,
+            lines: reversalLines,
+          });
+        }
+
+        for (const item of items) {
+          const [inv] = await tx.select().from(inventory).where(
+            and(
+              eq(inventory.productId, item.productId),
+              eq(inventory.warehouseId, purchase.warehouseId)
+            )
+          );
+
+          if (inv) {
+            await tx.update(inventory)
+              .set({ quantity: Math.max(0, inv.quantity - item.quantity) })
+              .where(eq(inventory.id, inv.id));
+          }
+
+          const itemSerials = await tx.select().from(serialNumbers).where(eq(serialNumbers.purchaseItemId, item.id));
+          for (const serial of itemSerials) {
+            await tx.delete(serialNumbers).where(eq(serialNumbers.id, serial.id));
+          }
+        }
+        await tx.delete(journalEntries).where(and(eq(journalEntries.sourceType, "purchase"), eq(journalEntries.sourceId, id)));
+      }
+
+      await tx.delete(purchaseItems).where(eq(purchaseItems.purchaseId, id));
+      await tx.delete(purchasePayments).where(eq(purchasePayments.purchaseId, id));
+      await tx.delete(purchases).where(eq(purchases.id, id));
+    });
+  }
 
   async createPurchase(data: any, items: any[]): Promise<Purchase> {
-    return {} as any;
+    const purchaseNumber = await this.getNextNumber("PU");
+
+    return await db.transaction(async (tx) => {
+      const purchaseData = {
+        purchaseNumber,
+        supplierId: data.supplierId,
+        shopId: data.shopId,
+        branchId: data.branchId || null,
+        warehouseId: data.warehouseId || null,
+        paymentStatus: "pending",
+        status: "pending",
+        paymentMethod: data.paymentMethod || null,
+        bankAccountId: null,
+        paidAmount: "0.000",
+        creditApplied: "0.000",
+        subtotal: data.subtotal?.toString() || "0.000",
+        vatAmount: data.vatAmount?.toString() || "0.000",
+        discount: data.discount?.toString() || "0.000",
+        freight: data.freight?.toString() || "0.000",
+        total: data.total?.toString() || "0.000",
+        invoiceNo: data.invoiceNo || null,
+        invoiceDate: data.invoiceDate || null,
+        otherCharges: data.otherCharges?.toString() || "0.000",
+        previousDue: data.previousDue?.toString() || "0.000",
+        purchaseOrderId: data.purchaseOrderId || null,
+        file: data.file || null,
+      };
+
+      const [purchase] = await tx.insert(purchases).values(purchaseData).returning();
+
+      for (const item of items) {
+        await tx.insert(purchaseItems).values({
+          purchaseId: purchase.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice?.toString() || "0.000",
+          vatRate: item.vatRate?.toString() || "5.00",
+          discount: item.discount?.toString() || "0.000",
+          total: item.total?.toString() || "0.000",
+          serialNumber: item.serialNumbers?.join(", ") || null,
+          salesRate: item.salesRate?.toString() || null,
+          boxSalesRate: item.boxSalesRate?.toString() || null,
+          warrantyMonths: item.warrantyMonths || null,
+          storageType: item.storageType || null,
+          manufacturingDate: item.manufacturingDate || null,
+          expiryDate: item.expiryDate || null,
+        });
+      }
+
+      return purchase;
+    });
+  }
+
+  async approvePurchase(id: string): Promise<Purchase> {
+    return await db.transaction(async (tx) => {
+      const [purchase] = await tx.select().from(purchases).where(eq(purchases.id, id));
+      if (!purchase) throw new Error("Purchase not found");
+      if (purchase.status === "approved") {
+        throw new Error("Purchase is already approved");
+      }
+
+      // 1. Transition status to approved
+      await tx.update(purchases).set({ status: "approved", updateDate: new Date() }).where(eq(purchases.id, id));
+
+      // 2. Fetch purchase items
+      const items = await tx.select().from(purchaseItems).where(eq(purchaseItems.purchaseId, id));
+
+      // 3. Update Inventory and Serial Numbers
+      for (const item of items) {
+        // Create serial numbers in database
+        if (item.serialNumber) {
+          const serials = item.serialNumber.split(",").map(s => s.trim()).filter(Boolean);
+          if (serials.length > 0) {
+            const serialsToCreate = serials.map(serialNum => ({
+              serialNumber: serialNum,
+              productId: item.productId,
+              warehouseId: purchase.warehouseId || null,
+              shopId: purchase.shopId || null,
+              purchaseId: purchase.id,
+              purchaseItemId: item.id,
+              costPrice: item.unitPrice?.toString() || null,
+              sellingPrice: item.salesRate?.toString() || null,
+              status: "available",
+            }));
+            await tx.insert(serialNumbers).values(serialsToCreate);
+          }
+        }
+
+        // Add to inventory (FIFO - each purchase creates a new batch)
+        if (purchase.warehouseId) {
+          await tx.insert(inventory).values({
+            productId: item.productId,
+            warehouseId: purchase.warehouseId,
+            branchId: purchase.branchId || null,
+            quantity: item.quantity,
+            costPrice: item.unitPrice?.toString() || "0.000",
+          });
+        }
+      }
+
+      // 4. Update supplier balance (what we owe them)
+      const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, purchase.supplierId));
+      const totalAmount = parseFloat(purchase.total || "0");
+      if (supplier) {
+        const newBalance = parseFloat(supplier.currentBalance || "0") + totalAmount;
+        await tx.update(suppliers).set({ currentBalance: newBalance.toFixed(3) }).where(eq(suppliers.id, purchase.supplierId));
+      }
+
+      // 5. Update purchase order status if linked
+      if (purchase.purchaseOrderId) {
+        await tx.update(purchaseOrders).set({ status: "converted" }).where(eq(purchaseOrders.id, purchase.purchaseOrderId));
+      }
+
+      // 6. Create double-entry journal entries
+      const subtotal = parseFloat(purchase.subtotal || "0");
+      const vatAmount = parseFloat(purchase.vatAmount || "0");
+      const discount = parseFloat(purchase.discount || "0");
+      const freight = parseFloat(purchase.freight || "0");
+      const otherCharges = parseFloat(purchase.otherCharges || "0");
+
+      const inventoryCost = Math.max(0, subtotal - discount + freight + otherCharges);
+
+      const journalLines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string }> = [];
+
+      // DR Inventory (1200)
+      if (inventoryCost > 0) {
+        journalLines.push({ accountCode: "1200", debit: inventoryCost, description: "Inventory purchase" });
+      }
+
+      // DR VAT Input (2150)
+      if (vatAmount > 0) {
+        journalLines.push({ accountCode: "2150", debit: vatAmount, description: "VAT on purchase (input)" });
+      }
+
+      // CR Supplier Payable (2000)
+      if (totalAmount > 0) {
+        journalLines.push({ accountCode: "2000", credit: totalAmount, description: "Supplier payable - full purchase amount" });
+      }
+
+      if (journalLines.length > 0) {
+        await this.createJournalEntryInTx(tx, {
+          sourceType: "purchase",
+          sourceId: purchase.id,
+          shopId: purchase.shopId,
+          branchId: purchase.branchId || purchase.shopId,
+          reference: purchase.purchaseNumber,
+          description: `Purchase from supplier - ${purchase.purchaseNumber}`,
+          lines: journalLines,
+        });
+      }
+
+      return { ...purchase, status: "approved" };
+    });
   }
 
   async getPurchasePayments(purchaseId: string): Promise<any[]> {
-    return [];
+    return db.select().from(purchasePayments).where(eq(purchasePayments.purchaseId, purchaseId)).orderBy(desc(purchasePayments.paidAt));
   }
 
   async createPurchasePayment(data: { purchaseId: string; amount: number; paymentMethod: string; bankAccountId: string; notes?: string }): Promise<any> {
-    return [];
+    const paymentAmount = data.amount;
+
+    if (!data.bankAccountId) {
+      throw new Error("Bank account is required for purchase payment.");
+    }
+
+    if (paymentAmount <= 0) {
+      throw new Error("Payment amount must be greater than zero.");
+    }
+
+    if (data.paymentMethod === "cash") {
+      const [cashBox] = await db.select().from(pettyCash).where(eq(pettyCash.id, data.bankAccountId));
+      const cashBalance = parseFloat(cashBox?.currentBalance || "0");
+      if (paymentAmount > cashBalance) {
+        throw new Error(`Insufficient funds in selected petty cash box. Available: ${cashBalance.toFixed(3)} BD, Required: ${paymentAmount.toFixed(3)} BD.`);
+      }
+    } else {
+      await this.ensureSufficientFunds(paymentAmount, data.bankAccountId, "purchase payment");
+    }
+    const invoiceOutstanding = await this.getPurchaseOutstanding(data.purchaseId);
+
+    if (invoiceOutstanding.outstandingAmount <= 0.001) {
+      throw new Error("This invoice is already fully paid. No payment can be recorded.");
+    }
+
+    if (paymentAmount > invoiceOutstanding.outstandingAmount + 0.001) {
+      throw new Error(`Payment amount (${paymentAmount.toFixed(3)} BD) exceeds invoice outstanding balance (${invoiceOutstanding.outstandingAmount.toFixed(3)} BD)`);
+    }
+
+    return await db.transaction(async (tx) => {
+      const [purchase] = await tx.select().from(purchases).where(eq(purchases.id, data.purchaseId));
+      if (!purchase) throw new Error("Purchase not found");
+      if (purchase.status !== "approved") {
+        throw new Error("Cannot pay for a purchase invoice that is pending approval");
+      }
+
+      const supplierId = purchase.supplierId;
+      if (!supplierId) throw new Error("Purchase has no associated supplier");
+
+      const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, supplierId));
+      const supplierBalance = parseFloat(supplier?.currentBalance || "0");
+      if (supplierBalance <= 0) {
+        throw new Error("Supplier has no outstanding payable balance. Payment cannot be processed.");
+      }
+
+      const actualPayment = Math.min(paymentAmount, invoiceOutstanding.outstandingAmount);
+      const newTotalPaid = invoiceOutstanding.totalPaid + actualPayment;
+      const newPaymentStatus = newTotalPaid >= invoiceOutstanding.invoiceTotal - 0.001 ? "paid" : "partial";
+
+      await tx.update(purchases).set({
+        paidAmount: newTotalPaid.toFixed(3),
+        paymentStatus: newPaymentStatus,
+        updateDate: new Date(),
+      }).where(eq(purchases.id, data.purchaseId));
+
+      if (data.paymentMethod === "cash") {
+        const [cashBox] = await tx.select().from(pettyCash).where(eq(pettyCash.id, data.bankAccountId));
+        if (cashBox) {
+          const currentBalance = parseFloat(cashBox.currentBalance || "0");
+          const newBalance = currentBalance - actualPayment;
+          await tx.update(pettyCash).set({ currentBalance: newBalance.toFixed(3) }).where(eq(pettyCash.id, data.bankAccountId));
+        }
+      } else {
+        const [account] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
+        if (account) {
+          const currentBalance = parseFloat(account.currentBalance || "0");
+          const newBalance = currentBalance - actualPayment;
+          await tx.update(bankAccounts).set({ currentBalance: newBalance.toFixed(3) }).where(eq(bankAccounts.id, data.bankAccountId));
+
+          await tx.insert(bankTransactions).values({
+            bankAccountId: data.bankAccountId,
+            shopId: account.shopId,
+            branchId: account.branchId,
+            type: "withdrawal",
+            amount: actualPayment.toFixed(3),
+            reference: purchase.purchaseNumber,
+            description: `Payment for purchase ${purchase.purchaseNumber}`,
+            relatedType: "purchase_payment",
+            relatedId: data.purchaseId,
+          });
+        }
+      }
+
+      if (supplier) {
+        const newSupplierBalance = supplierBalance - actualPayment;
+        await tx.update(suppliers).set({ currentBalance: newSupplierBalance.toFixed(3) }).where(eq(suppliers.id, supplierId));
+      }
+
+      const paymentRef = await this.getNextNumber("PAY");
+      const [payment] = await tx.insert(purchasePayments).values({
+        purchaseId: data.purchaseId,
+        supplierId: supplierId,
+        amount: actualPayment.toFixed(3),
+        paymentMethod: data.paymentMethod || "cash",
+        bankAccountId: data.bankAccountId,
+        reference: paymentRef,
+        notes: data.notes || `Payment for purchase invoice ${purchase.purchaseNumber}`,
+        shopId: purchase.shopId,
+        branchId: purchase.branchId,
+      }).returning();
+
+      const journalLines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string }> = [
+        { accountCode: "2000", debit: actualPayment, description: `Payment to supplier - purchase ${purchase.purchaseNumber}` },
+        { accountCode: "1000", credit: actualPayment, description: "Cash/Bank withdrawal for supplier payment" },
+      ];
+
+      await this.createJournalEntryInTx(tx, {
+        sourceType: "purchase_payment",
+        sourceId: payment.id,
+        shopId: purchase.shopId,
+        branchId: purchase.branchId || purchase.shopId,
+        reference: paymentRef,
+        description: `Payment for purchase invoice - ${purchase.purchaseNumber}`,
+        lines: journalLines,
+      });
+
+      return payment;
+    });
   }
 
   // Sales
@@ -2378,6 +2952,24 @@ export class DatabaseStorage implements IStorage {
       isVendor: client.isVendor,
     } as any);
 
+    if (client.isVendor) {
+      await db.insert(suppliers).values({
+        id: client.id,
+        shopId: client.shopId,
+        branchId: client.branchId,
+        companyId: client.brandId || (client as any).erpCompanyId || null,
+        name: client.name,
+        companyName: client.companyName || "",
+        email: client.email || "",
+        phone: client.phone || "",
+        vatNumber: (client as any).vatNumber || "",
+        address: (client as any).billingAddress || (client as any).deliveryAddress || "",
+        openingBalance: client.openingBalance || "0.000",
+        currentBalance: client.openingBalance || "0.000",
+        status: client.status || "active",
+      } as any);
+    }
+
     // Return with dynamic outstanding balance (which will be openingBalance initially)
     const outstanding = await this.calculateClientOutstanding(client.id);
     return {
@@ -2405,6 +2997,40 @@ export class DatabaseStorage implements IStorage {
       isVendor: client.isVendor,
     } as any).where(eq(outlets.id, client.id));
 
+    if (client.isVendor) {
+      const [existingSupplier] = await db.select().from(suppliers).where(eq(suppliers.id, client.id));
+      if (existingSupplier) {
+        await db.update(suppliers).set({
+          name: client.name,
+          companyName: client.companyName || "",
+          email: client.email || "",
+          phone: client.phone || "",
+          vatNumber: (client as any).vatNumber || "",
+          address: (client as any).billingAddress || (client as any).deliveryAddress || "",
+          status: client.status || "active",
+          shopId: client.shopId,
+          branchId: client.branchId,
+          companyId: client.brandId || (client as any).erpCompanyId || null,
+        } as any).where(eq(suppliers.id, client.id));
+      } else {
+        await db.insert(suppliers).values({
+          id: client.id,
+          shopId: client.shopId,
+          branchId: client.branchId,
+          companyId: client.brandId || (client as any).erpCompanyId || null,
+          name: client.name,
+          companyName: client.companyName || "",
+          email: client.email || "",
+          phone: client.phone || "",
+          vatNumber: (client as any).vatNumber || "",
+          address: (client as any).billingAddress || (client as any).deliveryAddress || "",
+          openingBalance: client.openingBalance || "0.000",
+          currentBalance: client.openingBalance || "0.000",
+          status: client.status || "active",
+        } as any);
+      }
+    }
+
     const outstanding = await this.calculateClientOutstanding(client.id);
     return {
       ...client,
@@ -2415,6 +3041,7 @@ export class DatabaseStorage implements IStorage {
   async deleteClient(id: string): Promise<void> {
     await db.delete(outletZones).where(eq(outletZones.outletId, id));
     await db.delete(outlets).where(eq(outlets.id, id));
+    await db.delete(suppliers).where(eq(suppliers.id, id));
     await db.delete(clients).where(eq(clients.id, id));
   }
 
@@ -6628,6 +7255,7 @@ export class DatabaseStorage implements IStorage {
       // Insert payment record
       const [insertedPayment] = await tx.insert(invoicePayments).values({
         ...payment,
+        paymentDate: payment.paymentDate ? new Date(payment.paymentDate) : new Date(),
         orderId: invoice.orderId,
         customerId: invoice.customerId,
       }).returning();
@@ -6866,7 +7494,23 @@ export class DatabaseStorage implements IStorage {
     return row || undefined;
   }
 
-  async recordDeliveryPOD(tripId: string, orderId: string, podUrl: string, status: string, issueLog?: string): Promise<Delivery> {
+  async recordDeliveryPOD(
+    tripId: string, 
+    orderId: string, 
+    podUrl: string, 
+    status: string, 
+    issueLog?: string,
+    deliveryDetails?: {
+      actualDeliveryDate?: string;
+      actualDeliveryTime?: string;
+      receivedQuantity?: string | number;
+      shortageQuantity?: string | number;
+      damagedQuantity?: string | number;
+      damageReason?: string;
+      receiverName?: string;
+      receiverContact?: string;
+    }
+  ): Promise<Delivery> {
     const [existing] = await db.select().from(deliveries)
       .where(and(eq(deliveries.tripId, tripId), eq(deliveries.orderId, orderId)));
     
@@ -6882,6 +7526,22 @@ export class DatabaseStorage implements IStorage {
         .values({ tripId, orderId, podUrl, status, issueLog, deliveryTimestamp: new Date() })
         .returning();
       delivery = created;
+    }
+
+    if (deliveryDetails) {
+      await db.update(trips)
+        .set({
+          actualDeliveryDate: deliveryDetails.actualDeliveryDate || null,
+          actualDeliveryTime: deliveryDetails.actualDeliveryTime || null,
+          receivedQuantity: deliveryDetails.receivedQuantity ? String(deliveryDetails.receivedQuantity) : null,
+          shortageQuantity: deliveryDetails.shortageQuantity ? String(deliveryDetails.shortageQuantity) : null,
+          damagedQuantity: deliveryDetails.damagedQuantity ? String(deliveryDetails.damagedQuantity) : null,
+          damageReason: deliveryDetails.damageReason || null,
+          receiverName: deliveryDetails.receiverName || null,
+          receiverContact: deliveryDetails.receiverContact || null,
+          signedPodUrl: podUrl || null,
+        })
+        .where(eq(trips.id, tripId));
     }
 
     // Resolve outletId from order if possible

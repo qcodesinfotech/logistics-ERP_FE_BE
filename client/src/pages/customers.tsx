@@ -162,6 +162,9 @@ export default function CustomersPage() {
 
   // Filter and search logic on the client side
   const filteredClients = clients.filter(c => {
+    // Exclude vendors from the customer master list
+    if (c.isVendor) return false;
+
     const code = c.customerCode || "";
     const name = c.name || "";
     const trade = c.tradeName || "";

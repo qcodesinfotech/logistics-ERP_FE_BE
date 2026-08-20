@@ -42,17 +42,45 @@ export default function DispatchPage() {
   const [selectedOutletIdForHistory, setSelectedOutletIdForHistory] = useState("");
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   
-  // Selection states for new trip creation
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
   const [selectedDriverId, setSelectedDriverId] = useState<string>("");
   const [tripRoute, setTripRoute] = useState("");
+  const [selectedTrailerNumber, setSelectedTrailerNumber] = useState("");
+  const [tripPrice, setTripPrice] = useState("0.000");
 
-  // Delivery status / POD state
+  // Depart / Pickup Loading States
+  const [isDepartDialogOpen, setIsDepartDialogOpen] = useState(false);
+  const [departTrip, setDepartTrip] = useState<Trip | null>(null);
+  const [departPickupDate, setDepartPickupDate] = useState(new Date().toISOString().substring(0, 10));
+  const [departPickupTime, setDepartPickupTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+  const [departLoadedQty, setDepartLoadedQty] = useState("0");
+  const [departCargoCondition, setDepartCargoCondition] = useState("Good");
+  const [departLoadingNotes, setDepartLoadingNotes] = useState("");
+
+  // In Transit Log States
+  const [isTransitDialogOpen, setIsTransitDialogOpen] = useState(false);
+  const [transitTrip, setTransitTrip] = useState<Trip | null>(null);
+  const [transitLocation, setTransitLocation] = useState("");
+  const [transitGps, setTransitGps] = useState("");
+  const [transitDelayReason, setTransitDelayReason] = useState("");
+  const [transitDelayHours, setTransitDelayHours] = useState("");
+  const [transitIncidentDesc, setTransitIncidentDesc] = useState("");
+  const [transitIncidentCost, setTransitIncidentCost] = useState("");
+  const [transitExpenseName, setTransitExpenseName] = useState("");
+  const [transitExpenseCost, setTransitExpenseCost] = useState("");
   const [selectedOrderIdForPOD, setSelectedOrderIdForPOD] = useState<string>("");
   const [podStatus, setPodStatus] = useState<string>("delivered");
   const [podUrl, setPodUrl] = useState<string>("");
   const [issueLog, setIssueLog] = useState<string>("");
+  const [podDeliveryDate, setPodDeliveryDate] = useState(new Date().toISOString().substring(0, 10));
+  const [podDeliveryTime, setPodDeliveryTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+  const [podReceivedQty, setPodReceivedQty] = useState("0");
+  const [podShortageQty, setPodShortageQty] = useState("0");
+  const [podDamagedQty, setPodDamagedQty] = useState("0");
+  const [podDamageReason, setPodDamageReason] = useState("");
+  const [podReceiverName, setPodReceiverName] = useState("");
+  const [podReceiverContact, setPodReceiverContact] = useState("");
 
   // Driver Settlement States
   const [isSettlementDialogOpen, setIsSettlementDialogOpen] = useState(false);
@@ -119,6 +147,8 @@ export default function DispatchPage() {
       route: string;
       status: string;
       startTime: Date;
+      trailerNumber?: string;
+      sellingRate?: string;
     }) => apiRequest("POST", "/api/trips", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
@@ -131,20 +161,24 @@ export default function DispatchPage() {
       setSelectedVehicleId("");
       setSelectedDriverId("");
       setTripRoute("");
+      setSelectedTrailerNumber("");
+      setTripPrice("0.000");
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
     },
   });
 
-  const updateTripStatusMutation = useMutation({
-    mutationFn: ({ id, status, endTime }: { id: string; status: string; endTime?: Date }) => 
-      apiRequest("PUT", `/api/trips/${id}`, { status, endTime }),
+  const updateTripMutation = useMutation({
+    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) => 
+      apiRequest("PUT", `/api/trips/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Trip status updated successfully" });
+      toast({ title: "Trip updated successfully" });
+      setIsDepartDialogOpen(false);
+      setIsTransitDialogOpen(false);
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -152,13 +186,24 @@ export default function DispatchPage() {
   });
 
   const updateDeliveryMutation = useMutation({
-    mutationFn: ({ tripId, orderId, status, podUrl, issueLog }: {
+    mutationFn: (data: {
       tripId: string;
       orderId: string;
       status: string;
       podUrl: string;
       issueLog?: string;
-    }) => apiRequest("POST", `/api/trips/${tripId}/update-delivery`, { orderId, status, podUrl, issueLog }),
+      actualDeliveryDate?: string;
+      actualDeliveryTime?: string;
+      receivedQuantity?: number | string;
+      shortageQuantity?: number | string;
+      damagedQuantity?: number | string;
+      damageReason?: string;
+      receiverName?: string;
+      receiverContact?: string;
+    }) => {
+      const { tripId, ...payload } = data;
+      return apiRequest("POST", `/api/trips/${tripId}/update-delivery`, payload);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -168,6 +213,14 @@ export default function DispatchPage() {
       setSelectedOrderIdForPOD("");
       setPodUrl("");
       setIssueLog("");
+      setPodDeliveryDate(new Date().toISOString().substring(0, 10));
+      setPodDeliveryTime(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+      setPodReceivedQty("0");
+      setPodShortageQty("0");
+      setPodDamagedQty("0");
+      setPodDamageReason("");
+      setPodReceiverName("");
+      setPodReceiverContact("");
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -446,27 +499,56 @@ export default function DispatchPage() {
                               </Button>
                             )}
 
-                            {trip.status === "pending" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs border-green-200 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20"
-                                onClick={() => updateTripStatusMutation.mutate({ id: trip.id, status: "in_transit" })}
-                              >
-                                Depart
-                              </Button>
-                            )}
+                             {trip.status === "pending" && (
+                               <Button
+                                 size="sm"
+                                 variant="outline"
+                                 className="h-8 text-xs border-green-200 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20"
+                                 onClick={() => {
+                                   setDepartTrip(trip);
+                                   setDepartPickupDate(new Date().toISOString().substring(0, 10));
+                                   setDepartPickupTime(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+                                   setDepartLoadedQty("0");
+                                   setDepartCargoCondition("Good");
+                                   setDepartLoadingNotes("");
+                                   setIsDepartDialogOpen(true);
+                                 }}
+                               >
+                                 Depart
+                               </Button>
+                             )}
 
-                            {trip.status === "in_transit" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className="h-8 text-xs text-foreground"
-                                onClick={() => updateTripStatusMutation.mutate({ id: trip.id, status: "completed", endTime: new Date() })}
-                              >
-                                Complete Trip
-                              </Button>
-                            )}
+                             {trip.status === "in_transit" && (
+                               <div className="inline-flex gap-1">
+                                 <Button
+                                   size="sm"
+                                   variant="outline"
+                                   className="h-8 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
+                                   onClick={() => {
+                                     setTransitTrip(trip);
+                                     setTransitLocation(trip.currentLocation || "");
+                                     setTransitGps(trip.gpsLocation || "");
+                                     setTransitDelayReason("");
+                                     setTransitDelayHours("0");
+                                     setTransitIncidentDesc("");
+                                     setTransitIncidentCost("0");
+                                     setTransitExpenseName("");
+                                     setTransitExpenseCost("0");
+                                     setIsTransitDialogOpen(true);
+                                   }}
+                                 >
+                                   Update Log
+                                 </Button>
+                                 <Button
+                                   size="sm"
+                                   variant="secondary"
+                                   className="h-8 text-xs text-foreground"
+                                   onClick={() => updateTripMutation.mutate({ id: trip.id, status: "completed", endTime: new Date() })}
+                                 >
+                                   Complete Trip
+                                 </Button>
+                               </div>
+                             )}
 
                             {trip.podVerificationStatus === "pending" && (
                               <Button
@@ -569,6 +651,27 @@ export default function DispatchPage() {
                 placeholder="Transit nodes summary"
               />
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Trailer Number</label>
+                <Input 
+                  value={selectedTrailerNumber} 
+                  onChange={(e) => setSelectedTrailerNumber(e.target.value)} 
+                  placeholder="e.g. TR-890"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Trip Price / Revenue (BD)</label>
+                <Input 
+                  type="number"
+                  step="0.001"
+                  value={tripPrice} 
+                  onChange={(e) => setTripPrice(e.target.value)} 
+                  placeholder="0.000"
+                />
+              </div>
+            </div>
           </div>
           <DialogFooter className="pt-4">
             <Button type="button" variant="outline" onClick={() => setIsAssignDialogOpen(false)}>
@@ -583,6 +686,8 @@ export default function DispatchPage() {
                 route: tripRoute,
                 status: "pending",
                 startTime: new Date(),
+                trailerNumber: selectedTrailerNumber || undefined,
+                sellingRate: tripPrice,
               })}
               disabled={!selectedVehicleId || !selectedDriverId || !tripRoute || createTripMutation.isPending}
             >
@@ -592,9 +697,8 @@ export default function DispatchPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Record POD Dialog */}
       <Dialog open={isPODDialogOpen} onOpenChange={setIsPODDialogOpen}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Record Order Proof-of-Delivery (POD)</DialogTitle>
             <DialogDescription>
@@ -628,6 +732,83 @@ export default function DispatchPage() {
                   <SelectItem value="failed">Failed Delivery (Reject/Return)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Actual Delivery Date *</label>
+                <Input 
+                  type="date"
+                  value={podDeliveryDate}
+                  onChange={(e) => setPodDeliveryDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Actual Delivery Time *</label>
+                <Input 
+                  type="time"
+                  value={podDeliveryTime}
+                  onChange={(e) => setPodDeliveryTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Received Qty</label>
+                <Input 
+                  type="number"
+                  step="0.001"
+                  value={podReceivedQty}
+                  onChange={(e) => setPodReceivedQty(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Shortage Qty</label>
+                <Input 
+                  type="number"
+                  step="0.001"
+                  value={podShortageQty}
+                  onChange={(e) => setPodShortageQty(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Damaged Qty</label>
+                <Input 
+                  type="number"
+                  step="0.001"
+                  value={podDamagedQty}
+                  onChange={(e) => setPodDamagedQty(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Damage / Shortage Reason</label>
+              <Input 
+                value={podDamageReason}
+                onChange={(e) => setPodDamageReason(e.target.value)}
+                placeholder="e.g. Wet bags, torn packaging, rough driving"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Receiver Name</label>
+                <Input 
+                  value={podReceiverName}
+                  onChange={(e) => setPodReceiverName(e.target.value)}
+                  placeholder="e.g. Zakaria Ali"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Receiver Contact</label>
+                <Input 
+                  value={podReceiverContact}
+                  onChange={(e) => setPodReceiverContact(e.target.value)}
+                  placeholder="e.g. +973 33445566"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -669,6 +850,14 @@ export default function DispatchPage() {
                 status: podStatus,
                 podUrl: podUrl,
                 issueLog: issueLog,
+                actualDeliveryDate: podDeliveryDate,
+                actualDeliveryTime: podDeliveryTime,
+                receivedQuantity: podReceivedQty,
+                shortageQuantity: podShortageQty,
+                damagedQuantity: podDamagedQty,
+                damageReason: podDamageReason,
+                receiverName: podReceiverName,
+                receiverContact: podReceiverContact,
               })}
               disabled={!selectedOrderIdForPOD || !podStatus || updateDeliveryMutation.isPending}
             >
@@ -870,6 +1059,260 @@ export default function DispatchPage() {
               disabled={saveDriverSettlementMutation.isPending}
             >
               {saveDriverSettlementMutation.isPending ? "Saving..." : "Save & Cost Trip"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Depart / Loading Details Dialog */}
+      <Dialog open={isDepartDialogOpen} onOpenChange={setIsDepartDialogOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Depart Run & Loading Details</DialogTitle>
+            <DialogDescription>
+              Record cargo loading conditions, loaded quantities, and documents before dispatch.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Actual Pickup Date *</label>
+                <Input 
+                  type="date"
+                  value={departPickupDate}
+                  onChange={(e) => setDepartPickupDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Actual Pickup Time *</label>
+                <Input 
+                  type="time"
+                  value={departPickupTime}
+                  onChange={(e) => setDepartPickupTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Loaded Quantity</label>
+                <Input 
+                  type="number"
+                  step="0.001"
+                  value={departLoadedQty}
+                  onChange={(e) => setDepartLoadedQty(e.target.value)}
+                  placeholder="0.000"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cargo Condition</label>
+                <Select value={departCargoCondition} onValueChange={setDepartCargoCondition}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Good">Good / Intact</SelectItem>
+                    <SelectItem value="Damaged">Damaged</SelectItem>
+                    <SelectItem value="Wet">Wet / Leakage</SelectItem>
+                    <SelectItem value="N/A">Not Inspected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Loading Notes</label>
+              <Textarea 
+                value={departLoadingNotes}
+                onChange={(e) => setDepartLoadingNotes(e.target.value)}
+                placeholder="Log any seals, temperature readings, or packaging observations..."
+              />
+            </div>
+          </div>
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsDepartDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="button" 
+              onClick={() => {
+                if (departTrip) {
+                  updateTripMutation.mutate({
+                    id: departTrip.id,
+                    status: "in_transit",
+                    actualPickupDate: departPickupDate,
+                    actualPickupTime: departPickupTime,
+                    loadedQuantity: departLoadedQty,
+                    cargoCondition: departCargoCondition,
+                    loadingNotes: departLoadingNotes,
+                  });
+                }
+              }}
+              disabled={updateTripMutation.isPending}
+            >
+              {updateTripMutation.isPending ? "Starting Run..." : "Confirm Departure"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Update Transit Log Dialog */}
+      <Dialog open={isTransitDialogOpen} onOpenChange={setIsTransitDialogOpen}>
+        <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Update Transit Logs for {transitTrip?.tripNumber}</DialogTitle>
+            <DialogDescription>
+              Log current run details, delays, incidents, or expenses incurred during transit.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* GPS & Location */}
+            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Current Location & Tracking</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Current Location (City/Hub)</label>
+                  <Input 
+                    value={transitLocation}
+                    onChange={(e) => setTransitLocation(e.target.value)}
+                    placeholder="e.g. Haima City Hub"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">GPS Coordinates</label>
+                  <Input 
+                    value={transitGps}
+                    onChange={(e) => setTransitGps(e.target.value)}
+                    placeholder="e.g. 22.012, 56.124"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Delay log */}
+            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Delay (Optional)</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Delay Reason</label>
+                  <Input 
+                    value={transitDelayReason}
+                    onChange={(e) => setTransitDelayReason(e.target.value)}
+                    placeholder="e.g. Border Custom Delay"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Duration (Hours)</label>
+                  <Input 
+                    type="number"
+                    value={transitDelayHours}
+                    onChange={(e) => setTransitDelayHours(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Incident log */}
+            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Incident (Optional)</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Incident Description</label>
+                  <Input 
+                    value={transitIncidentDesc}
+                    onChange={(e) => setTransitIncidentDesc(e.target.value)}
+                    placeholder="e.g. Flat tire, minor breakdown"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Estimated Cost (BD)</label>
+                  <Input 
+                    type="number"
+                    step="0.001"
+                    value={transitIncidentCost}
+                    onChange={(e) => setTransitIncidentCost(e.target.value)}
+                    placeholder="0.000"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Expense log */}
+            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Additional Trip Expense (Optional)</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Expense Title</label>
+                  <Input 
+                    value={transitExpenseName}
+                    onChange={(e) => setTransitExpenseName(e.target.value)}
+                    placeholder="e.g. Road Tolls, Helper Fee"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium">Cost Amount (BD)</label>
+                  <Input 
+                    type="number"
+                    step="0.001"
+                    value={transitExpenseCost}
+                    onChange={(e) => setTransitExpenseCost(e.target.value)}
+                    placeholder="0.000"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="pt-4">
+            <Button type="button" variant="outline" onClick={() => setIsTransitDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="button" 
+              onClick={() => {
+                if (transitTrip) {
+                  // Merge/append delays
+                  const newDelays = [...(transitTrip.delays as any[] || [])];
+                  if (transitDelayReason && parseFloat(transitDelayHours) > 0) {
+                    newDelays.push({
+                      reason: transitDelayReason,
+                      durationHours: parseFloat(transitDelayHours),
+                      date: new Date().toISOString(),
+                    });
+                  }
+
+                  // Merge/append incidents
+                  const newIncidents = [...(transitTrip.incidents as any[] || [])];
+                  if (transitIncidentDesc) {
+                    newIncidents.push({
+                      description: transitIncidentDesc,
+                      cost: parseFloat(transitIncidentCost) || 0,
+                      date: new Date().toISOString(),
+                    });
+                  }
+
+                  // Merge/append expenses
+                  const newExpenses = [...(transitTrip.additionalExpenses as any[] || [])];
+                  if (transitExpenseName && parseFloat(transitExpenseCost) > 0) {
+                    newExpenses.push({
+                      name: transitExpenseName,
+                      cost: parseFloat(transitExpenseCost),
+                    });
+                  }
+
+                  updateTripMutation.mutate({
+                    id: transitTrip.id,
+                    currentLocation: transitLocation,
+                    gpsLocation: transitGps,
+                    delays: newDelays,
+                    incidents: newIncidents,
+                    additionalExpenses: newExpenses,
+                  });
+                }
+              }}
+              disabled={updateTripMutation.isPending}
+            >
+              {updateTripMutation.isPending ? "Logging Updates..." : "Save Transit Logs"}
             </Button>
           </DialogFooter>
         </DialogContent>

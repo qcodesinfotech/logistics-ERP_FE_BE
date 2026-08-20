@@ -302,6 +302,38 @@ export async function ensureDriverTablesSchema() {
         outstanding_amount = orders.grand_total
       FROM orders
       WHERE invoices.order_id = orders.id AND (invoices.total = '0.000' OR invoices.total IS NULL);
+
+      -- Backfill existing vendors (clients where is_vendor = true) into suppliers table
+      INSERT INTO suppliers (id, shop_id, branch_id, company_id, name, company_name, email, phone, vat_number, address, opening_balance, current_balance, status, created_at)
+      SELECT 
+        id, 
+        shop_id, 
+        branch_id, 
+        brand_id, 
+        name, 
+        company_name, 
+        email, 
+        phone, 
+        vat_number, 
+        billing_address, 
+        opening_balance, 
+        opening_balance, 
+        status, 
+        created_at
+      FROM clients
+      WHERE is_vendor = true
+      ON CONFLICT (id) DO UPDATE 
+      SET 
+        name = EXCLUDED.name,
+        company_name = EXCLUDED.company_name,
+        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
+        vat_number = EXCLUDED.vat_number,
+        address = EXCLUDED.address,
+        status = EXCLUDED.status,
+        shop_id = EXCLUDED.shop_id,
+        branch_id = EXCLUDED.branch_id,
+        company_id = EXCLUDED.company_id;
     `);
     schemaCheckDone = true;
     console.log("[db] Driver tables schema verified and updated successfully");

@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
-  Building2, Plus, Edit, Trash2, Eye, Landmark, Phone, FileText, Download, Trash, Globe, ShieldAlert, Loader2
+  Building2, Plus, Edit, Trash2, Eye, Landmark, Phone, FileText, Download, Trash, Globe, ShieldAlert, Loader2, CheckCircle, CreditCard, Upload
 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -125,33 +126,11 @@ export default function SuppliersPage() {
   });
 
   const openCreateDialog = () => {
-    setEditingSupplier(null);
-    form.reset({
-      name: "",
-      companyName: "",
-      email: "",
-      phone: "",
-      vatNumber: "",
-      address: "",
-      openingBalance: "0.000",
-      status: "active",
-    });
-    setIsDialogOpen(true);
+    setLocation("/logistics/vendors/new");
   };
 
   const openEditDialog = (supplier: Supplier) => {
-    setEditingSupplier(supplier);
-    form.reset({
-      name: supplier.name,
-      companyName: supplier.companyName || "",
-      email: supplier.email || "",
-      phone: supplier.phone || "",
-      vatNumber: supplier.vatNumber || "",
-      address: supplier.address || "",
-      openingBalance: supplier.openingBalance || "0.000",
-      status: supplier.status || "active",
-    });
-    setIsDialogOpen(true);
+    setLocation(`/logistics/vendors/${supplier.id}/edit`);
   };
 
   const onSubmit = (data: SupplierFormData) => {
@@ -196,15 +175,15 @@ export default function SuppliersPage() {
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
             <Building2 className="h-6 w-6 text-primary" />
-            Suppliers Master
+            Vendors Master
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage logistics vendor suppliers.
+            Manage logistics vendors and purchase ledgers.
           </p>
         </div>
         {hasWrite && (
           <Button onClick={openCreateDialog} className="gap-2">
-            <Plus className="h-4 w-4" /> Add Supplier
+            <Plus className="h-4 w-4" /> Add Vendor
           </Button>
         )}
       </div>
@@ -214,8 +193,8 @@ export default function SuppliersPage() {
         <CardHeader className="pb-3 border-b">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <CardTitle className="text-base">Suppliers List</CardTitle>
-              <CardDescription>Showing all registered vendor suppliers</CardDescription>
+              <CardTitle className="text-base">Vendors List</CardTitle>
+              <CardDescription>Showing all registered vendors</CardDescription>
             </div>
             <Input
               placeholder="Search by name, company or email..."
@@ -227,14 +206,14 @@ export default function SuppliersPage() {
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-10 text-center text-muted-foreground">Loading suppliers...</div>
+            <div className="p-10 text-center text-muted-foreground">Loading vendors...</div>
           ) : filteredSuppliers.length === 0 ? (
             <div className="p-14 flex flex-col items-center gap-3 text-muted-foreground">
               <Building2 className="h-10 w-10 opacity-25" />
-              <p className="text-sm">No suppliers found.</p>
+              <p className="text-sm">No vendors found.</p>
               {hasWrite && (
                 <Button variant="outline" onClick={openCreateDialog} className="gap-2 mt-1">
-                  <Plus className="h-4 w-4" /> Add Supplier
+                  <Plus className="h-4 w-4" /> Add Vendor
                 </Button>
               )}
             </div>
@@ -242,7 +221,7 @@ export default function SuppliersPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Supplier Name</TableHead>
+                  <TableHead>Vendor Name</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Phone / Email</TableHead>
                   <TableHead className="text-right">Opening Balance</TableHead>
@@ -255,7 +234,7 @@ export default function SuppliersPage() {
                 {filteredSuppliers.map((supplier) => (
                   <TableRow 
                     key={supplier.id}
-                    onClick={() => setLocation(`/logistics/suppliers/${supplier.id}`)}
+                    onClick={() => setLocation(`/logistics/vendors/${supplier.id}`)}
                     className="cursor-pointer hover:bg-accent/30 transition-colors"
                   >
                     <TableCell className="font-medium">{supplier.name}</TableCell>
@@ -269,15 +248,15 @@ export default function SuppliersPage() {
                     <TableCell><StatusBadge status={supplier.status} /></TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/suppliers/${supplier.id}`)} title="View Transactions">
+                        <Button variant="ghost" size="icon" onClick={() => setLocation(`/logistics/vendors/${supplier.id}`)} title="View Transactions">
                           <Eye className="h-4 w-4 text-muted-foreground" />
                         </Button>
                         {hasWrite && (
                           <>
-                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(supplier)} title="Edit Supplier">
+                            <Button variant="ghost" size="icon" onClick={() => openEditDialog(supplier)} title="Edit Vendor">
                               <Edit className="h-4 w-4 text-blue-600" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setDeletingSupplier(supplier)} title="Delete Supplier">
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => setDeletingSupplier(supplier)} title="Delete Vendor">
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </>
@@ -292,126 +271,7 @@ export default function SuppliersPage() {
         </CardContent>
       </Card>
 
-      {/* Add / Edit Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editingSupplier ? "Edit Supplier Details" : "Add New Supplier"}</DialogTitle>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Supplier Name *</FormLabel>
-                    <FormControl><Input {...field} placeholder="e.g. Al-Jazeera Industrial Co" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="companyName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Company Name</FormLabel>
-                    <FormControl><Input {...field} placeholder="e.g. Al-Jazeera Group" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Phone Number</FormLabel>
-                      <FormControl><Input {...field} placeholder="+973 17XXXXXX" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email Address</FormLabel>
-                      <FormControl><Input {...field} type="email" placeholder="supplier@email.com" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="vatNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>VAT Number</FormLabel>
-                      <FormControl><Input {...field} placeholder="3000XXXXXXXXXXX" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="openingBalance"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Opening Balance (BD)</FormLabel>
-                      <FormControl><Input {...field} type="number" step="0.001" disabled={!!editingSupplier} className={editingSupplier ? "bg-muted/40" : ""} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Address</FormLabel>
-                    <FormControl><Input {...field} placeholder="Building, Road, Block, Area" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="status"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <DialogFooter className="pt-2">
-                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
-                  {editingSupplier ? "Save Changes" : "Create Supplier"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+
 
       {/* Delete Alert Dialog */}
       <AlertDialog open={!!deletingSupplier} onOpenChange={(o) => !o && setDeletingSupplier(null)}>
@@ -460,10 +320,10 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
       <div className="p-6">
         <EmptyState
           icon={Building2}
-          title="Supplier not found"
-          description="The requested supplier does not exist in the database."
+          title="Vendor not found"
+          description="The requested vendor does not exist in the database."
         >
-          <Button onClick={() => setLocation("/logistics/suppliers")}>Back to List</Button>
+          <Button onClick={() => setLocation("/logistics/vendors")}>Back to List</Button>
         </EmptyState>
       </div>
     );
@@ -472,9 +332,9 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <PageHeader
         title={supplier.name}
-        description={`Supplier Profile & Transactions`}
+        description={`Vendor Profile & Transactions`}
       >
-        <Button variant="outline" onClick={() => setLocation("/logistics/suppliers")}>
+        <Button variant="outline" onClick={() => setLocation("/logistics/vendors")}>
           Back to List
         </Button>
       </PageHeader>
@@ -570,7 +430,43 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
 }
 
 export function SupplierTransactionsLedger({ id }: { id: string }) {
-  // Queries for Supplier Transactions
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const isAdmin = user?.role === "super_admin" || user?.role === "admin";
+
+  // State for Purchase Dialog
+  const [isPurchaseDialogOpen, setIsPurchaseDialogOpen] = useState(false);
+  const [purchaseInvoiceNo, setPurchaseInvoiceNo] = useState("");
+  const [purchaseInvoiceDate, setPurchaseInvoiceDate] = useState(new Date().toISOString().split("T")[0]);
+  const [purchaseNotes, setPurchaseNotes] = useState("");
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState("");
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [purchaseQty, setPurchaseQty] = useState(1);
+  const [purchaseUnitPrice, setPurchaseUnitPrice] = useState(0);
+  const [purchaseVatRate, setPurchaseVatRate] = useState(5);
+  const [purchaseDiscount, setPurchaseDiscount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
+  const [uploadedFilename, setUploadedFilename] = useState<string | null>(null);
+
+  // State for Payment Dialog
+  const [isPayDialogOpen, setIsPayDialogOpen] = useState(false);
+  const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
+  const [selectedPurchaseRef, setSelectedPurchaseRef] = useState("");
+  const [selectedPurchaseTotal, setSelectedPurchaseTotal] = useState(0);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
+  const [paymentBankAccountId, setPaymentBankAccountId] = useState("");
+  const [paymentPettyCashId, setPaymentPettyCashId] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+
+  // Queries
+  const { data: myScope } = useQuery<any>({ queryKey: ["/api/my-scope"] });
+  const { data: products = [] } = useQuery<any[]>({ queryKey: ["/api/products"] });
+  const { data: warehouses = [] } = useQuery<any[]>({ queryKey: ["/api/warehouses"] });
+  const { data: bankAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/bank-accounts"] });
+  const { data: pettyCash = [] } = useQuery<any[]>({ queryKey: ["/api/petty-cash"] });
+
   const { data: purchases = [], isLoading: purchasesLoading } = useQuery<Purchase[]>({
     queryKey: ["/api/purchases"],
   });
@@ -594,66 +490,197 @@ export function SupplierTransactionsLedger({ id }: { id: string }) {
 
   // Consolidate all supplier ledger entries chronologically
   const consolidatedLedger: {
+    id: string;
     date: Date;
     type: string;
     refNo: string;
     debit?: number; // Payments/Refunds decrease liability
     credit?: number; // Purchase invoices increase liability
     status?: string;
+    approvalStatus?: string;
+    file?: string | null;
   }[] = [];
 
   // 1. Add Purchase Invoices (increases liability -> Credit)
   supplierPurchases.forEach(p => {
     consolidatedLedger.push({
+      id: p.id,
       date: new Date(p.purchaseDate || p.date || Date.now()),
       type: "Purchase Invoice",
       refNo: p.purchaseNumber,
       credit: parseFloat(p.grandTotal || p.total || p.subtotal || "0"),
       status: p.paymentStatus || "pending",
+      approvalStatus: p.status || "pending",
+      file: p.file || null,
     });
   });
 
   // 2. Add Supplier Payments (decreases liability -> Debit)
   paymentTransactions.forEach(t => {
     consolidatedLedger.push({
+      id: t.id,
       date: new Date(t.date || t.createDate || Date.now()),
       type: "Supplier Payment",
       refNo: t.entryNumber || t.reference || "PAY",
       debit: parseFloat(t.amount || "0"),
       status: "paid",
+      approvalStatus: "approved",
     });
   });
 
   // 3. Add Opening Balance Payments (decreases liability -> Debit)
   obPayments.forEach(t => {
     consolidatedLedger.push({
+      id: t.id,
       date: new Date(t.date || t.createDate || Date.now()),
       type: "Opening Balance Payment",
       refNo: t.entryNumber || t.reference || "OB-PAY",
       debit: parseFloat(t.amount || "0"),
       status: "paid",
+      approvalStatus: "approved",
     });
   });
 
   // 4. Add Credit Refunds (decreases liability -> Debit)
   creditRefunds.forEach(t => {
     consolidatedLedger.push({
+      id: t.id,
       date: new Date(t.refundDate || t.createDate || Date.now()),
       type: "Credit Refund",
       refNo: t.refundNumber || "RFD",
       debit: parseFloat(t.amount || "0"),
       status: "refunded",
+      approvalStatus: "approved",
     });
   });
 
   // Sort consolidated ledger chronologically (newest first)
   consolidatedLedger.sort((a, b) => b.date.getTime() - a.date.getTime());
 
+  // File Upload handler
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await apiRequest("POST", "/api/upload/invoice", formData);
+      const data = await res.json();
+      setUploadedFileUrl(data.url);
+      setUploadedFilename(data.filename);
+      toast({ title: "Invoice attachment uploaded successfully." });
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast({
+        title: "Upload failed",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Purchase Mutation
+  const createPurchaseMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/purchases", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/purchases"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/suppliers/${id}`] });
+      toast({ title: "Purchase invoice recorded successfully and sent for approval." });
+      setIsPurchaseDialogOpen(false);
+      resetPurchaseForm();
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to record purchase invoice",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resetPurchaseForm = () => {
+    setPurchaseInvoiceNo("");
+    setPurchaseInvoiceDate(new Date().toISOString().split("T")[0]);
+    setPurchaseNotes("");
+    setSelectedWarehouseId("");
+    setSelectedProductId("");
+    setPurchaseQty(1);
+    setPurchaseUnitPrice(0);
+    setPurchaseVatRate(5);
+    setPurchaseDiscount(0);
+    setUploadedFileUrl(null);
+    setUploadedFilename(null);
+  };
+
+  // Approve Mutation
+  const approvePurchaseMutation = useMutation({
+    mutationFn: (purchaseId: string) => apiRequest("POST", `/api/purchases/${purchaseId}/approve`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/purchases"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/suppliers/${id}`] });
+      toast({ title: "Purchase invoice approved successfully. Inventory and ledger updated." });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to approve purchase invoice",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Pay Mutation
+  const createPaymentMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", `/api/purchases/${selectedPurchaseId}/payments`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/purchases"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/suppliers/${id}/payment-transactions`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/suppliers/${id}`] });
+      toast({ title: "Vendor payment recorded successfully." });
+      setIsPayDialogOpen(false);
+      resetPayForm();
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to record payment",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resetPayForm = () => {
+    setSelectedPurchaseId(null);
+    setSelectedPurchaseRef("");
+    setSelectedPurchaseTotal(0);
+    setPaymentAmount(0);
+    setPaymentMethod("bank_transfer");
+    setPaymentBankAccountId("");
+    setPaymentPettyCashId("");
+    setPaymentNotes("");
+  };
+
+  const purchaseSubtotal = purchaseQty * purchaseUnitPrice - purchaseDiscount;
+  const purchaseVatAmount = purchaseSubtotal * (purchaseVatRate / 100);
+  const purchaseTotal = purchaseSubtotal + purchaseVatAmount;
+
   return (
     <Card>
-      <CardHeader className="pb-3 border-b">
-        <CardTitle className="text-base">Supplier Transactions Ledger</CardTitle>
-        <CardDescription>Chronological purchase and payment transactions history</CardDescription>
+      <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-base font-bold text-primary">Vendor Transactions Ledger</CardTitle>
+          <CardDescription>Chronological purchase and payment transactions history</CardDescription>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => setIsPurchaseDialogOpen(true)} className="gap-2" size="sm">
+            <Plus className="h-4 w-4" /> Record Purchase Invoice
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {isLoading ? (
@@ -661,7 +688,7 @@ export function SupplierTransactionsLedger({ id }: { id: string }) {
         ) : consolidatedLedger.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
             <FileText className="h-8 w-8 opacity-20" />
-            <span>No transactions recorded for this supplier.</span>
+            <span>No transactions recorded for this vendor.</span>
           </div>
         ) : (
           <Table>
@@ -673,6 +700,7 @@ export function SupplierTransactionsLedger({ id }: { id: string }) {
                 <TableHead className="text-right">Debit (Paid/Ref)</TableHead>
                 <TableHead className="text-right">Credit (Purchased)</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -686,7 +714,16 @@ export function SupplierTransactionsLedger({ id }: { id: string }) {
                       {item.type}
                     </Badge>
                   </TableCell>
-                  <TableCell className="font-mono font-medium">{item.refNo}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1 font-mono font-medium">
+                      {item.refNo}
+                      {item.file && (
+                        <a href={item.file} target="_blank" rel="noreferrer" className="text-primary hover:text-primary-focus inline-flex items-center" title="View POD file">
+                          <FileText className="h-3.5 w-3.5 cursor-pointer ml-1" />
+                        </a>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right font-mono font-semibold text-green-700">
                     {item.debit ? `${item.debit.toFixed(3)} BD` : "—"}
                   </TableCell>
@@ -694,17 +731,62 @@ export function SupplierTransactionsLedger({ id }: { id: string }) {
                     {item.credit ? `${item.credit.toFixed(3)} BD` : "—"}
                   </TableCell>
                   <TableCell>
-                    {item.status ? (
-                      <Badge
-                        className={
-                          ["paid", "refunded", "completed"].includes(item.status)
-                            ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                            : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-                        }
-                      >
-                        {item.status}
-                      </Badge>
-                    ) : "—"}
+                    <div className="flex flex-col gap-1">
+                      {item.type === "Purchase Invoice" && (
+                        <Badge className={item.approvalStatus === "approved" ? "bg-green-100 text-green-800 border-none" : "bg-yellow-100 text-yellow-800 border-none"}>
+                          {item.approvalStatus === "approved" ? "Approved" : "Pending Approval"}
+                        </Badge>
+                      )}
+                      {item.status && (item.approvalStatus === "approved" || item.type !== "Purchase Invoice") && (
+                        <Badge
+                          className={
+                            ["paid", "refunded", "completed"].includes(item.status)
+                              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-none"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border-none"
+                          }
+                        >
+                          {item.status}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {item.type === "Purchase Invoice" && (
+                      <div className="flex justify-end gap-1.5">
+                        {item.approvalStatus === "pending" && isAdmin && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                            disabled={approvePurchaseMutation.isPending}
+                            onClick={() => approvePurchaseMutation.mutate(item.id)}
+                          >
+                            {approvePurchaseMutation.isPending && approvePurchaseMutation.variables === item.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                            )}
+                            Approve
+                          </Button>
+                        )}
+                        {item.approvalStatus === "approved" && item.status !== "paid" && (
+                          <Button
+                            size="sm"
+                            className="bg-blue-600 text-white hover:bg-blue-700"
+                            onClick={() => {
+                              setSelectedPurchaseId(item.id);
+                              setSelectedPurchaseRef(item.refNo);
+                              setSelectedPurchaseTotal(item.credit || 0);
+                              setPaymentAmount(item.credit || 0);
+                              setIsPayDialogOpen(true);
+                            }}
+                          >
+                            <CreditCard className="h-3 w-3 mr-1" />
+                            Pay
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -712,6 +794,323 @@ export function SupplierTransactionsLedger({ id }: { id: string }) {
           </Table>
         )}
       </CardContent>
+
+      <Dialog open={isPurchaseDialogOpen} onOpenChange={setIsPurchaseDialogOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Record Supplier Purchase Invoice</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="invoiceNo">Invoice No / Ref</Label>
+                <Input
+                  id="invoiceNo"
+                  value={purchaseInvoiceNo}
+                  onChange={(e) => setPurchaseInvoiceNo(e.target.value)}
+                  placeholder="e.g. INV-2026-001"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invoiceDate">Invoice Date</Label>
+                <Input
+                  id="invoiceDate"
+                  type="date"
+                  value={purchaseInvoiceDate}
+                  onChange={(e) => setPurchaseInvoiceDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="warehouse">Warehouse</Label>
+                <Select value={selectedWarehouseId} onValueChange={setSelectedWarehouseId}>
+                  <SelectTrigger id="warehouse">
+                    <SelectValue placeholder="Select Warehouse" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="product">Product</Label>
+                <Select value={selectedProductId} onValueChange={(val) => {
+                  setSelectedProductId(val);
+                  const prod = products.find(p => p.id === val);
+                  if (prod) {
+                    setPurchaseUnitPrice(parseFloat(prod.purchasePrice || "0"));
+                  }
+                }}>
+                  <SelectTrigger id="product">
+                    <SelectValue placeholder="Select Product" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {products.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-4">
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="qty">Quantity</Label>
+                <Input
+                  id="qty"
+                  type="number"
+                  min="1"
+                  value={purchaseQty}
+                  onChange={(e) => setPurchaseQty(parseInt(e.target.value) || 1)}
+                />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="price">Unit Price (BD)</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={purchaseUnitPrice}
+                  onChange={(e) => setPurchaseUnitPrice(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="vatRate">VAT Rate (%)</Label>
+                <Input
+                  id="vatRate"
+                  type="number"
+                  value={purchaseVatRate}
+                  onChange={(e) => setPurchaseVatRate(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="discount">Discount (BD)</Label>
+                <Input
+                  id="discount"
+                  type="number"
+                  step="0.001"
+                  value={purchaseDiscount}
+                  onChange={(e) => setPurchaseDiscount(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Invoice POD / Attachment</Label>
+              <div className="flex items-center gap-4 border p-3 rounded-lg bg-muted/40">
+                <Label htmlFor="pod-upload" className="cursor-pointer">
+                  <div className="flex items-center gap-2 text-sm text-primary font-medium hover:underline">
+                    {isUploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    {uploadedFilename ? "Change Invoice POD File" : "Upload Invoice POD File"}
+                  </div>
+                </Label>
+                <input
+                  id="pod-upload"
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  disabled={isUploading}
+                />
+                {uploadedFilename && (
+                  <span className="text-xs text-muted-foreground truncate max-w-[250px]">
+                    {uploadedFilename}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Input
+                id="notes"
+                value={purchaseNotes}
+                onChange={(e) => setPurchaseNotes(e.target.value)}
+                placeholder="Internal notes or description"
+              />
+            </div>
+
+            <div className="border-t pt-4 mt-2 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Subtotal:</span>
+                <span className="font-mono font-semibold">{purchaseSubtotal.toFixed(3)} BD</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>VAT Amount:</span>
+                <span className="font-mono font-semibold">{purchaseVatAmount.toFixed(3)} BD</span>
+              </div>
+              <div className="flex justify-between text-base font-bold text-primary">
+                <span>Invoice Total:</span>
+                <span className="font-mono">{purchaseTotal.toFixed(3)} BD</span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPurchaseDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={createPurchaseMutation.isPending || !selectedProductId || !selectedWarehouseId || !purchaseInvoiceNo}
+              onClick={() => {
+                createPurchaseMutation.mutate({
+                  supplierId: id,
+                  shopId: myScope?.shopId || "1",
+                  branchId: myScope?.branchId || null,
+                  warehouseId: selectedWarehouseId,
+                  invoiceNo: purchaseInvoiceNo,
+                  invoiceDate: purchaseInvoiceDate,
+                  notes: purchaseNotes,
+                  file: uploadedFileUrl,
+                  subtotal: purchaseSubtotal,
+                  vatAmount: purchaseVatAmount,
+                  total: purchaseTotal,
+                  items: [
+                    {
+                      productId: selectedProductId,
+                      quantity: purchaseQty,
+                      unitPrice: purchaseUnitPrice,
+                      vatRate: purchaseVatRate,
+                      discount: purchaseDiscount,
+                      total: purchaseTotal
+                    }
+                  ]
+                });
+              }}
+            >
+              {createPurchaseMutation.isPending ? "Saving..." : "Save Invoice"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isPayDialogOpen} onOpenChange={setIsPayDialogOpen}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Record Payment for {selectedPurchaseRef}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label>Invoice Total</Label>
+              <Input value={`${selectedPurchaseTotal.toFixed(3)} BD`} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="payAmount">Payment Amount (BD)</Label>
+              <Input
+                id="payAmount"
+                type="number"
+                step="0.001"
+                min="0.001"
+                max={selectedPurchaseTotal}
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="payMethod">Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={(val) => {
+                setPaymentMethod(val);
+                if (val === "bank_transfer") {
+                  setPaymentPettyCashId("");
+                } else {
+                  setPaymentBankAccountId("");
+                }
+              }}>
+                <SelectTrigger id="payMethod">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="cash">Petty Cash</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {paymentMethod === "bank_transfer" ? (
+              <div className="space-y-2">
+                <Label htmlFor="bankAcc">Select Bank Account</Label>
+                <Select value={paymentBankAccountId} onValueChange={setPaymentBankAccountId}>
+                  <SelectTrigger id="bankAcc">
+                    <SelectValue placeholder="Select Account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name} - {b.accountNumber} ({parseFloat(b.currentBalance).toFixed(3)} BD)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="cashBox">Select Cash Box</Label>
+                <Select value={paymentPettyCashId} onValueChange={setPaymentPettyCashId}>
+                  <SelectTrigger id="cashBox">
+                    <SelectValue placeholder="Select Petty Cash" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pettyCash.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({parseFloat(c.currentBalance).toFixed(3)} BD)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="payNotes">Notes / Reference</Label>
+              <Input
+                id="payNotes"
+                value={paymentNotes}
+                onChange={(e) => setPaymentNotes(e.target.value)}
+                placeholder="Transaction reference or notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPayDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                createPaymentMutation.isPending ||
+                paymentAmount <= 0 ||
+                (paymentMethod === "bank_transfer" && !paymentBankAccountId) ||
+                (paymentMethod === "cash" && !paymentPettyCashId)
+              }
+              onClick={() => {
+                createPaymentMutation.mutate({
+                  amount: paymentAmount,
+                  paymentMethod,
+                  bankAccountId: paymentMethod === "bank_transfer" ? paymentBankAccountId : paymentPettyCashId,
+                  notes: paymentNotes,
+                });
+              }}
+            >
+              {createPaymentMutation.isPending ? "Recording..." : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

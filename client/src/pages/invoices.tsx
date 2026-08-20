@@ -36,6 +36,8 @@ export default function InvoicesPage() {
   const [paymentMethod, setPaymentMethod] = useState("bank_transfer");
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
+  const [paymentNotes, setPaymentNotes] = useState("");
 
   const { data: bankAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/bank-accounts"] });
   const { data: pettyCashAccounts = [] } = useQuery<any[]>({ queryKey: ["/api/petty-cash"] });
@@ -104,6 +106,8 @@ export default function InvoicesPage() {
     setPaymentMethod("bank_transfer");
     setPaymentAccountId("");
     setPaymentReference("");
+    setPaymentDate(new Date().toISOString().substring(0, 10));
+    setPaymentNotes("");
   };
 
   const handlePaymentSubmit = () => {
@@ -126,6 +130,8 @@ export default function InvoicesPage() {
       reference: paymentReference,
       bankAccountId: (paymentMethod === "bank_transfer" || paymentMethod === "cheque") ? paymentAccountId : null,
       pettyCashId: paymentMethod === "cash" ? paymentAccountId : null,
+      paymentDate,
+      notes: paymentNotes,
     });
   };
 
@@ -437,6 +443,24 @@ export default function InvoicesPage() {
                 value={paymentReference} 
                 onChange={(e) => setPaymentReference(e.target.value)} 
                 placeholder="e.g. TRN-1234"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Payment Receipt Date *</Label>
+              <Input 
+                type="date"
+                value={paymentDate} 
+                onChange={(e) => setPaymentDate(e.target.value)} 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Receipt Notes / Remarks (Optional)</Label>
+              <Input 
+                value={paymentNotes} 
+                onChange={(e) => setPaymentNotes(e.target.value)} 
+                placeholder="e.g. Received partial advance, bank transfer confirmed"
               />
             </div>
           </div>
