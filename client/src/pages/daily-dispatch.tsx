@@ -1081,6 +1081,17 @@ export default function DailyDispatchPage() {
     }
   }, [boardSheetId]);
 
+  const [boardClientId, setBoardClientId] = useState<string>(() => {
+    return localStorage.getItem("dispatchBoardClientId") || "all";
+  });
+  const [uploadClientId, setUploadClientId] = useState<string>("");
+
+  useEffect(() => {
+    localStorage.setItem("dispatchBoardClientId", boardClientId);
+  }, [boardClientId]);
+
+  const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
+
 
 
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
@@ -1160,17 +1171,17 @@ export default function DailyDispatchPage() {
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
   const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
-  // Sync boardSheetId with sheets matching the selectedDate automatically
+  // Sync boardSheetId with sheets matching the selectedDate and boardClientId automatically
   useEffect(() => {
     if (sheets && sheets.length > 0) {
-      const sheet = sheets.find(s => s.date === selectedDate);
+      const sheet = sheets.find(s => s.date === selectedDate && (boardClientId === "all" || s.clientId === boardClientId));
       if (sheet) {
         setBoardSheetId(sheet.id);
       } else {
         setBoardSheetId(null);
       }
     }
-  }, [selectedDate, sheets]);
+  }, [selectedDate, boardClientId, sheets]);
 
   const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
@@ -1312,7 +1323,7 @@ export default function DailyDispatchPage() {
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: (data: { date: string; fileName: string; items: any[]; mergeStrategy?: "skip" | "replace" | "overwrite" }) =>
+    mutationFn: (data: { date: string; fileName: string; items: any[]; mergeStrategy?: "skip" | "replace" | "overwrite"; clientId?: string | null }) =>
       apiRequest("POST", "/api/dispatch/sheets", data),
     onSuccess: async (res) => {
       const result = await res.json();
@@ -1628,18 +1639,22 @@ export default function DailyDispatchPage() {
 
   const handleUpload = () => {
     if (!csvPreview || csvPreview.length === 0) return;
+    if (!uploadClientId) {
+      toast({ title: "Validation Error", description: "Please select a client before uploading.", variant: "destructive" });
+      return;
+    }
     
-    const existingSheet = sheets.find(s => s.date === uploadDate);
+    const existingSheet = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
     if (existingSheet) {
       setMergeConfirmOpen(true);
       return;
     }
 
-    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview, mergeStrategy: "overwrite" });
+    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview, mergeStrategy: "overwrite", clientId: uploadClientId });
   };
 
   // Find sheet for selected date on board
-  const sheetForDate = sheets.find(s => s.date === selectedDate);
+  const sheetForDate = sheets.find(s => s.date === selectedDate && (boardClientId === "all" || s.clientId === boardClientId));
 
   const driverMap = new Map(drivers.map(d => [d.id, d]));
   const zoneMap = new Map(zones.map(z => [z.id, z]));
@@ -1720,6 +1735,19 @@ export default function DailyDispatchPage() {
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
                 className="w-40 h-8 text-sm" />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Client:</span>
+              <select
+                value={boardClientId}
+                onChange={e => setBoardClientId(e.target.value)}
+                className="h-8 border rounded-md px-2 bg-transparent text-xs min-w-[140px]"
+              >
+                <option value="all">All Clients</option>
+                {clientList.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
             </div>
             {sheetForDate ? (
               <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
@@ -2260,6 +2288,20 @@ export default function DailyDispatchPage() {
                   <Input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} className="w-44" />
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Client / Customer</Label>
+                  <select
+                    value={uploadClientId}
+                    onChange={e => setUploadClientId(e.target.value)}
+                    className="w-full h-10 border rounded-md px-3 bg-transparent text-sm"
+                  >
+                    <option value="">-- Select Client --</option>
+                    {clientList.map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Dropzone */}
                 <div
                   className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${isDragging ? "border-primary bg-primary/5 scale-[1.01]" : "border-muted-foreground/30 hover:border-primary hover:bg-primary/3"}`}
@@ -2436,21 +2478,21 @@ export default function DailyDispatchPage() {
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip" });
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
               <p className="font-medium text-sm text-primary">Skip Duplicates</p>
               <p className="text-xs text-muted-foreground mt-0.5">Ignore items that are already in the system. Only add new items.</p>
             </div>
             <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace" });
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
               <p className="font-medium text-sm text-primary">Replace Duplicates</p>
               <p className="text-xs text-muted-foreground mt-0.5">Update quantities for existing items, and add new items.</p>
             </div>
             <div className="border rounded-lg p-3 cursor-pointer hover:border-destructive hover:bg-destructive/10 transition-colors" onClick={() => {
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite" });
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
               <p className="font-medium text-sm text-destructive">Overwrite Entire Sheet</p>
@@ -2538,8 +2580,18 @@ export default function DailyDispatchPage() {
                             <td className="py-2 px-3 font-mono font-medium">{item.itemCode || ""}</td>
                             <td className="py-2 px-3">
                               <Input
-                                value={item.description || ""}
-                                onChange={(e) => updateItemMutation.mutate({ id: item.id, description: e.target.value })}
+                                key={`${item.id}-${item.description}`}
+                                defaultValue={item.description || ""}
+                                onBlur={(e) => {
+                                  if (e.target.value !== (item.description || "")) {
+                                    updateItemMutation.mutate({ id: item.id, description: e.target.value });
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.currentTarget.blur();
+                                  }
+                                }}
                                 className="h-7 text-xs py-0.5 px-2"
                               />
                             </td>
@@ -2568,13 +2620,19 @@ export default function DailyDispatchPage() {
                             </td>
                             <td className="py-2 px-3 text-right">
                               <Input
+                                key={`${item.id}-${item.requestedQty}`}
                                 type="number"
                                 step="any"
-                                value={item.requestedQty || item.weight || ""}
-                                onChange={(e) => {
+                                defaultValue={item.requestedQty || item.weight || ""}
+                                onBlur={(e) => {
                                   const val = parseFloat(e.target.value);
-                                  if (!isNaN(val)) {
+                                  if (!isNaN(val) && val !== parseFloat(item.requestedQty || item.weight || "0")) {
                                     updateItemMutation.mutate({ id: item.id, requestedQty: val });
+                                  }
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.currentTarget.blur();
                                   }
                                 }}
                                 className="h-7 w-20 text-right text-xs py-0.5 px-2 ml-auto"
@@ -3212,8 +3270,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                       {vehiclesList
                         .filter((v: any) => {
                           if (!truckForm.zoneId) return false;
-                          // Show vehicles assigned to selected zone, or all available if none are zone-matched
-                          return v.currentZoneId === truckForm.zoneId || v.status === "available";
+                          // Show all active vehicles
+                          return v.status !== "inactive";
                         })
                         .sort((a: any, b: any) => {
                           // Sort: zone-matched vehicles first
@@ -3225,9 +3283,9 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                           const isZoneMatch = v.currentZoneId === truckForm.zoneId;
                           const isAssigned = trucksAssignedInSheet.includes(v.id);
                           return (
-                            <SelectItem key={v.id} value={v.id} disabled={isAssigned}>
+                            <SelectItem key={v.id} value={v.id} disabled={false}>
                               {isZoneMatch ? "✓ " : ""}{v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
-                              {isAssigned ? " (Already in sheet)" : !isZoneMatch ? " (Other Zone)" : ""}
+                              {isAssigned ? " (Assigned in other route)" : !isZoneMatch ? " (Other Zone)" : ""}
                             </SelectItem>
                           );
                         })}
@@ -3243,7 +3301,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                       {drivers.filter((d: any) => d.status === "active").map((d: any) => {
                         const isAssigned = assignedDriversInSheet.has(d.id);
                         return (
-                          <SelectItem key={d.id} value={d.id} disabled={isAssigned}>
+                          <SelectItem key={d.id} value={d.id} disabled={false}>
                             {d.name} {isAssigned ? "(Assigned)" : ""}
                           </SelectItem>
                         );
@@ -3728,7 +3786,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     {drivers.map((d: any) => {
                       const isAssignedToOther = assignedDriversInSheet.has(d.id) && editAssignment.driverId !== d.id;
                       return (
-                        <SelectItem key={d.id} value={d.id} disabled={isAssignedToOther}>
+                        <SelectItem key={d.id} value={d.id} disabled={false}>
                           {d.name} {isAssignedToOther ? "(Assigned)" : ""}
                         </SelectItem>
                       );

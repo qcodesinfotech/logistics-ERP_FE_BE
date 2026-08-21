@@ -3241,13 +3241,19 @@ export class DatabaseStorage implements IStorage {
     return sheet;
   }
 
-  async getDispatchSheetByDate(date: string): Promise<any | undefined> {
-    const [sheet] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.date, date));
+  async getDispatchSheetByDateAndClient(date: string, clientId?: string | null): Promise<any | undefined> {
+    const query = db.select().from(dispatchSheets).where(
+      and(
+        eq(dispatchSheets.date, date),
+        clientId ? eq(dispatchSheets.clientId, clientId) : isNull(dispatchSheets.clientId)
+      )
+    );
+    const [sheet] = await query;
     return sheet;
   }
 
-  async createDispatchSheet(data: { date: string; uploadedBy?: string; fileName?: string }, mergeStrategy?: "skip" | "replace" | "overwrite"): Promise<any> {
-    const existing = await this.getDispatchSheetByDate(data.date);
+  async createDispatchSheet(data: { date: string; uploadedBy?: string; fileName?: string; clientId?: string | null }, mergeStrategy?: "skip" | "replace" | "overwrite"): Promise<any> {
+    const existing = await this.getDispatchSheetByDateAndClient(data.date, data.clientId);
     if (existing) {
       if (mergeStrategy === "overwrite" || !mergeStrategy) {
         await this.deleteDispatchSheet(existing.id);
@@ -8103,12 +8109,12 @@ export class DatabaseStorage implements IStorage {
       const zoneIdsArray = Array.from(zoneIds).filter(Boolean);
       if (zoneIdsArray.length === 0) return;
 
-      // 3. Find all available vehicles currently assigned to these zones
+      // 3. Find all active vehicles currently assigned to these zones
       const zoneVehicles = await db.select().from(vehicles)
         .where(
           and(
             inArray(vehicles.currentZoneId, zoneIdsArray),
-            eq(vehicles.status, "available")
+            ne(vehicles.status, "inactive")
           )
         );
       if (zoneVehicles.length === 0) return;

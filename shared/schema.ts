@@ -2271,6 +2271,7 @@ export const driverZones = pgTable("driver_zones", {
 export const dispatchSheets = pgTable("dispatch_sheets", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   date: date("date").notNull(),
+  clientId: varchar("client_id"),
   uploadedBy: varchar("uploaded_by"),
   fileName: text("file_name"),
   status: text("status").notNull().default("active"),

@@ -7427,11 +7427,11 @@ export async function registerRoutes(
   // Upload CSV and create dispatch sheet
   app.post("/api/dispatch/sheets", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { date, fileName, items, mergeStrategy } = req.body; // mergeStrategy: "skip" | "replace" | "overwrite"
+      const { date, fileName, items, mergeStrategy, clientId } = req.body; // mergeStrategy: "skip" | "replace" | "overwrite"
       const uploadedBy = req.user?.id;
 
       // Note: createDispatchSheet now takes mergeStrategy. It deletes the sheet if "overwrite" or if not provided.
-      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName }, mergeStrategy);
+      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName, clientId: clientId || null }, mergeStrategy);
 
       // Resolve outlet codes to outlet IDs and route IDs
       const allOutlets = await storage.getOutlets();
