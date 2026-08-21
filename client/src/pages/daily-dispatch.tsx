@@ -1118,6 +1118,16 @@ export default function DailyDispatchPage() {
     items: [],
   });
 
+  const [editedItems, setEditedItems] = useState<any[]>([]);
+  const [prevOpen, setPrevOpen] = useState(false);
+
+  useEffect(() => {
+    if (manageItemsModal.isOpen && !prevOpen) {
+      setEditedItems(JSON.parse(JSON.stringify(manageItemsModal.items || [])));
+    }
+    setPrevOpen(manageItemsModal.isOpen);
+  }, [manageItemsModal.isOpen, manageItemsModal.items, prevOpen]);
+
   const [newItemForm, setNewItemForm] = useState({
     itemCode: "",
     description: "",
@@ -1413,6 +1423,19 @@ export default function DailyDispatchPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       toast({ title: "Item updated successfully" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const batchUpdateItemsMutation = useMutation({
+    mutationFn: async (data: { items: any[] }) => {
+      const res = await apiRequest("POST", "/api/dispatch/items/batch-update", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      toast({ title: "Items updated successfully" });
+      setManageItemsModal(prev => ({ ...prev, isOpen: false }));
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -2570,7 +2593,7 @@ export default function DailyDispatchPage() {
             {/* Existing Items Table */}
             <div>
               <h3 className="text-xs font-bold text-slate-800 mb-2 uppercase tracking-wide">Existing Items</h3>
-              {(!manageItemsModal.items || manageItemsModal.items.length === 0) ? (
+              {(!editedItems || editedItems.length === 0) ? (
                 <p className="text-xs text-muted-foreground bg-slate-50 p-4 rounded text-center">No items currently on this sheet for this outlet.</p>
               ) : (
                 <div className="border rounded-md overflow-hidden bg-white">
@@ -2586,24 +2609,18 @@ export default function DailyDispatchPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {(manageItemsModal.items || []).map((item: any, idx: number) => {
+                      {(editedItems || []).map((item: any, idx: number) => {
                         const effectiveRouteId = item.overrideRouteId || item.routeId;
                         return (
                           <tr key={item.id || idx} className="hover:bg-slate-50/50">
                             <td className="py-2 px-3 font-mono font-medium">{item.itemCode || ""}</td>
                             <td className="py-2 px-3">
                               <Input
-                                key={`${item.id}-${item.description}`}
-                                defaultValue={item.description || ""}
-                                onBlur={(e) => {
-                                  if (e.target.value !== (item.description || "")) {
-                                    updateItemMutation.mutate({ id: item.id, description: e.target.value });
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.currentTarget.blur();
-                                  }
+                                value={item.description || ""}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], description: e.target.value };
+                                  setEditedItems(updated);
                                 }}
                                 className="h-7 text-xs py-0.5 px-2"
                               />
@@ -2611,7 +2628,11 @@ export default function DailyDispatchPage() {
                             <td className="py-2 px-3">
                               <select
                                 value={item.storageType || "Dry"}
-                                onChange={(e) => updateItemMutation.mutate({ id: item.id, storageType: e.target.value })}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], storageType: e.target.value };
+                                  setEditedItems(updated);
+                                }}
                                 className="h-7 text-xs py-0.5 px-2 border rounded-md"
                               >
                                 <option value="Dry">Dry</option>
@@ -2622,7 +2643,11 @@ export default function DailyDispatchPage() {
                             <td className="py-2 px-3">
                               <select
                                 value={effectiveRouteId || ""}
-                                onChange={(e) => updateItemMutation.mutate({ id: item.id, overrideRouteId: e.target.value || null })}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], overrideRouteId: e.target.value || null };
+                                  setEditedItems(updated);
+                                }}
                                 className="h-7 text-xs py-0.5 px-2 border rounded-md max-w-[120px]"
                               >
                                 <option value="">Default Route</option>
@@ -2633,20 +2658,13 @@ export default function DailyDispatchPage() {
                             </td>
                             <td className="py-2 px-3 text-right">
                               <Input
-                                key={`${item.id}-${item.requestedQty}`}
                                 type="number"
                                 step="any"
-                                defaultValue={item.requestedQty || item.weight || ""}
-                                onBlur={(e) => {
-                                  const val = parseFloat(e.target.value);
-                                  if (!isNaN(val) && val !== parseFloat(item.requestedQty || item.weight || "0")) {
-                                    updateItemMutation.mutate({ id: item.id, requestedQty: val });
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.currentTarget.blur();
-                                  }
+                                value={item.requestedQty || item.weight || ""}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], requestedQty: e.target.value };
+                                  setEditedItems(updated);
                                 }}
                                 className="h-7 w-20 text-right text-xs py-0.5 px-2 ml-auto"
                               />
@@ -2770,14 +2788,29 @@ export default function DailyDispatchPage() {
             </div>
           </div>
 
-          <DialogFooter className="border-t pt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setManageItemsModal(prev => ({ ...prev, isOpen: false }))}
-            >
-              Close
-            </Button>
+          <DialogFooter className="border-t pt-4 flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3">
+            <p className="text-xs text-muted-foreground text-left">
+              Changes are staged locally. Click "Save Changes" to apply them.
+            </p>
+            <div className="flex gap-2 justify-end w-full md:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setManageItemsModal(prev => ({ ...prev, isOpen: false }))}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                onClick={() => {
+                  batchUpdateItemsMutation.mutate({ items: editedItems });
+                }}
+                disabled={batchUpdateItemsMutation.isPending}
+              >
+                {batchUpdateItemsMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

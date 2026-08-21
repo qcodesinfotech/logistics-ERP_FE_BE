@@ -7787,6 +7787,54 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/dispatch/items/batch-update", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { items } = req.body;
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Invalid items array" });
+      }
+
+      const sheetIds = new Set<string>();
+
+      await db.transaction(async (tx) => {
+        for (const item of items) {
+          const [existingItem] = await tx.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, item.id));
+          if (!existingItem) continue;
+
+          sheetIds.add(existingItem.sheetId);
+
+          const updateData: any = {};
+          if (item.requestedQty !== undefined) {
+            updateData.requestedQty = String(item.requestedQty);
+            updateData.weight = String(item.requestedQty);
+          }
+          if (item.storageType !== undefined) {
+            updateData.storageType = item.storageType;
+          }
+          if (item.overrideRouteId !== undefined) {
+            updateData.overrideRouteId = item.overrideRouteId || null;
+          }
+          if (item.description !== undefined) {
+            updateData.description = item.description || null;
+          }
+
+          await tx.update(schema.dispatchItems)
+            .set(updateData)
+            .where(eq(schema.dispatchItems.id, item.id));
+        }
+      });
+
+      for (const sheetId of Array.from(sheetIds)) {
+        await recalculateTruckCapacities(sheetId);
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Batch update dispatch items error:", e);
+      res.status(500).json({ error: "Failed to batch update dispatch items" });
+    }
+  });
+
   app.patch("/api/dispatch/items/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { id } = req.params;
