@@ -7875,6 +7875,7 @@ export class DatabaseStorage implements IStorage {
       weight: dispatchItems.weight,
       storageType: dispatchItems.storageType,
       routeId: dispatchItems.routeId,
+      overrideRouteId: dispatchItems.overrideRouteId,
       
       sheetId: dispatchItems.sheetId,
       sheetDate: dispatchSheets.date,
@@ -7896,10 +7897,102 @@ export class DatabaseStorage implements IStorage {
     const driversList = await this.getDrivers();
     const driverMap = new Map(driversList.map(d => [d.id, d.name]));
 
-    return list.map(item => ({
-      ...item,
-      driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned"
-    }));
+    // Fetch overrides and assignments for uniqueSheetIds to resolve actual zones dynamically
+    const uniqueSheetIds = Array.from(new Set(list.map(item => item.sheetId).filter(Boolean))) as string[];
+
+    let overrides: any[] = [];
+    let truckAssigns: any[] = [];
+    let outletTruckAssigns: any[] = [];
+
+    if (uniqueSheetIds.length > 0) {
+      overrides = await db.select().from(dispatchOutletZoneOverrides).where(inArray(dispatchOutletZoneOverrides.sheetId, uniqueSheetIds));
+      truckAssigns = await db.select().from(dispatchTruckAssignments).where(inArray(dispatchTruckAssignments.sheetId, uniqueSheetIds));
+      
+      const truckAssignIds = truckAssigns.map(t => t.id);
+      if (truckAssignIds.length > 0) {
+        outletTruckAssigns = await db.select().from(dispatchOutletTruckAssignments).where(inArray(dispatchOutletTruckAssignments.truckAssignmentId, truckAssignIds));
+      }
+    }
+
+    const allRoutes = await db.select().from(routes);
+    const routeMap = new Map(allRoutes.map(r => [r.id, r]));
+    const allOutlets = await db.select().from(outlets);
+    const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+
+    // Create maps per sheetId for fast lookup
+    const sheetOverridesMap = new Map<string, Map<string, any>>();
+    const sheetTruckAssignsMap = new Map<string, any[]>();
+    const sheetOutletTruckMap = new Map<string, Map<string, string>>();
+
+    for (const ov of overrides) {
+      if (!sheetOverridesMap.has(ov.sheetId)) {
+        sheetOverridesMap.set(ov.sheetId, new Map());
+      }
+      sheetOverridesMap.get(ov.sheetId)!.set(ov.outletId, ov);
+    }
+
+    for (const ta of truckAssigns) {
+      if (!sheetTruckAssignsMap.has(ta.sheetId)) {
+        sheetTruckAssignsMap.set(ta.sheetId, []);
+      }
+      sheetTruckAssignsMap.get(ta.sheetId)!.push(ta);
+    }
+
+    const truckAssignToSheetId = new Map(truckAssigns.map(ta => [ta.id, ta.sheetId]));
+    for (const ota of outletTruckAssigns) {
+      const sId = truckAssignToSheetId.get(ota.truckAssignmentId);
+      if (sId) {
+        if (!sheetOutletTruckMap.has(sId)) {
+          sheetOutletTruckMap.set(sId, new Map());
+        }
+        const key = ota.outletId || ota.outletCode;
+        sheetOutletTruckMap.get(sId)!.set(key, ota.truckAssignmentId);
+      }
+    }
+
+    return list.map(item => {
+      const sId = item.sheetId;
+      const outletId = item.outletId;
+      const outletCode = item.outletCode;
+
+      // Get sheet-specific maps
+      const overrideMap = sheetOverridesMap.get(sId) || new Map();
+      const sheetTruckAssigns = sheetTruckAssignsMap.get(sId) || [];
+      const outletToTruck = sheetOutletTruckMap.get(sId) || new Map();
+
+      let tAssignId = (outletId ? outletToTruck.get(outletId) : null) || outletToTruck.get(outletCode) || null;
+      if (outletId && overrideMap.has(outletId)) {
+        const ov = overrideMap.get(outletId);
+        if (ov?.overrideTruckId) {
+          tAssignId = ov.overrideTruckId;
+        }
+      }
+
+      let effectiveZoneId: string | null = item.routeId;
+      const assignedTruck = tAssignId ? sheetTruckAssigns.find(t => t.id === tAssignId) : null;
+
+      if (assignedTruck && assignedTruck.zoneId) {
+        effectiveZoneId = assignedTruck.zoneId;
+      } else if (item.overrideRouteId) {
+        effectiveZoneId = item.overrideRouteId;
+      } else if (outletId && overrideMap.has(outletId)) {
+        effectiveZoneId = overrideMap.get(outletId)!.overrideZoneId;
+      } else if (outletId) {
+        const outlet = outletMap.get(outletId);
+        if (outlet && outlet.routeId) {
+          effectiveZoneId = outlet.routeId;
+        }
+      }
+
+      const resolvedRoute = effectiveZoneId ? routeMap.get(effectiveZoneId) : null;
+
+      return {
+        ...item,
+        routeId: effectiveZoneId || "unassigned",
+        zoneName: resolvedRoute?.name || item.zoneName || "Unknown Route",
+        driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned"
+      };
+    });
   }
 
   // Logistics Fleet Advanced

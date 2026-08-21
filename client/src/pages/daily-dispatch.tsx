@@ -42,7 +42,7 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
-  Share2, MoreHorizontal, Folder, Wrench, History, Fuel,
+  Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle,
 } from "lucide-react";
 
 // ===== Types =====
@@ -76,11 +76,21 @@ function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length < 2) return [];
   const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
+  const hasItemSpecificDesc = rawHeaders.some(h => {
+    return (h.includes("item") || h.includes("product")) && 
+           (h.includes("desc") || h.includes("name"));
+  });
   // Normalize common header variants
   const normalize = (h: string) => {
     if (h.includes("outlet") && h.includes("code")) return "outlet_code";
     if (h.includes("item") && h.includes("code")) return "item_code";
-    if (h.includes("desc") && !h.includes("sub_desc")) return "description";
+    if (h.includes("sub_desc") || h.includes("outlet_desc") || h.includes("customer_desc") || h.includes("outlet_name") || h.includes("customer_name")) {
+      return "to_sub_desc";
+    }
+    if (hasItemSpecificDesc && (h === "description" || h === "desc")) {
+      return "to_sub_desc";
+    }
+    if (h.includes("desc")) return "description";
     if (h.includes("name") && (h.includes("item") || h.includes("product"))) return "description";
     if (h.includes("validation") && (h.includes("qty") || h.includes("quantity"))) return "weight";
     if (h.includes("total") && (h.includes("qty") || h.includes("quantity"))) return "total_qty_col";
@@ -255,7 +265,7 @@ function MoveOverrideDialog({
 
 // ===== Outlet Card =====
 function OutletCard({
-  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect,
+  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect, onManageItems,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
@@ -264,6 +274,7 @@ function OutletCard({
   onOverrideItem: (item: DispatchItem) => void;
   selectedDate: string;
   onSelect?: () => void;
+  onManageItems: (outlet: OutletGroup) => void;
 }) {
   const { user } = useAuth();
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
@@ -321,17 +332,30 @@ function OutletCard({
             <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">{delivered}/{total}</Badge>
           </div>
           
-          {isSupervisor && !isOutletComplete && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-6 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-0.5"
-              onClick={e => { e.stopPropagation(); onOverride(outlet); }}
-            >
-              <ArrowRight className="h-3 w-3" />
-              Move
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {isSupervisor && !isOutletComplete && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-0.5"
+                onClick={e => { e.stopPropagation(); onOverride(outlet); }}
+              >
+                <ArrowRight className="h-3 w-3" />
+                Move
+              </Button>
+            )}
+            {isSupervisor && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 px-2 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50 gap-0.5"
+                onClick={e => { e.stopPropagation(); onManageItems(outlet); }}
+              >
+                <Settings className="h-3 w-3" />
+                Manage
+              </Button>
+            )}
+          </div>
         </div>
       </div>
       {expanded && (
@@ -391,7 +415,7 @@ function OutletCard({
 // ===== Zone Column =====
 function ZoneColumn({
   zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
-  onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails,
+  onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails, onManageItems,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
@@ -403,6 +427,7 @@ function ZoneColumn({
   isExpanded: boolean;
   selectedOutletForDetails: any | null;
   onCloseDetails: () => void;
+  onManageItems: (outlet: OutletGroup) => void;
 }) {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
@@ -639,6 +664,7 @@ function ZoneColumn({
                     onOverrideItem={onOverrideItem}
                     selectedDate={selectedDate}
                     onSelect={() => onSelectOutlet(outlet)}
+                    onManageItems={onManageItems}
                   />
                 </div>
               );
@@ -1055,6 +1081,8 @@ export default function DailyDispatchPage() {
     }
   }, [boardSheetId]);
 
+
+
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -1064,6 +1092,33 @@ export default function DailyDispatchPage() {
   const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
   const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
+
+  // Item Management Modals State
+  const [manageItemsModal, setManageItemsModal] = useState<{
+    isOpen: boolean;
+    outletCode: string;
+    outletName: string;
+    items: any[];
+  }>({
+    isOpen: false,
+    outletCode: "",
+    outletName: "",
+    items: [],
+  });
+
+  const [newItemForm, setNewItemForm] = useState({
+    itemCode: "",
+    description: "",
+    requestedQty: "",
+    storageType: "Dry",
+    routeId: "",
+    toNo: "",
+  });
+
+  const [globalAddModal, setGlobalAddModal] = useState({
+    isOpen: false,
+    selectedOutletCode: "",
+  });
 
   const [boardRouteFilter, setBoardRouteFilter] = useState("all");
   const [boardOutletFilter, setBoardOutletFilter] = useState("all");
@@ -1089,11 +1144,21 @@ export default function DailyDispatchPage() {
     setSelectedOutletForDetails(null);
   };
 
+  const handleManageItems = (outlet: any) => {
+    setManageItemsModal({
+      isOpen: true,
+      outletCode: outlet.outletCode,
+      outletName: outlet.outletName || outlet.outletCode,
+      items: outlet.items || [],
+    });
+  };
+
   // Queries
   const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
   const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
   const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
+  const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
   // Sync boardSheetId with sheets matching the selectedDate automatically
   useEffect(() => {
@@ -1307,6 +1372,76 @@ export default function DailyDispatchPage() {
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
+  // Item Management mutations
+  const addItemMutation = useMutation({
+    mutationFn: async (data: { sheetId: string; outletCode: string; itemCode: string; description: string; requestedQty: number; storageType: string; routeId?: string; toNo?: string }) => {
+      const res = await apiRequest("POST", `/api/dispatch/sheets/${data.sheetId}/items`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      toast({ title: "Item added successfully" });
+      setNewItemForm({
+        itemCode: "",
+        description: "",
+        requestedQty: "",
+        storageType: "Dry",
+        routeId: "",
+        toNo: "",
+      });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const updateItemMutation = useMutation({
+    mutationFn: async (data: { id: string; requestedQty?: number; storageType?: string; overrideRouteId?: string | null; description?: string; itemCode?: string }) => {
+      const res = await apiRequest("PATCH", `/api/dispatch/items/${data.id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      toast({ title: "Item updated successfully" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const deleteItemMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/dispatch/items/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      toast({ title: "Item deleted successfully" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  // Sync manageItemsModal items when boardData changes
+  useEffect(() => {
+    if (manageItemsModal.isOpen && boardData) {
+      let foundOutlet: any = null;
+      for (const zone of boardData.zones) {
+        const outlet = zone.outlets.find((o: any) => o.outletCode === manageItemsModal.outletCode);
+        if (outlet) {
+          foundOutlet = outlet;
+          break;
+        }
+      }
+      if (foundOutlet) {
+        setManageItemsModal(prev => ({
+          ...prev,
+          items: foundOutlet.items,
+        }));
+      } else {
+        setManageItemsModal(prev => ({
+          ...prev,
+          items: [],
+        }));
+      }
+    }
+  }, [boardData, manageItemsModal.isOpen, manageItemsModal.outletCode]);
+
   const removeOverrideMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/overrides/${id}`),
     onSuccess: () => {
@@ -1358,11 +1493,22 @@ export default function DailyDispatchPage() {
 
           if (rawJson.length > 0) {
             const rawHeaders = Object.keys(rawJson[0]);
+            const hasItemSpecificDesc = rawHeaders.some(h => {
+              const lower = h.toLowerCase().replace(/\s+/g, "_");
+              return (lower.includes("item") || lower.includes("product")) && 
+                     (lower.includes("desc") || lower.includes("name"));
+            });
             const normalize = (h: string) => {
               const lower = h.toLowerCase().replace(/\s+/g, "_");
               if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
               if (lower.includes("item") && lower.includes("code")) return "item_code";
-              if (lower.includes("desc") && !lower.includes("sub_desc")) return "description";
+              if (lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") || lower.includes("outlet_name") || lower.includes("customer_name")) {
+                return "to_sub_desc";
+              }
+              if (hasItemSpecificDesc && (lower === "description" || lower === "desc")) {
+                return "to_sub_desc";
+              }
+              if (lower.includes("desc")) return "description";
               if (lower.includes("name") && (lower.includes("item") || lower.includes("product"))) return "description";
               if (lower.includes("validation") && (lower.includes("qty") || lower.includes("quantity"))) return "weight";
               if (lower.includes("total") && (lower.includes("qty") || lower.includes("quantity"))) return "total_qty_col";
@@ -1593,6 +1739,16 @@ export default function DailyDispatchPage() {
             {boardSheetId && (
               <Button size="sm" variant="ghost" onClick={() => refetchBoard()}>
                 <RefreshCw className="h-3.5 w-3.5 mr-1" />Refresh
+              </Button>
+            )}
+            {boardSheetId && (
+              <Button 
+                size="sm" 
+                variant="outline" 
+                className="border-orange-200 text-orange-700 hover:bg-orange-50"
+                onClick={() => setGlobalAddModal({ isOpen: true, selectedOutletCode: "" })}
+              >
+                <PlusCircle className="h-3.5 w-3.5 mr-1" />Add Item / Outlet
               </Button>
             )}
             {boardData && boardData.overrides.length > 0 && (
@@ -1841,6 +1997,7 @@ export default function DailyDispatchPage() {
                           onDeliveryUpdate={item => setDeliveryDialog(item)}
                           onOverride={outlet => setOverrideDialog(outlet)}
                           onOverrideItem={item => setItemOverrideDialog(item)}
+                          onManageItems={handleManageItems}
                           selectedDate={selectedDate}
                           onSelectRoute={() => handleSelectRouteForDetails(zone)}
                           onSelectOutlet={handleSelectOutletForDetails}
@@ -2337,6 +2494,360 @@ export default function DailyDispatchPage() {
           })}
         />
       )}
+
+      {/* Manage Items Dialog */}
+      <Dialog 
+        open={manageItemsModal.isOpen} 
+        onOpenChange={(open) => setManageItemsModal(prev => ({ ...prev, isOpen: open }))}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Settings className="h-5 w-5 text-orange-600 animate-spin-hover" />
+              Manage Items — {manageItemsModal.outletName || ""} ({manageItemsModal.outletCode || ""})
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Add new items, update quantities/routes, or delete items from this sheet. Changes update truck load capacities automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 my-4">
+            {/* Existing Items Table */}
+            <div>
+              <h3 className="text-xs font-bold text-slate-800 mb-2 uppercase tracking-wide">Existing Items</h3>
+              {(!manageItemsModal.items || manageItemsModal.items.length === 0) ? (
+                <p className="text-xs text-muted-foreground bg-slate-50 p-4 rounded text-center">No items currently on this sheet for this outlet.</p>
+              ) : (
+                <div className="border rounded-md overflow-hidden bg-white">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b text-slate-500 font-semibold">
+                        <th className="py-2 px-3 text-left">Code</th>
+                        <th className="py-2 px-3 text-left">Description</th>
+                        <th className="py-2 px-3 text-left">Storage</th>
+                        <th className="py-2 px-3 text-left">Route</th>
+                        <th className="py-2 px-3 text-right">Quantity</th>
+                        <th className="py-2 px-3 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {(manageItemsModal.items || []).map((item: any, idx: number) => {
+                        const effectiveRouteId = item.overrideRouteId || item.routeId;
+                        return (
+                          <tr key={item.id || idx} className="hover:bg-slate-50/50">
+                            <td className="py-2 px-3 font-mono font-medium">{item.itemCode || ""}</td>
+                            <td className="py-2 px-3">
+                              <Input
+                                value={item.description || ""}
+                                onChange={(e) => updateItemMutation.mutate({ id: item.id, description: e.target.value })}
+                                className="h-7 text-xs py-0.5 px-2"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={item.storageType || "Dry"}
+                                onChange={(e) => updateItemMutation.mutate({ id: item.id, storageType: e.target.value })}
+                                className="h-7 text-xs py-0.5 px-2 border rounded-md"
+                              >
+                                <option value="Dry">Dry</option>
+                                <option value="Chilled">Chilled</option>
+                                <option value="Frozen">Frozen</option>
+                              </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={effectiveRouteId || ""}
+                                onChange={(e) => updateItemMutation.mutate({ id: item.id, overrideRouteId: e.target.value || null })}
+                                className="h-7 text-xs py-0.5 px-2 border rounded-md max-w-[120px]"
+                              >
+                                <option value="">Default Route</option>
+                                {(zones || []).map((r: any) => (
+                                  <option key={r.id} value={r.id}>{r.name || ""}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <Input
+                                type="number"
+                                step="any"
+                                value={item.requestedQty || item.weight || ""}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  if (!isNaN(val)) {
+                                    updateItemMutation.mutate({ id: item.id, requestedQty: val });
+                                  }
+                                }}
+                                className="h-7 w-20 text-right text-xs py-0.5 px-2 ml-auto"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  if (confirm("Are you sure you want to delete this item?")) {
+                                    deleteItemMutation.mutate(item.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Add New Item Form */}
+            <div className="border-t pt-4">
+              <h3 className="text-xs font-bold text-slate-800 mb-3 uppercase tracking-wide">Add New Item</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block text-slate-500 mb-1">Item Code *</label>
+                  <Input
+                    placeholder="e.g. R1000121"
+                    value={newItemForm.itemCode || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, itemCode: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-slate-500 mb-1">Description</label>
+                  <Input
+                    placeholder="e.g. PH FLOUR PIZZA MIX (25KG/BAG)"
+                    value={newItemForm.description || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">Storage Type</label>
+                  <select
+                    value={newItemForm.storageType || "Dry"}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
+                    className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                  >
+                    <option value="Dry">Dry</option>
+                    <option value="Chilled">Chilled</option>
+                    <option value="Frozen">Frozen</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">Route / Zone (Optional)</label>
+                  <select
+                    value={newItemForm.routeId || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, routeId: e.target.value }))}
+                    className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                  >
+                    <option value="">Default Route</option>
+                    {(zones || []).map((r: any) => (
+                      <option key={r.id} value={r.id}>{r.name || ""}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">Quantity *</label>
+                  <Input
+                    type="number"
+                    step="any"
+                    placeholder="e.g. 10"
+                    value={newItemForm.requestedQty || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, requestedQty: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
+                  <Input
+                    placeholder="e.g. TO-12502"
+                    value={newItemForm.toNo || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="col-span-2 md:col-span-3 flex justify-end pt-2">
+                  <Button
+                    size="sm"
+                    className="bg-orange-600 hover:bg-orange-700 text-white gap-1 h-8 text-xs"
+                    onClick={() => {
+                      if (!newItemForm.itemCode || !newItemForm.requestedQty) {
+                        toast({ title: "Validation Error", description: "Item Code and Quantity are required.", variant: "destructive" });
+                        return;
+                      }
+                      addItemMutation.mutate({
+                        sheetId: boardSheetId!,
+                        outletCode: manageItemsModal.outletCode,
+                        itemCode: newItemForm.itemCode,
+                        description: newItemForm.description,
+                        requestedQty: parseFloat(newItemForm.requestedQty),
+                        storageType: newItemForm.storageType,
+                        routeId: newItemForm.routeId || undefined,
+                        toNo: newItemForm.toNo || undefined,
+                      });
+                    }}
+                    disabled={addItemMutation.isPending}
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add Item
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setManageItemsModal(prev => ({ ...prev, isOpen: false }))}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Global Add Item / Outlet Dialog */}
+      <Dialog 
+        open={globalAddModal.isOpen} 
+        onOpenChange={(open) => setGlobalAddModal(prev => ({ ...prev, isOpen: open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <PlusCircle className="h-5 w-5 text-orange-600" />
+              Add Item / Outlet to Sheet
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Select an outlet and add a new delivery item to it on this sheet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 my-3 text-xs">
+            <div>
+              <label className="block text-slate-500 mb-1 font-semibold">Select Outlet *</label>
+              <select
+                value={globalAddModal.selectedOutletCode || ""}
+                onChange={e => setGlobalAddModal(prev => ({ ...prev, selectedOutletCode: e.target.value }))}
+                className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+              >
+                <option value="">-- Choose Outlet --</option>
+                {(outlets || []).map((o: any, idx: number) => (
+                  <option key={o.id || o.code || idx} value={o.code || ""}>{o.name || "Unnamed"} ({o.code || "No Code"})</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 mb-1 font-semibold">Item Code *</label>
+                <Input
+                  placeholder="e.g. R1000121"
+                  value={newItemForm.itemCode || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, itemCode: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-500 mb-1 font-semibold">Quantity *</label>
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="e.g. 10"
+                  value={newItemForm.requestedQty || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, requestedQty: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1">Description</label>
+              <Input
+                placeholder="e.g. PH FLOUR PIZZA MIX (25KG/BAG)"
+                value={newItemForm.description || ""}
+                onChange={e => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 mb-1">Storage Type</label>
+                <select
+                  value={newItemForm.storageType || "Dry"}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
+                  className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                >
+                  <option value="Dry">Dry</option>
+                  <option value="Chilled">Chilled</option>
+                  <option value="Frozen">Frozen</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-slate-500 mb-1">Route / Zone (Optional)</label>
+                <select
+                  value={newItemForm.routeId || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, routeId: e.target.value }))}
+                  className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                >
+                  <option value="">Default Route</option>
+                  {(zones || []).map((r: any) => (
+                    <option key={r.id} value={r.id}>{r.name || ""}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
+              <Input
+                placeholder="e.g. TO-12502"
+                value={newItemForm.toNo || ""}
+                onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setGlobalAddModal(prev => ({ ...prev, isOpen: false }))}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={() => {
+                if (!globalAddModal.selectedOutletCode || !newItemForm.itemCode || !newItemForm.requestedQty) {
+                  toast({ title: "Validation Error", description: "Outlet, Item Code, and Quantity are required.", variant: "destructive" });
+                  return;
+                }
+                addItemMutation.mutate({
+                  sheetId: boardSheetId!,
+                  outletCode: globalAddModal.selectedOutletCode,
+                  itemCode: newItemForm.itemCode,
+                  description: newItemForm.description,
+                  requestedQty: parseFloat(newItemForm.requestedQty),
+                  storageType: newItemForm.storageType,
+                  routeId: newItemForm.routeId || undefined,
+                  toNo: newItemForm.toNo || undefined,
+                }, {
+                  onSuccess: () => {
+                    setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
+                  }
+                });
+              }}
+              disabled={addItemMutation.isPending}
+            >
+              Add to Sheet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -3242,6 +3753,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
           )}
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }
@@ -3838,6 +4350,24 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                         }}
                                       >
                                         <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.pods.size})
+                                      </Button>
+                                    )}
+                                    {(isSupervisor || isAdmin) && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setManageItemsModal({
+                                            isOpen: true,
+                                            outletCode: outlet.outletCode,
+                                            outletName: outlet.outletName,
+                                            items: outlet.items,
+                                          });
+                                        }}
+                                      >
+                                        <Settings className="h-3 w-3 mr-1" /> Manage Items
                                       </Button>
                                     )}
                                     {outlet.items.length > 0 && (
