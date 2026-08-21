@@ -1182,6 +1182,13 @@ export default function DailyDispatchPage() {
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
   const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
+  const allOutletOptions = useMemo(() => {
+    return (outlets || []).map((o: any) => ({
+      value: o.code || "",
+      label: `${o.name || "Unnamed"} (${o.code || "No Code"})`
+    }));
+  }, [outlets]);
+
   // Sync boardSheetId with sheets matching the selectedDate and boardClientId automatically
   useEffect(() => {
     if (sheets && sheets.length > 0) {
@@ -1203,6 +1210,12 @@ export default function DailyDispatchPage() {
   const { data: vehiclesList = [] } = useQuery<any[]>({
     queryKey: ["/api/vehicles"],
   });
+
+  const activeZones = useMemo(() => {
+    if (!boardData || !boardData.zones) return zones || [];
+    const activeIds = new Set(boardData.zones.map((z: any) => z.zoneId));
+    return (zones || []).filter((r: any) => activeIds.has(r.id));
+  }, [zones, boardData]);
 
   const stats = useMemo(() => {
     if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0, assignedTrucksCount: 0 };
@@ -1400,8 +1413,9 @@ export default function DailyDispatchPage() {
       const res = await apiRequest("POST", `/api/dispatch/sheets/${data.sheetId}/items`, data);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (newItem) => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setEditedItems(prev => [...prev, newItem]);
       toast({ title: "Item added successfully" });
       setNewItemForm({
         itemCode: "",
@@ -1445,8 +1459,9 @@ export default function DailyDispatchPage() {
       const res = await apiRequest("DELETE", `/api/dispatch/items/${id}`);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setEditedItems(prev => prev.filter(item => item.id !== deletedId));
       toast({ title: "Item deleted successfully" });
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
@@ -2578,8 +2593,8 @@ export default function DailyDispatchPage() {
         open={manageItemsModal.isOpen} 
         onOpenChange={(open) => setManageItemsModal(prev => ({ ...prev, isOpen: open }))}
       >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-6 pb-4 border-b">
             <DialogTitle className="flex items-center gap-2 text-base font-bold">
               <Settings className="h-5 w-5 text-orange-600 animate-spin-hover" />
               Manage Items — {manageItemsModal.outletName || ""} ({manageItemsModal.outletCode || ""})
@@ -2589,7 +2604,7 @@ export default function DailyDispatchPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 my-4">
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
             {/* Existing Items Table */}
             <div>
               <h3 className="text-xs font-bold text-slate-800 mb-2 uppercase tracking-wide">Existing Items</h3>
@@ -2651,7 +2666,7 @@ export default function DailyDispatchPage() {
                                 className="h-7 text-xs py-0.5 px-2 border rounded-md max-w-[120px]"
                               >
                                 <option value="">Default Route</option>
-                                {(zones || []).map((r: any) => (
+                                {(activeZones || []).map((r: any) => (
                                   <option key={r.id} value={r.id}>{r.name || ""}</option>
                                 ))}
                               </select>
@@ -2788,7 +2803,7 @@ export default function DailyDispatchPage() {
             </div>
           </div>
 
-          <DialogFooter className="border-t pt-4 flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3">
+          <DialogFooter className="p-6 pt-4 border-t flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3 bg-slate-50">
             <p className="text-xs text-muted-foreground text-left">
               Changes are staged locally. Click "Save Changes" to apply them.
             </p>
@@ -2834,16 +2849,21 @@ export default function DailyDispatchPage() {
           <div className="space-y-4 my-3 text-xs">
             <div>
               <label className="block text-slate-500 mb-1 font-semibold">Select Outlet *</label>
-              <select
+              <SearchableSelect
                 value={globalAddModal.selectedOutletCode || ""}
-                onChange={e => setGlobalAddModal(prev => ({ ...prev, selectedOutletCode: e.target.value }))}
-                className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
-              >
-                <option value="">-- Choose Outlet --</option>
-                {(outlets || []).map((o: any, idx: number) => (
-                  <option key={o.id || o.code || idx} value={o.code || ""}>{o.name || "Unnamed"} ({o.code || "No Code"})</option>
-                ))}
-              </select>
+                onValueChange={(val) => {
+                  setGlobalAddModal(prev => ({ ...prev, selectedOutletCode: val }));
+                  const matched = (outlets || []).find((o: any) => o.code === val);
+                  if (matched && matched.routeId) {
+                    setNewItemForm(prev => ({ ...prev, routeId: matched.routeId }));
+                  } else {
+                    setNewItemForm(prev => ({ ...prev, routeId: "" }));
+                  }
+                }}
+                options={allOutletOptions}
+                placeholder="-- Choose Outlet --"
+                width="w-full"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -2897,7 +2917,7 @@ export default function DailyDispatchPage() {
                   className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
                 >
                   <option value="">Default Route</option>
-                  {(zones || []).map((r: any) => (
+                  {(activeZones || []).map((r: any) => (
                     <option key={r.id} value={r.id}>{r.name || ""}</option>
                   ))}
                 </select>
