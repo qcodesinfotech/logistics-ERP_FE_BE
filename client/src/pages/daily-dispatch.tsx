@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
+import { ErrorBoundary } from "@/components/error-boundary";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -2218,7 +2219,19 @@ export default function DailyDispatchPage() {
 
         {/* ===== COMPLETED TAB ===== */}
         <TabsContent value="completed" className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
-          <CompletedDeliveriesTab selectedDate={selectedDate} />
+          <ErrorBoundary>
+            <CompletedDeliveriesTab 
+              selectedDate={selectedDate} 
+              onManageItems={(outletCode: string, outletName: string, items: any[]) => {
+                setManageItemsModal({
+                  isOpen: true,
+                  outletCode,
+                  outletName,
+                  items,
+                });
+              }}
+            />
+          </ErrorBoundary>
         </TabsContent>
 
         {/* ===== UPLOAD TAB ===== */}
@@ -4088,9 +4101,20 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
 // ===== TRUCK TRANSFERS TAB =====
 // ===== COMPLETED DELIVERIES TAB =====
-function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
+function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?: string; onManageItems?: (outletCode: string, outletName: string, items: any[]) => void }) {
   const [startDate, setStartDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
+
+  const safeFormatDate = (dateVal: any, formatStr: string) => {
+    if (!dateVal) return "";
+    const parsed = new Date(dateVal);
+    if (isNaN(parsed.getTime())) return "";
+    try {
+      return format(parsed, formatStr);
+    } catch (e) {
+      return "";
+    }
+  };
 
   useEffect(() => {
     if (selectedDate) {
@@ -4111,6 +4135,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isSupervisor = true; // TODO: link to user role
 
   const revertMutation = useMutation({
     mutationFn: async (dispatchItemId: string) => {
@@ -4222,7 +4247,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   const handleExport = () => {
     if (!filteredDeliveries.length) return;
     const ws = XLSX.utils.json_to_sheet(filteredDeliveries.map(d => ({
-      Date: d.deliveredAt ? format(new Date(d.deliveredAt), "dd/MM/yyyy HH:mm") : "",
+      Date: safeFormatDate(d.deliveredAt, "dd/MM/yyyy HH:mm"),
       Route: d.zoneName,
       Outlet: d.outletName,
       Code: d.outletCode,
@@ -4383,7 +4408,8 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                       const uniqueDates = Array.from(new Set(
                                         Array.from(outlet.pods.values())
                                           .filter(Boolean)
-                                          .map((d: any) => format(new Date(d), "dd MMM yyyy, HH:mm"))
+                                          .map((d: any) => safeFormatDate(d, "dd MMM yyyy, HH:mm"))
+                                          .filter(Boolean)
                                       ));
                                       return uniqueDates.map((dt, i) => (
                                         <span key={i} className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
@@ -4410,19 +4436,14 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                         <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.pods.size})
                                       </Button>
                                     )}
-                                    {(isSupervisor || isAdmin) && (
+                                    {(isSupervisor || isAdmin) && onManageItems && (
                                       <Button
                                         variant="outline"
                                         size="sm"
                                         className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setManageItemsModal({
-                                            isOpen: true,
-                                            outletCode: outlet.outletCode,
-                                            outletName: outlet.outletName,
-                                            items: outlet.items,
-                                          });
+                                          onManageItems(outlet.outletCode, outlet.outletName, outlet.items);
                                         }}
                                       >
                                         <Settings className="h-3 w-3 mr-1" /> Manage Items
@@ -4476,7 +4497,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                   <tr key={p.id} className="hover:bg-slate-50 text-slate-600 bg-white">
                                     <td className="py-1.5 px-3 border-r pl-12 text-xs text-muted-foreground">
                                       {p.storageType && <Badge variant="outline" className="text-[9px] h-4 px-1 mr-1">{p.storageType}</Badge>}
-                                      {p.deliveredAt && format(new Date(p.deliveredAt), "dd/MM HH:mm")}
+                                      {safeFormatDate(p.deliveredAt, "dd/MM HH:mm")}
                                     </td>
                                     <td className="py-1.5 px-3 border-r font-mono text-xs">{p.itemCode}</td>
                                     <td className="py-1.5 px-3 border-r text-xs max-w-[200px] truncate" title={p.description || ""}>
@@ -4536,7 +4557,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
             {viewPodsModal.pods.map((pod, idx) => {
               const url = pod.url.replace(/\\/g, '/');
               const srcUrl = (url.startsWith('http') || url.startsWith('data:') || url.startsWith('/')) ? url : `/${url}`;
-              const dateStr = pod.date ? format(new Date(pod.date), "dd MMM yyyy, HH:mm") : "Unknown Date";
+              const dateStr = safeFormatDate(pod.date, "dd MMM yyyy, HH:mm") || "Unknown Date";
               
               return (
                 <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex flex-col min-h-[300px]">
