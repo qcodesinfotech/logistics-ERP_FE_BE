@@ -1176,7 +1176,7 @@ export default function DailyDispatchPage() {
   };
 
   // Queries
-  const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
+  const { data: sheets = [], isLoading: sheetsLoading } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
   const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
   const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
@@ -1191,7 +1191,7 @@ export default function DailyDispatchPage() {
 
   // Sync boardSheetId with sheets matching the selectedDate and boardClientId automatically
   useEffect(() => {
-    if (sheets && sheets.length > 0) {
+    if (!sheetsLoading) {
       const sheet = sheets.find(s => s.date === selectedDate && (boardClientId === "all" || s.clientId === boardClientId));
       if (sheet) {
         setBoardSheetId(sheet.id);
@@ -1199,7 +1199,7 @@ export default function DailyDispatchPage() {
         setBoardSheetId(null);
       }
     }
-  }, [selectedDate, boardClientId, sheets]);
+  }, [selectedDate, boardClientId, sheets, sheetsLoading]);
 
   const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
