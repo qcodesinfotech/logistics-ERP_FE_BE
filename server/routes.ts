@@ -7427,11 +7427,11 @@ export async function registerRoutes(
   // Upload CSV and create dispatch sheet
   app.post("/api/dispatch/sheets", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { date, fileName, items, mergeStrategy } = req.body; // mergeStrategy: "skip" | "replace" | "overwrite"
+      const { date, fileName, items, mergeStrategy, clientId } = req.body; // mergeStrategy: "skip" | "replace" | "overwrite"
       const uploadedBy = req.user?.id;
 
       // Note: createDispatchSheet now takes mergeStrategy. It deletes the sheet if "overwrite" or if not provided.
-      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName }, mergeStrategy);
+      const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName, clientId: clientId || null }, mergeStrategy);
 
       // Resolve outlet codes to outlet IDs and route IDs
       const allOutlets = await storage.getOutlets();
@@ -7448,17 +7448,57 @@ export async function registerRoutes(
         }
       });
 
+      // Fetch known item descriptions to heal any missing/incorrect product names in the uploaded sheet
+      const knownProductsQuery = await db.select({
+        itemCode: schema.dispatchItems.itemCode,
+        description: schema.dispatchItems.description
+      }).from(schema.dispatchItems);
+      
+      const productDescMap = new Map<string, string>();
+      const normalizeItemCode = (c: string) => (c || "").trim().toLowerCase();
+      
+      const outletNamesSet = new Set(allOutlets.map(o => o.name.toLowerCase().trim()));
+      const outletCodesSet = new Set(allOutlets.map(o => (o.code || "").toLowerCase().trim()).filter(Boolean));
+
+      const isValidProductName = (desc: string | null | undefined): boolean => {
+        if (!desc) return false;
+        const d = desc.toLowerCase().trim();
+        if (outletNamesSet.has(d) || outletCodesSet.has(d)) return false;
+        if (d.startsWith("pizza hut") && !d.startsWith("ph ")) return false;
+        if (d.startsWith("kfc") && d.includes("-")) return false;
+        return true;
+      };
+
+      knownProductsQuery.forEach(row => {
+        if (row.itemCode && row.description && isValidProductName(row.description)) {
+          productDescMap.set(normalizeItemCode(row.itemCode), row.description);
+        }
+      });
+
       const resolvedItems = items
         .map((row: any) => {
           const rowCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
           const outlet = outletCodeMap.get(normalizeOutletCode(rowCode));
+          const itemCode = String(row.item_number || row.item_code || row.itemCode || "");
+          
+          let description = row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || null;
+          
+          if (!isValidProductName(description)) {
+            const correctDesc = productDescMap.get(normalizeItemCode(itemCode));
+            if (correctDesc) {
+              description = correctDesc;
+            } else {
+              description = description || row.to_sub_desc || null;
+            }
+          }
+
           return {
             sheetId: sheet.id,
             outletCode: String(rowCode),
             outletId: outlet?.id || null,
             routeId: outlet?.routeId || null,
-            itemCode: String(row.item_number || row.item_code || row.itemCode || ""),
-            description: row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || row.to_sub_desc || null,
+            itemCode: itemCode,
+            description: description,
             toNo: row.to_no || null,
             lineNumber: row.line_number || null,
             requestedDeliveryDate: row.requested_delivery_date ? new Date(row.requested_delivery_date.split('-').reverse().join('-')) : null, // Assuming DD-MM-YYYY
@@ -7575,6 +7615,14 @@ export async function registerRoutes(
 
       const result = await storage.updateDispatchDelivery(req.params.id, { ...req.body, driverId: req.user?.id });
       
+      if (req.body.status === "pending") {
+        try {
+          await db.delete(schema.fmcgInvoiceItems).where(eq(schema.fmcgInvoiceItems.dispatchItemId, req.params.id));
+        } catch (invoiceErr) {
+          console.error("Failed to remove FMCG invoice item on revert:", invoiceErr);
+        }
+      }
+      
       // Auto-generate fmcg invoice logic
       if (req.body.status === "delivered" || req.body.status === "partial") {
         try {
@@ -7665,6 +7713,193 @@ export async function registerRoutes(
     } catch (e) {
       console.error("Item override error:", e);
       res.status(500).json({ error: "Failed to update item override" });
+    }
+  });
+
+  async function recalculateTruckCapacities(sheetId: string) {
+    try {
+      const truckAssigns = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.sheetId, sheetId));
+      const truckAssignIds = truckAssigns.map(ta => ta.id);
+      if (truckAssignIds.length === 0) return;
+
+      const outletTruckAssigns = await db.select().from(schema.dispatchOutletTruckAssignments).where(inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckAssignIds));
+      const items = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.sheetId, sheetId));
+
+      for (const ta of truckAssigns) {
+        const assignedOutlets = outletTruckAssigns.filter(ota => ota.truckAssignmentId === ta.id);
+        let totalWeight = 0;
+
+        for (const ota of assignedOutlets) {
+          const outletItems = items.filter(item => {
+            const matchesOutlet = item.outletId === ota.outletId || item.outletCode === ota.outletCode;
+            if (!matchesOutlet) return false;
+            
+            if (ota.storageType) {
+              return item.storageType?.toLowerCase() === ota.storageType.toLowerCase();
+            }
+            return true;
+          });
+
+          const otaWeight = outletItems.reduce((sum, item) => sum + parseFloat(item.weight || item.requestedQty || "0"), 0);
+          totalWeight += otaWeight;
+
+          await db.update(schema.dispatchOutletTruckAssignments)
+            .set({ assignedWeight: otaWeight.toFixed(3) })
+            .where(eq(schema.dispatchOutletTruckAssignments.id, ota.id));
+        }
+
+        await db.update(schema.dispatchTruckAssignments)
+          .set({ usedCapacity: totalWeight.toFixed(3) } as any)
+          .where(eq(schema.dispatchTruckAssignments.id, ta.id));
+      }
+    } catch (err) {
+      console.error("Error recalculating truck capacities:", err);
+    }
+  }
+
+  app.post("/api/dispatch/sheets/:sheetId/items", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { sheetId } = req.params;
+      const { outletCode, itemCode, description, requestedQty, storageType, routeId, toNo, uom } = req.body;
+      
+      if (!outletCode || !itemCode || !requestedQty) {
+        return res.status(400).json({ error: "outletCode, itemCode, and requestedQty are required" });
+      }
+
+      const allOutlets = await storage.getOutlets();
+      const normalize = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+      const outlet = allOutlets.find(o => normalize(o.code || "") === normalize(outletCode));
+      
+      const resolvedOutletId = outlet?.id || null;
+      const resolvedRouteId = routeId || outlet?.routeId || null;
+
+      const [newItem] = await db.insert(schema.dispatchItems).values({
+        sheetId,
+        outletCode: String(outletCode),
+        outletId: resolvedOutletId,
+        routeId: resolvedRouteId,
+        itemCode: String(itemCode),
+        description: description || null,
+        requestedQty: String(requestedQty),
+        weight: String(requestedQty),
+        storageType: storageType || "Dry",
+        toNo: toNo || null,
+        uom: uom || null,
+      }).returning();
+
+      await recalculateTruckCapacities(sheetId);
+
+      res.json(newItem);
+    } catch (e) {
+      console.error("Add dispatch item error:", e);
+      res.status(500).json({ error: "Failed to add dispatch item" });
+    }
+  });
+
+  app.post("/api/dispatch/items/batch-update", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { items } = req.body;
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Invalid items array" });
+      }
+
+      const sheetIds = new Set<string>();
+
+      await db.transaction(async (tx) => {
+        for (const item of items) {
+          const [existingItem] = await tx.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, item.id));
+          if (!existingItem) continue;
+
+          sheetIds.add(existingItem.sheetId);
+
+          const updateData: any = {};
+          if (item.requestedQty !== undefined) {
+            updateData.requestedQty = String(item.requestedQty);
+            updateData.weight = String(item.requestedQty);
+          }
+          if (item.storageType !== undefined) {
+            updateData.storageType = item.storageType;
+          }
+          if (item.overrideRouteId !== undefined) {
+            updateData.overrideRouteId = item.overrideRouteId || null;
+          }
+          if (item.description !== undefined) {
+            updateData.description = item.description || null;
+          }
+
+          await tx.update(schema.dispatchItems)
+            .set(updateData)
+            .where(eq(schema.dispatchItems.id, item.id));
+        }
+      });
+
+      for (const sheetId of Array.from(sheetIds)) {
+        await recalculateTruckCapacities(sheetId);
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Batch update dispatch items error:", e);
+      res.status(500).json({ error: "Failed to batch update dispatch items" });
+    }
+  });
+
+  app.patch("/api/dispatch/items/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { requestedQty, storageType, overrideRouteId, description, itemCode } = req.body;
+      
+      const [existingItem] = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, id));
+      if (!existingItem) return res.status(404).json({ error: "Item not found" });
+
+      const updateData: any = {};
+      if (requestedQty !== undefined) {
+        updateData.requestedQty = String(requestedQty);
+        updateData.weight = String(requestedQty);
+      }
+      if (storageType !== undefined) {
+        updateData.storageType = storageType;
+      }
+      if (overrideRouteId !== undefined) {
+        updateData.overrideRouteId = overrideRouteId || null;
+      }
+      if (description !== undefined) {
+        updateData.description = description || null;
+      }
+      if (itemCode !== undefined) {
+        updateData.itemCode = String(itemCode);
+      }
+
+      const [updated] = await db.update(schema.dispatchItems)
+        .set(updateData)
+        .where(eq(schema.dispatchItems.id, id))
+        .returning();
+
+      await recalculateTruckCapacities(existingItem.sheetId);
+
+      res.json(updated);
+    } catch (e) {
+      console.error("Update dispatch item error:", e);
+      res.status(500).json({ error: "Failed to update dispatch item" });
+    }
+  });
+
+  app.delete("/api/dispatch/items/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      
+      const [existingItem] = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.id, id));
+      if (!existingItem) return res.status(404).json({ error: "Item not found" });
+
+      await db.delete(schema.dispatchDeliveries).where(eq(schema.dispatchDeliveries.dispatchItemId, id));
+      await db.delete(schema.dispatchItems).where(eq(schema.dispatchItems.id, id));
+      
+      await recalculateTruckCapacities(existingItem.sheetId);
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Delete dispatch item error:", e);
+      res.status(500).json({ error: "Failed to delete dispatch item" });
     }
   });
 
@@ -9900,6 +10135,20 @@ export async function registerRoutes(
       const outletName = outletRow?.name || `Outlet ${outletId}`;
       const outletCode = outletRow?.code || "N/A";
 
+      const conditions = [
+        eq(schema.dispatchItems.sheetId, sheetId),
+        eq(schema.dispatchItems.outletId, outletId)
+      ];
+
+      if (storageType !== "all" && storageType !== "All") {
+        const types = storageType.split(",").map(t => t.trim()).filter(Boolean);
+        if (types.length === 1) {
+          conditions.push(eq(schema.dispatchItems.storageType, types[0]));
+        } else if (types.length > 1) {
+          conditions.push(inArray(schema.dispatchItems.storageType, types));
+        }
+      }
+
       // Fetch completed deliveries matching this outlet and storageType
       const deliveriesQuery = await db.select({
         id: schema.dispatchDeliveries.id,
@@ -9930,13 +10179,7 @@ export async function registerRoutes(
       })
       .from(schema.dispatchDeliveries)
       .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
-      .where(
-        and(
-          eq(schema.dispatchItems.sheetId, sheetId),
-          eq(schema.dispatchItems.outletId, outletId),
-          eq(schema.dispatchItems.storageType, storageType)
-        )
-      );
+      .where(and(...conditions));
 
       if (deliveriesQuery.length === 0) {
         return res.status(404).json({ error: "No completed delivery items found." });
@@ -9982,7 +10225,9 @@ export async function registerRoutes(
         doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
         doc.moveDown(1.5);
 
-        const requiresTemp = ["frozen", "chilled", "assorted"].includes(storageType.toLowerCase());
+        const requiresTemp = storageType.split(",").some(st => 
+          ["frozen", "chilled", "assorted"].includes(st.trim().toLowerCase())
+        );
 
         doc.fillColor("#1F2937").fontSize(10);
         let currentY = doc.y;

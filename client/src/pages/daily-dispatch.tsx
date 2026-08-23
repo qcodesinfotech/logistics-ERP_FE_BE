@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
+import { ErrorBoundary } from "@/components/error-boundary";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -42,7 +43,7 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
-  Share2, MoreHorizontal, Folder, Wrench, History, Fuel,
+  Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search,
 } from "lucide-react";
 
 // ===== Types =====
@@ -76,11 +77,21 @@ function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length < 2) return [];
   const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
+  const hasItemSpecificDesc = rawHeaders.some(h => {
+    return (h.includes("item") || h.includes("product")) && 
+           (h.includes("desc") || h.includes("name"));
+  });
   // Normalize common header variants
   const normalize = (h: string) => {
     if (h.includes("outlet") && h.includes("code")) return "outlet_code";
     if (h.includes("item") && h.includes("code")) return "item_code";
-    if (h.includes("desc") && !h.includes("sub_desc")) return "description";
+    if (h.includes("sub_desc") || h.includes("outlet_desc") || h.includes("customer_desc") || h.includes("outlet_name") || h.includes("customer_name")) {
+      return "to_sub_desc";
+    }
+    if (hasItemSpecificDesc && (h === "description" || h === "desc")) {
+      return "to_sub_desc";
+    }
+    if (h.includes("desc")) return "description";
     if (h.includes("name") && (h.includes("item") || h.includes("product"))) return "description";
     if (h.includes("validation") && (h.includes("qty") || h.includes("quantity"))) return "weight";
     if (h.includes("total") && (h.includes("qty") || h.includes("quantity"))) return "total_qty_col";
@@ -255,7 +266,8 @@ function MoveOverrideDialog({
 
 // ===== Outlet Card =====
 function OutletCard({
-  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect,
+  outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect, onManageItems,
+  onQuickComplete, onRevertDelivery,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
@@ -264,6 +276,9 @@ function OutletCard({
   onOverrideItem: (item: DispatchItem) => void;
   selectedDate: string;
   onSelect?: () => void;
+  onManageItems: (outlet: OutletGroup) => void;
+  onQuickComplete?: (item: DispatchItem) => void;
+  onRevertDelivery?: (item: DispatchItem) => void;
 }) {
   const { user } = useAuth();
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
@@ -321,17 +336,30 @@ function OutletCard({
             <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">{delivered}/{total}</Badge>
           </div>
           
-          {isSupervisor && !isOutletComplete && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-6 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-0.5"
-              onClick={e => { e.stopPropagation(); onOverride(outlet); }}
-            >
-              <ArrowRight className="h-3 w-3" />
-              Move
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {isSupervisor && !isOutletComplete && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-0.5"
+                onClick={e => { e.stopPropagation(); onOverride(outlet); }}
+              >
+                <ArrowRight className="h-3 w-3" />
+                Move
+              </Button>
+            )}
+            {isSupervisor && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 px-2 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50 gap-0.5"
+                onClick={e => { e.stopPropagation(); onManageItems(outlet); }}
+              >
+                <Settings className="h-3 w-3" />
+                Manage
+              </Button>
+            )}
+          </div>
         </div>
       </div>
       {expanded && (
@@ -369,6 +397,18 @@ function OutletCard({
                       Move
                     </Button>
                   )}
+                  {isSupervisor && status === "pending" && onQuickComplete && (
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-emerald-600 border-emerald-200 hover:bg-emerald-50 flex-shrink-0"
+                      onClick={() => onQuickComplete(item)}>
+                      <Check className="h-3.5 w-3.5 mr-0.5" />Complete
+                    </Button>
+                  )}
+                  {isSupervisor && status !== "pending" && onRevertDelivery && (
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50 flex-shrink-0"
+                      onClick={() => onRevertDelivery(item)}>
+                      <RefreshCw className="h-3 w-3 mr-0.5" />Revert
+                    </Button>
+                  )}
                   {status === "pending" && (
                     <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
                       disabled={isFuture || (isDriver && !isToday)}
@@ -388,10 +428,10 @@ function OutletCard({
 }
 
 // ===== Zone Column =====
-// ===== Zone Column =====
 function ZoneColumn({
   zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
-  onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails,
+  onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails, onManageItems,
+  onQuickComplete, onRevertDelivery, initialZoneData,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
@@ -403,6 +443,10 @@ function ZoneColumn({
   isExpanded: boolean;
   selectedOutletForDetails: any | null;
   onCloseDetails: () => void;
+  onManageItems: (outlet: OutletGroup) => void;
+  onQuickComplete?: (item: DispatchItem) => void;
+  onRevertDelivery?: (item: DispatchItem) => void;
+  initialZoneData?: ZoneGroup;
 }) {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
@@ -509,6 +553,33 @@ function ZoneColumn({
   const formattedTotalQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
   const formattedDeliveredQty = deliveredQty % 1 === 0 ? deliveredQty.toFixed(0) : deliveredQty.toFixed(1);
   const completionPercentage = totalQty > 0 ? Math.round((deliveredQty / totalQty) * 100) : 0;
+
+  // Unfiltered (initial) stats calculation
+  const initialOutlets = initialZoneData?.outlets || zone.outlets;
+  const initialOutletsCount = initialOutlets.length;
+  
+  const initialTotalQty = initialOutlets.reduce((sumOutlet, o) => {
+    return sumOutlet + o.items.reduce((sumItem, i) => sumItem + parseNumber(i.requestedQty || i.weight), 0);
+  }, 0);
+
+  const initialDeliveredQty = initialOutlets.reduce((sumOutlet, o) => {
+    return sumOutlet + o.items.reduce((sumItem, i) => {
+      if (i.delivery?.status === "delivered") {
+        return sumItem + parseNumber(i.delivery.deliveredQty || i.requestedQty || i.weight);
+      }
+      return sumItem;
+    }, 0);
+  }, 0);
+
+  const initialCompletionPercentage = initialTotalQty > 0 ? Math.round((initialDeliveredQty / initialTotalQty) * 100) : 0;
+
+  const initialCompletedOutletsCount = initialOutlets.filter(o => 
+    o.items.length > 0 && o.items.every(i => (i.delivery?.status || "pending") !== "pending")
+  ).length;
+
+  const formattedInitialTotalQty = initialTotalQty % 1 === 0 ? initialTotalQty.toFixed(0) : initialTotalQty.toFixed(1);
+  const formattedInitialDeliveredQty = initialDeliveredQty % 1 === 0 ? initialDeliveredQty.toFixed(0) : initialDeliveredQty.toFixed(1);
+
   const isUnassigned = zone.zoneId === "unassigned";
 
   const renderOutletItems = (items: any[]) => {
@@ -563,20 +634,42 @@ function ZoneColumn({
               </div>
               <div>
                 <h3 className="font-bold text-sm">{zone.zoneName}</h3>
-                <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · Qty: {formattedTotalQty}</p>
+                <p className="text-xs text-muted-foreground">
+                  {zone.outlets.length === initialOutletsCount 
+                    ? `${initialOutletsCount} outlets` 
+                    : `${zone.outlets.length}/${initialOutletsCount} outlets`}
+                  {" · "}
+                  Qty: {formattedTotalQty === formattedInitialTotalQty 
+                    ? formattedTotalQty 
+                    : `${formattedTotalQty}/${formattedInitialTotalQty}`}
+                </p>
               </div>
             </div>
-            <Badge className={`${deliveredQty === totalQty && totalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
-              {formattedDeliveredQty}/{formattedTotalQty} ({completionPercentage}%)
+            <Badge className={`${initialDeliveredQty === initialTotalQty && initialTotalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
+              {formattedInitialDeliveredQty}/{formattedInitialTotalQty} ({initialCompletionPercentage}%)
             </Badge>
           </div>
-          {totalQty > 0 && (
-            <div className="mb-3 space-y-1">
-              <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                <span>Delivery Completion</span>
-                <span className="font-semibold text-primary">{completionPercentage}%</span>
+          {initialTotalQty > 0 && (
+            <div className="mb-3 space-y-2">
+              <div className="space-y-0.5">
+                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                  <span>Qty Completion</span>
+                  <span className="font-semibold text-primary">{initialCompletionPercentage}%</span>
+                </div>
+                <Progress value={initialCompletionPercentage} className="h-1 bg-slate-100 dark:bg-slate-800" />
               </div>
-              <Progress value={completionPercentage} className="h-1.5 bg-slate-100 dark:bg-slate-800" />
+              <div className="space-y-0.5">
+                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                  <span>Outlets Completion</span>
+                  <span className="font-semibold text-indigo-600">
+                    {initialCompletedOutletsCount}/{initialOutletsCount} ({initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}%)
+                  </span>
+                </div>
+                <Progress 
+                  value={initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0} 
+                  className="h-1 bg-slate-100 dark:bg-slate-800" 
+                />
+              </div>
             </div>
           )}
           {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
@@ -639,6 +732,9 @@ function ZoneColumn({
                     onOverrideItem={onOverrideItem}
                     selectedDate={selectedDate}
                     onSelect={() => onSelectOutlet(outlet)}
+                    onManageItems={onManageItems}
+                    onQuickComplete={onQuickComplete}
+                    onRevertDelivery={onRevertDelivery}
                   />
                 </div>
               );
@@ -1036,6 +1132,7 @@ export default function DailyDispatchPage() {
 
   // State
   const [activeTab, setActiveTab] = useState("board");
+  const [expandedSummaryItems, setExpandedSummaryItems] = useState<Record<string, boolean>>({});
   const [selectedDate, setSelectedDate] = useState(() => {
     return localStorage.getItem("dispatchSelectedDate") || format(new Date(), "yyyy-MM-dd");
   });
@@ -1055,6 +1152,19 @@ export default function DailyDispatchPage() {
     }
   }, [boardSheetId]);
 
+  const [boardClientId, setBoardClientId] = useState<string>(() => {
+    return localStorage.getItem("dispatchBoardClientId") || "all";
+  });
+  const [uploadClientId, setUploadClientId] = useState<string>("");
+
+  useEffect(() => {
+    localStorage.setItem("dispatchBoardClientId", boardClientId);
+  }, [boardClientId]);
+
+  const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
+
+
+
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -1064,6 +1174,46 @@ export default function DailyDispatchPage() {
   const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
   const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
+
+  // Item Management Modals State
+  const [manageItemsModal, setManageItemsModal] = useState<{
+    isOpen: boolean;
+    outletCode: string;
+    outletName: string;
+    items: any[];
+  }>({
+    isOpen: false,
+    outletCode: "",
+    outletName: "",
+    items: [],
+  });
+
+  const [editedItems, setEditedItems] = useState<any[]>([]);
+  const [prevOpen, setPrevOpen] = useState(false);
+
+  useEffect(() => {
+    if (manageItemsModal.isOpen && !prevOpen) {
+      setEditedItems(JSON.parse(JSON.stringify(manageItemsModal.items || [])));
+    }
+    setPrevOpen(manageItemsModal.isOpen);
+  }, [manageItemsModal.isOpen, manageItemsModal.items, prevOpen]);
+
+  const [newItemForm, setNewItemForm] = useState({
+    itemCode: "",
+    description: "",
+    requestedQty: "",
+    storageType: "Dry",
+    routeId: "",
+    toNo: "",
+    uom: "",
+  });
+
+  const [globalAddModal, setGlobalAddModal] = useState({
+    isOpen: false,
+    selectedOutletCode: "",
+  });
+
+  const [summarySearchQuery, setSummarySearchQuery] = useState("");
 
   const [boardRouteFilter, setBoardRouteFilter] = useState("all");
   const [boardOutletFilter, setBoardOutletFilter] = useState("all");
@@ -1089,23 +1239,40 @@ export default function DailyDispatchPage() {
     setSelectedOutletForDetails(null);
   };
 
+  const handleManageItems = (outlet: any) => {
+    setManageItemsModal({
+      isOpen: true,
+      outletCode: outlet.outletCode,
+      outletName: outlet.outletName || outlet.outletCode,
+      items: outlet.items || [],
+    });
+  };
+
   // Queries
-  const { data: sheets = [] } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
+  const { data: sheets = [], isLoading: sheetsLoading } = useQuery<DispatchSheet[]>({ queryKey: ["/api/dispatch/sheets"] });
   const { data: zones = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
   const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
+  const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
 
-  // Sync boardSheetId with sheets matching the selectedDate automatically
+  const allOutletOptions = useMemo(() => {
+    return (outlets || []).map((o: any) => ({
+      value: o.code || "",
+      label: `${o.name || "Unnamed"} (${o.code || "No Code"})`
+    }));
+  }, [outlets]);
+
+  // Sync boardSheetId with sheets matching the selectedDate and boardClientId automatically
   useEffect(() => {
-    if (sheets && sheets.length > 0) {
-      const sheet = sheets.find(s => s.date === selectedDate);
+    if (!sheetsLoading) {
+      const sheet = sheets.find(s => s.date === selectedDate && (boardClientId === "all" || s.clientId === boardClientId));
       if (sheet) {
         setBoardSheetId(sheet.id);
       } else {
         setBoardSheetId(null);
       }
     }
-  }, [selectedDate, sheets]);
+  }, [selectedDate, boardClientId, sheets, sheetsLoading]);
 
   const { data: boardData, isLoading: boardLoading, refetch: refetchBoard } = useQuery<BoardData>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`],
@@ -1116,6 +1283,12 @@ export default function DailyDispatchPage() {
   const { data: vehiclesList = [] } = useQuery<any[]>({
     queryKey: ["/api/vehicles"],
   });
+
+  const activeZones = useMemo(() => {
+    if (!boardData || !boardData.zones) return zones || [];
+    const activeIds = new Set(boardData.zones.map((z: any) => z.zoneId));
+    return (zones || []).filter((r: any) => activeIds.has(r.id));
+  }, [zones, boardData]);
 
   const stats = useMemo(() => {
     if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0, assignedTrucksCount: 0 };
@@ -1247,7 +1420,7 @@ export default function DailyDispatchPage() {
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: (data: { date: string; fileName: string; items: any[]; mergeStrategy?: "skip" | "replace" | "overwrite" }) =>
+    mutationFn: (data: { date: string; fileName: string; items: any[]; mergeStrategy?: "skip" | "replace" | "overwrite"; clientId?: string | null }) =>
       apiRequest("POST", "/api/dispatch/sheets", data),
     onSuccess: async (res) => {
       const result = await res.json();
@@ -1286,6 +1459,29 @@ export default function DailyDispatchPage() {
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
+  const handleQuickComplete = (item: DispatchItem) => {
+    deliveryMutation.mutate({
+      itemId: item.id,
+      data: {
+        status: "delivered",
+        deliveredQty: item.requestedQty || item.weight || "0",
+        remainingQty: "0",
+        damagedQty: "0",
+        damageReason: "",
+        remark: "Completed by Supervisor",
+      },
+    });
+  };
+
+  const handleRevert = (item: DispatchItem) => {
+    deliveryMutation.mutate({
+      itemId: item.id,
+      data: {
+        status: "pending",
+      },
+    });
+  };
+
   // Override mutation
   const overrideMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/dispatch/overrides", data),
@@ -1306,6 +1502,92 @@ export default function DailyDispatchPage() {
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
+
+  // Item Management mutations
+  const addItemMutation = useMutation({
+    mutationFn: async (data: { sheetId: string; outletCode: string; itemCode: string; description: string; requestedQty: number; storageType: string; routeId?: string; toNo?: string; uom?: string }) => {
+      const res = await apiRequest("POST", `/api/dispatch/sheets/${data.sheetId}/items`, data);
+      return res.json();
+    },
+    onSuccess: (newItem) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setEditedItems(prev => [...prev, newItem]);
+      toast({ title: "Item added successfully" });
+      setNewItemForm({
+        itemCode: "",
+        description: "",
+        requestedQty: "",
+        storageType: "Dry",
+        routeId: "",
+        toNo: "",
+        uom: "",
+      });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const updateItemMutation = useMutation({
+    mutationFn: async (data: { id: string; requestedQty?: number; storageType?: string; overrideRouteId?: string | null; description?: string; itemCode?: string }) => {
+      const res = await apiRequest("PATCH", `/api/dispatch/items/${data.id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      toast({ title: "Item updated successfully" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const batchUpdateItemsMutation = useMutation({
+    mutationFn: async (data: { items: any[] }) => {
+      const res = await apiRequest("POST", "/api/dispatch/items/batch-update", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      toast({ title: "Items updated successfully" });
+      setManageItemsModal(prev => ({ ...prev, isOpen: false }));
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const deleteItemMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/dispatch/items/${id}`);
+      return res.json();
+    },
+    onSuccess: (_, deletedId) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      setEditedItems(prev => prev.filter(item => item.id !== deletedId));
+      toast({ title: "Item deleted successfully" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  // Sync manageItemsModal items when boardData changes
+  useEffect(() => {
+    if (manageItemsModal.isOpen && boardData) {
+      let foundOutlet: any = null;
+      for (const zone of boardData.zones) {
+        const outlet = zone.outlets.find((o: any) => o.outletCode === manageItemsModal.outletCode);
+        if (outlet) {
+          foundOutlet = outlet;
+          break;
+        }
+      }
+      if (foundOutlet) {
+        setManageItemsModal(prev => ({
+          ...prev,
+          items: foundOutlet.items,
+        }));
+      } else {
+        setManageItemsModal(prev => ({
+          ...prev,
+          items: [],
+        }));
+      }
+    }
+  }, [boardData, manageItemsModal.isOpen, manageItemsModal.outletCode]);
 
   const removeOverrideMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/overrides/${id}`),
@@ -1358,11 +1640,22 @@ export default function DailyDispatchPage() {
 
           if (rawJson.length > 0) {
             const rawHeaders = Object.keys(rawJson[0]);
+            const hasItemSpecificDesc = rawHeaders.some(h => {
+              const lower = h.toLowerCase().replace(/\s+/g, "_");
+              return (lower.includes("item") || lower.includes("product")) && 
+                     (lower.includes("desc") || lower.includes("name"));
+            });
             const normalize = (h: string) => {
               const lower = h.toLowerCase().replace(/\s+/g, "_");
               if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
               if (lower.includes("item") && lower.includes("code")) return "item_code";
-              if (lower.includes("desc") && !lower.includes("sub_desc")) return "description";
+              if (lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") || lower.includes("outlet_name") || lower.includes("customer_name")) {
+                return "to_sub_desc";
+              }
+              if (hasItemSpecificDesc && (lower === "description" || lower === "desc")) {
+                return "to_sub_desc";
+              }
+              if (lower.includes("desc")) return "description";
               if (lower.includes("name") && (lower.includes("item") || lower.includes("product"))) return "description";
               if (lower.includes("validation") && (lower.includes("qty") || lower.includes("quantity"))) return "weight";
               if (lower.includes("total") && (lower.includes("qty") || lower.includes("quantity"))) return "total_qty_col";
@@ -1482,18 +1775,22 @@ export default function DailyDispatchPage() {
 
   const handleUpload = () => {
     if (!csvPreview || csvPreview.length === 0) return;
+    if (!uploadClientId) {
+      toast({ title: "Validation Error", description: "Please select a client before uploading.", variant: "destructive" });
+      return;
+    }
     
-    const existingSheet = sheets.find(s => s.date === uploadDate);
+    const existingSheet = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
     if (existingSheet) {
       setMergeConfirmOpen(true);
       return;
     }
 
-    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview, mergeStrategy: "overwrite" });
+    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview, mergeStrategy: "overwrite", clientId: uploadClientId });
   };
 
   // Find sheet for selected date on board
-  const sheetForDate = sheets.find(s => s.date === selectedDate);
+  const sheetForDate = sheets.find(s => s.date === selectedDate && (boardClientId === "all" || s.clientId === boardClientId));
 
   const driverMap = new Map(drivers.map(d => [d.id, d]));
   const zoneMap = new Map(zones.map(z => [z.id, z]));
@@ -1575,6 +1872,19 @@ export default function DailyDispatchPage() {
               <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
                 className="w-40 h-8 text-sm" />
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Client:</span>
+              <select
+                value={boardClientId}
+                onChange={e => setBoardClientId(e.target.value)}
+                className="h-8 border rounded-md px-2 bg-transparent text-xs min-w-[140px]"
+              >
+                <option value="all">All Clients</option>
+                {clientList.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
             {sheetForDate ? (
               <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
                 onClick={() => setBoardSheetId(sheetForDate.id)}>
@@ -1593,6 +1903,16 @@ export default function DailyDispatchPage() {
             {boardSheetId && (
               <Button size="sm" variant="ghost" onClick={() => refetchBoard()}>
                 <RefreshCw className="h-3.5 w-3.5 mr-1" />Refresh
+              </Button>
+            )}
+            {boardSheetId && (
+              <Button 
+                size="sm" 
+                variant="outline" 
+                className="border-orange-200 text-orange-700 hover:bg-orange-50"
+                onClick={() => setGlobalAddModal({ isOpen: true, selectedOutletCode: "" })}
+              >
+                <PlusCircle className="h-3.5 w-3.5 mr-1" />Add Item / Outlet
               </Button>
             )}
             {boardData && boardData.overrides.length > 0 && (
@@ -1670,6 +1990,9 @@ export default function DailyDispatchPage() {
                     <div>
                       <p className="text-xl font-bold tracking-tight text-slate-900">
                         {stats.completedQty % 1 === 0 ? stats.completedQty.toFixed(0) : stats.completedQty.toFixed(1)}
+                        <span className="text-xs font-normal text-slate-500 ml-1.5">
+                          ({stats.totalQtyAssigned > 0 ? Math.round((stats.completedQty / stats.totalQtyAssigned) * 100) : 0}%)
+                        </span>
                       </p>
                       <p className="text-xs font-medium text-slate-500">Completed Qty</p>
                     </div>
@@ -1841,12 +2164,16 @@ export default function DailyDispatchPage() {
                           onDeliveryUpdate={item => setDeliveryDialog(item)}
                           onOverride={outlet => setOverrideDialog(outlet)}
                           onOverrideItem={item => setItemOverrideDialog(item)}
+                          onManageItems={handleManageItems}
                           selectedDate={selectedDate}
                           onSelectRoute={() => handleSelectRouteForDetails(zone)}
                           onSelectOutlet={handleSelectOutletForDetails}
                           isExpanded={selectedRouteForDetails?.zoneId === zone.zoneId}
                           selectedOutletForDetails={selectedOutletForDetails}
                           onCloseDetails={handleCloseDetailsPanel}
+                          onQuickComplete={handleQuickComplete}
+                          onRevertDelivery={handleRevert}
+                          initialZoneData={boardData.zones.find(z => z.zoneId === zone.zoneId)}
                         />
                       ));
                   })()}
@@ -1932,6 +2259,15 @@ export default function DailyDispatchPage() {
 
             {boardSheetId && reportData && (
               <div className="ml-auto flex items-center gap-2 print:hidden">
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search items, description, outlets..." 
+                    value={summarySearchQuery}
+                    onChange={e => setSummarySearchQuery(e.target.value)}
+                    className="pl-7 w-60 h-8 text-xs bg-white border-slate-200"
+                  />
+                </div>
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
                   <Printer className="h-4 w-4" /> Print
                 </Button>
@@ -1960,6 +2296,18 @@ export default function DailyDispatchPage() {
                 const itemGroups: Record<string, any> = {};
                 let grandTotal = 0;
 
+                const normalizeOutletCode = (code: string | number | null | undefined): string => {
+                  if (code === null || code === undefined) return "";
+                  return String(code).trim().toLowerCase().replace(/^0+/, "");
+                };
+
+                const outletLookup = new Map<string, string>();
+                outlets.forEach(o => {
+                  if (o.code) {
+                    outletLookup.set(normalizeOutletCode(o.code), o.name);
+                  }
+                });
+
                 reportData.items.forEach(item => {
                   const key = item.itemCode;
                   if (!itemGroups[key]) {
@@ -1969,15 +2317,48 @@ export default function DailyDispatchPage() {
                       uom: item.uom,
                       fromOrg: item.fromOrg,
                       storageType: item.storageType,
-                      totalQty: 0
+                      totalQty: 0,
+                      outlets: []
                     };
                   }
                   const qty = Number(item.requestedQty || item.weight || 0);
                   itemGroups[key].totalQty += qty;
-                  grandTotal += qty;
+
+                  // Add outlet info
+                  const outletKey = item.outletCode;
+                  const normalizedCode = normalizeOutletCode(outletKey);
+                  const matchedName = outletLookup.get(normalizedCode) || item.outletName || item.toSubDesc || "Unnamed Outlet";
+
+                  const existingOutlet = itemGroups[key].outlets.find((o: any) => normalizeOutletCode(o.outletCode) === normalizedCode);
+                  if (existingOutlet) {
+                    existingOutlet.qty += qty;
+                  } else {
+                    itemGroups[key].outlets.push({
+                      outletCode: item.outletCode,
+                      outletName: matchedName,
+                      qty: qty
+                    });
+                  }
                 });
 
-                const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+                const sortedItems = Object.values(itemGroups).sort((a: any, b: any) => a.itemCode.localeCompare(b.itemCode));
+
+                let filteredItems = sortedItems;
+                const query = summarySearchQuery.toLowerCase().trim();
+                if (query) {
+                  filteredItems = sortedItems.filter(item => {
+                    if (item.itemCode.toLowerCase().includes(query)) return true;
+                    if (item.description && item.description.toLowerCase().includes(query)) return true;
+                    if (item.storageType && item.storageType.toLowerCase().includes(query)) return true;
+                    return item.outlets.some((o: any) => 
+                      o.outletName.toLowerCase().includes(query) || 
+                      o.outletCode.toLowerCase().includes(query)
+                    );
+                  });
+                }
+
+                // Recalculate grand total based on filtered items
+                grandTotal = filteredItems.reduce((sum, it) => sum + it.totalQty, 0);
 
                 return (
                   <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
@@ -1993,16 +2374,44 @@ export default function DailyDispatchPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {sortedItems.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
-                            <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
-                            <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
-                          </tr>
-                        ))}
+                        {filteredItems.map((item: any, idx) => {
+                          const isExpanded = !!expandedSummaryItems[item.itemCode];
+                          return (
+                            <React.Fragment key={idx}>
+                              <tr 
+                                className="hover:bg-slate-50/50 cursor-pointer break-inside-avoid"
+                                onClick={() => setExpandedSummaryItems(prev => ({ ...prev, [item.itemCode]: !isExpanded }))}
+                              >
+                                <td className="py-1.5 px-3 border-r text-slate-600 font-medium flex items-center gap-1.5">
+                                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-primary" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                                  {item.itemCode}
+                                </td>
+                                <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
+                                <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
+                                <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
+                                <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
+                                <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-slate-50/30">
+                                  <td colSpan={6} className="p-3 border-b">
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 max-w-2xl mx-auto shadow-inner space-y-1.5">
+                                      <p className="font-semibold text-xs text-slate-700 border-b border-slate-200 pb-1">Outlet-wise Breakdown</p>
+                                      <div className="divide-y divide-slate-200/60 text-xs">
+                                        {item.outlets.map((o: any, oIdx: number) => (
+                                          <div key={oIdx} className="flex justify-between py-1.5">
+                                            <span className="text-slate-600 font-medium">{o.outletName} ({o.outletCode})</span>
+                                            <span className="text-slate-900 font-bold">{o.qty}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                       <tfoot className="bg-slate-100/80 border-t">
                         <tr>
@@ -2033,7 +2442,19 @@ export default function DailyDispatchPage() {
 
         {/* ===== COMPLETED TAB ===== */}
         <TabsContent value="completed" className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
-          <CompletedDeliveriesTab selectedDate={selectedDate} />
+          <ErrorBoundary>
+            <CompletedDeliveriesTab 
+              selectedDate={selectedDate} 
+              onManageItems={(outletCode: string, outletName: string, items: any[]) => {
+                setManageItemsModal({
+                  isOpen: true,
+                  outletCode,
+                  outletName,
+                  items,
+                });
+              }}
+            />
+          </ErrorBoundary>
         </TabsContent>
 
         {/* ===== UPLOAD TAB ===== */}
@@ -2101,6 +2522,20 @@ export default function DailyDispatchPage() {
                 <div className="space-y-2">
                   <Label>Dispatch Date</Label>
                   <Input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} className="w-44" />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Client / Customer</Label>
+                  <select
+                    value={uploadClientId}
+                    onChange={e => setUploadClientId(e.target.value)}
+                    className="w-full h-10 border rounded-md px-3 bg-transparent text-sm"
+                  >
+                    <option value="">-- Select Client --</option>
+                    {clientList.map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Dropzone */}
@@ -2279,21 +2714,21 @@ export default function DailyDispatchPage() {
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip" });
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
               <p className="font-medium text-sm text-primary">Skip Duplicates</p>
               <p className="text-xs text-muted-foreground mt-0.5">Ignore items that are already in the system. Only add new items.</p>
             </div>
             <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace" });
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
               <p className="font-medium text-sm text-primary">Replace Duplicates</p>
               <p className="text-xs text-muted-foreground mt-0.5">Update quantities for existing items, and add new items.</p>
             </div>
             <div className="border rounded-lg p-3 cursor-pointer hover:border-destructive hover:bg-destructive/10 transition-colors" onClick={() => {
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite" });
+              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
               <p className="font-medium text-sm text-destructive">Overwrite Entire Sheet</p>
@@ -2337,6 +2772,417 @@ export default function DailyDispatchPage() {
           })}
         />
       )}
+
+      {/* Manage Items Dialog */}
+      <Dialog 
+        open={manageItemsModal.isOpen} 
+        onOpenChange={(open) => setManageItemsModal(prev => ({ ...prev, isOpen: open }))}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-6 pb-4 border-b">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Settings className="h-5 w-5 text-orange-600 animate-spin-hover" />
+              Manage Items — {manageItemsModal.outletName || ""} ({manageItemsModal.outletCode || ""})
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Add new items, update quantities/routes, or delete items from this sheet. Changes update truck load capacities automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* Existing Items Table */}
+            <div>
+              <h3 className="text-xs font-bold text-slate-800 mb-2 uppercase tracking-wide">Existing Items</h3>
+              {(!editedItems || editedItems.length === 0) ? (
+                <p className="text-xs text-muted-foreground bg-slate-50 p-4 rounded text-center">No items currently on this sheet for this outlet.</p>
+              ) : (
+                <div className="border rounded-md overflow-hidden bg-white">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b text-slate-500 font-semibold">
+                        <th className="py-2 px-3 text-left">Code</th>
+                        <th className="py-2 px-3 text-left">Description</th>
+                        <th className="py-2 px-3 text-left">Storage</th>
+                        <th className="py-2 px-3 text-left">Route</th>
+                        <th className="py-2 px-3 text-right">Quantity</th>
+                        <th className="py-2 px-3 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {(editedItems || []).map((item: any, idx: number) => {
+                        const effectiveRouteId = item.overrideRouteId || item.routeId;
+                        return (
+                          <tr key={item.id || idx} className="hover:bg-slate-50/50">
+                            <td className="py-2 px-3 font-mono font-medium">{item.itemCode || ""}</td>
+                            <td className="py-2 px-3">
+                              <Input
+                                value={item.description || ""}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], description: e.target.value };
+                                  setEditedItems(updated);
+                                }}
+                                className="h-7 text-xs py-0.5 px-2"
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={item.storageType || "Dry"}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], storageType: e.target.value };
+                                  setEditedItems(updated);
+                                }}
+                                className="h-7 text-xs py-0.5 px-2 border rounded-md"
+                              >
+                                <option value="Dry">Dry</option>
+                                <option value="Chilled">Chilled</option>
+                                <option value="Frozen">Frozen</option>
+                              </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <select
+                                value={effectiveRouteId || ""}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], overrideRouteId: e.target.value || null };
+                                  setEditedItems(updated);
+                                }}
+                                className="h-7 text-xs py-0.5 px-2 border rounded-md max-w-[120px]"
+                              >
+                                <option value="">Default Route</option>
+                                {(activeZones || []).map((r: any) => (
+                                  <option key={r.id} value={r.id}>{r.name || ""}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <Input
+                                type="number"
+                                step="any"
+                                value={item.requestedQty || item.weight || ""}
+                                onChange={(e) => {
+                                  const updated = [...editedItems];
+                                  updated[idx] = { ...updated[idx], requestedQty: e.target.value };
+                                  setEditedItems(updated);
+                                }}
+                                className="h-7 w-20 text-right text-xs py-0.5 px-2 ml-auto"
+                              />
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => {
+                                  if (confirm("Are you sure you want to delete this item?")) {
+                                    deleteItemMutation.mutate(item.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Add New Item Form */}
+            <div className="border-t pt-4">
+              <h3 className="text-xs font-bold text-slate-800 mb-3 uppercase tracking-wide">Add New Item</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block text-slate-500 mb-1">Item Code *</label>
+                  <Input
+                    placeholder="e.g. R1000121"
+                    value={newItemForm.itemCode || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, itemCode: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-slate-500 mb-1">Description</label>
+                  <Input
+                    placeholder="e.g. PH FLOUR PIZZA MIX (25KG/BAG)"
+                    value={newItemForm.description || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1 font-semibold">Storage Type</label>
+                  <select
+                    value={newItemForm.storageType || "Dry"}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
+                    className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                  >
+                    <option value="Dry">Dry</option>
+                    <option value="Chilled">Chilled</option>
+                    <option value="Frozen">Frozen</option>
+                    <option value="Packaging">Packaging</option>
+                    <option value="Cleaning">Cleaning</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">Route / Zone (Optional)</label>
+                  <select
+                    value={newItemForm.routeId || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, routeId: e.target.value }))}
+                    className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                  >
+                    <option value="">Default Route</option>
+                    {(zones || []).map((r: any) => (
+                      <option key={r.id} value={r.id}>{r.name || ""}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1 font-semibold">Quantity *</label>
+                  <Input
+                    type="number"
+                    step="any"
+                    placeholder="e.g. 10"
+                    value={newItemForm.requestedQty || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, requestedQty: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
+                  <Input
+                    placeholder="e.g. TO-12502"
+                    value={newItemForm.toNo || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">UOM (Optional)</label>
+                  <Input
+                    placeholder="e.g. CT, PKT, EA"
+                    value={newItemForm.uom || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, uom: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="col-span-2 md:col-span-3 flex justify-end pt-2">
+                  <Button
+                    size="sm"
+                    className="bg-orange-600 hover:bg-orange-700 text-white gap-1 h-8 text-xs"
+                    onClick={() => {
+                      if (!newItemForm.itemCode || !newItemForm.requestedQty) {
+                        toast({ title: "Validation Error", description: "Item Code and Quantity are required.", variant: "destructive" });
+                        return;
+                      }
+                      addItemMutation.mutate({
+                        sheetId: boardSheetId!,
+                        outletCode: manageItemsModal.outletCode,
+                        itemCode: newItemForm.itemCode,
+                        description: newItemForm.description,
+                        requestedQty: parseFloat(newItemForm.requestedQty),
+                        storageType: newItemForm.storageType,
+                        routeId: newItemForm.routeId || undefined,
+                        toNo: newItemForm.toNo || undefined,
+                        uom: newItemForm.uom || undefined,
+                      });
+                    }}
+                    disabled={addItemMutation.isPending}
+                  >
+                    <Plus className="h-3 w-3 mr-1" /> Add Item
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="p-6 pt-4 border-t flex flex-col md:flex-row md:justify-between md:items-center w-full gap-3 bg-slate-50">
+            <p className="text-xs text-muted-foreground text-left">
+              Changes are staged locally. Click "Save Changes" to apply them.
+            </p>
+            <div className="flex gap-2 justify-end w-full md:w-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setManageItemsModal(prev => ({ ...prev, isOpen: false }))}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                onClick={() => {
+                  batchUpdateItemsMutation.mutate({ items: editedItems });
+                }}
+                disabled={batchUpdateItemsMutation.isPending}
+              >
+                {batchUpdateItemsMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Global Add Item / Outlet Dialog */}
+      <Dialog 
+        open={globalAddModal.isOpen} 
+        onOpenChange={(open) => setGlobalAddModal(prev => ({ ...prev, isOpen: open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <PlusCircle className="h-5 w-5 text-orange-600" />
+              Add Item / Outlet to Sheet
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Select an outlet and add a new delivery item to it on this sheet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 my-3 text-xs">
+            <div>
+              <label className="block text-slate-500 mb-1 font-semibold">Select Outlet *</label>
+              <SearchableSelect
+                value={globalAddModal.selectedOutletCode || ""}
+                onValueChange={(val) => {
+                  setGlobalAddModal(prev => ({ ...prev, selectedOutletCode: val }));
+                  const matched = (outlets || []).find((o: any) => o.code === val);
+                  if (matched && matched.routeId) {
+                    setNewItemForm(prev => ({ ...prev, routeId: matched.routeId }));
+                  } else {
+                    setNewItemForm(prev => ({ ...prev, routeId: "" }));
+                  }
+                }}
+                options={allOutletOptions}
+                placeholder="-- Choose Outlet --"
+                width="w-full"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 mb-1 font-semibold">Item Code *</label>
+                <Input
+                  placeholder="e.g. R1000121"
+                  value={newItemForm.itemCode || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, itemCode: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-500 mb-1 font-semibold">Quantity *</label>
+                <Input
+                  type="number"
+                  step="any"
+                  placeholder="e.g. 10"
+                  value={newItemForm.requestedQty || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, requestedQty: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1">Description</label>
+              <Input
+                placeholder="e.g. PH FLOUR PIZZA MIX (25KG/BAG)"
+                value={newItemForm.description || ""}
+                onChange={e => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 mb-1">Storage Type</label>
+                <select
+                  value={newItemForm.storageType || "Dry"}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
+                  className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                >
+                  <option value="Dry">Dry</option>
+                  <option value="Chilled">Chilled</option>
+                  <option value="Frozen">Frozen</option>
+                  <option value="Packaging">Packaging</option>
+                  <option value="Cleaning">Cleaning</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-slate-500 mb-1">Route / Zone (Optional)</label>
+                <select
+                  value={newItemForm.routeId || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, routeId: e.target.value }))}
+                  className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                >
+                  <option value="">Default Route</option>
+                  {(activeZones || []).map((r: any) => (
+                    <option key={r.id} value={r.id}>{r.name || ""}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
+                <Input
+                  placeholder="e.g. TO-12502"
+                  value={newItemForm.toNo || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-500 mb-1">UOM (Optional)</label>
+                <Input
+                  placeholder="e.g. CT, PKT"
+                  value={newItemForm.uom || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, uom: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setGlobalAddModal(prev => ({ ...prev, isOpen: false }))}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={() => {
+                if (!globalAddModal.selectedOutletCode || !newItemForm.itemCode || !newItemForm.requestedQty) {
+                  toast({ title: "Validation Error", description: "Outlet, Item Code, and Quantity are required.", variant: "destructive" });
+                  return;
+                }
+                addItemMutation.mutate({
+                  sheetId: boardSheetId!,
+                  outletCode: globalAddModal.selectedOutletCode,
+                  itemCode: newItemForm.itemCode,
+                  description: newItemForm.description,
+                  requestedQty: parseFloat(newItemForm.requestedQty),
+                  storageType: newItemForm.storageType,
+                  routeId: newItemForm.routeId || undefined,
+                  toNo: newItemForm.toNo || undefined,
+                  uom: newItemForm.uom || undefined,
+                }, {
+                  onSuccess: () => {
+                    setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
+                  }
+                });
+              }}
+              disabled={addItemMutation.isPending}
+            >
+              Add to Sheet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -2701,8 +3547,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                       {vehiclesList
                         .filter((v: any) => {
                           if (!truckForm.zoneId) return false;
-                          // Show vehicles assigned to selected zone, or all available if none are zone-matched
-                          return v.currentZoneId === truckForm.zoneId || v.status === "available";
+                          // Show all active vehicles
+                          return v.status !== "inactive";
                         })
                         .sort((a: any, b: any) => {
                           // Sort: zone-matched vehicles first
@@ -2714,9 +3560,9 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                           const isZoneMatch = v.currentZoneId === truckForm.zoneId;
                           const isAssigned = trucksAssignedInSheet.includes(v.id);
                           return (
-                            <SelectItem key={v.id} value={v.id} disabled={isAssigned}>
+                            <SelectItem key={v.id} value={v.id} disabled={false}>
                               {isZoneMatch ? "✓ " : ""}{v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
-                              {isAssigned ? " (Already in sheet)" : !isZoneMatch ? " (Other Zone)" : ""}
+                              {isAssigned ? " (Assigned in other route)" : !isZoneMatch ? " (Other Zone)" : ""}
                             </SelectItem>
                           );
                         })}
@@ -2732,7 +3578,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                       {drivers.filter((d: any) => d.status === "active").map((d: any) => {
                         const isAssigned = assignedDriversInSheet.has(d.id);
                         return (
-                          <SelectItem key={d.id} value={d.id} disabled={isAssigned}>
+                          <SelectItem key={d.id} value={d.id} disabled={false}>
                             {d.name} {isAssigned ? "(Assigned)" : ""}
                           </SelectItem>
                         );
@@ -3217,7 +4063,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     {drivers.map((d: any) => {
                       const isAssignedToOther = assignedDriversInSheet.has(d.id) && editAssignment.driverId !== d.id;
                       return (
-                        <SelectItem key={d.id} value={d.id} disabled={isAssignedToOther}>
+                        <SelectItem key={d.id} value={d.id} disabled={false}>
                           {d.name} {isAssignedToOther ? "(Assigned)" : ""}
                         </SelectItem>
                       );
@@ -3242,6 +4088,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
           )}
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }
@@ -3518,9 +4365,20 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
 // ===== TRUCK TRANSFERS TAB =====
 // ===== COMPLETED DELIVERIES TAB =====
-function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
+function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?: string; onManageItems?: (outletCode: string, outletName: string, items: any[]) => void }) {
   const [startDate, setStartDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
+
+  const safeFormatDate = (dateVal: any, formatStr: string) => {
+    if (!dateVal) return "";
+    const parsed = new Date(dateVal);
+    if (isNaN(parsed.getTime())) return "";
+    try {
+      return format(parsed, formatStr);
+    } catch (e) {
+      return "";
+    }
+  };
 
   useEffect(() => {
     if (selectedDate) {
@@ -3541,6 +4399,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isSupervisor = true; // TODO: link to user role
 
   const revertMutation = useMutation({
     mutationFn: async (dispatchItemId: string) => {
@@ -3652,7 +4511,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
   const handleExport = () => {
     if (!filteredDeliveries.length) return;
     const ws = XLSX.utils.json_to_sheet(filteredDeliveries.map(d => ({
-      Date: d.deliveredAt ? format(new Date(d.deliveredAt), "dd/MM/yyyy HH:mm") : "",
+      Date: safeFormatDate(d.deliveredAt, "dd/MM/yyyy HH:mm"),
       Route: d.zoneName,
       Outlet: d.outletName,
       Code: d.outletCode,
@@ -3813,7 +4672,8 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                       const uniqueDates = Array.from(new Set(
                                         Array.from(outlet.pods.values())
                                           .filter(Boolean)
-                                          .map((d: any) => format(new Date(d), "dd MMM yyyy, HH:mm"))
+                                          .map((d: any) => safeFormatDate(d, "dd MMM yyyy, HH:mm"))
+                                          .filter(Boolean)
                                       ));
                                       return uniqueDates.map((dt, i) => (
                                         <span key={i} className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
@@ -3838,6 +4698,19 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                         }}
                                       >
                                         <Eye className="h-3 w-3 mr-1" /> View PODs ({outlet.pods.size})
+                                      </Button>
+                                    )}
+                                    {(isSupervisor || isAdmin) && onManageItems && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap bg-orange-50 text-orange-700 hover:bg-orange-100 border-orange-200"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onManageItems(outlet.outletCode, outlet.outletName, outlet.items);
+                                        }}
+                                      >
+                                        <Settings className="h-3 w-3 mr-1" /> Manage Items
                                       </Button>
                                     )}
                                     {outlet.items.length > 0 && (
@@ -3888,7 +4761,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
                                   <tr key={p.id} className="hover:bg-slate-50 text-slate-600 bg-white">
                                     <td className="py-1.5 px-3 border-r pl-12 text-xs text-muted-foreground">
                                       {p.storageType && <Badge variant="outline" className="text-[9px] h-4 px-1 mr-1">{p.storageType}</Badge>}
-                                      {p.deliveredAt && format(new Date(p.deliveredAt), "dd/MM HH:mm")}
+                                      {safeFormatDate(p.deliveredAt, "dd/MM HH:mm")}
                                     </td>
                                     <td className="py-1.5 px-3 border-r font-mono text-xs">{p.itemCode}</td>
                                     <td className="py-1.5 px-3 border-r text-xs max-w-[200px] truncate" title={p.description || ""}>
@@ -3948,7 +4821,7 @@ function CompletedDeliveriesTab({ selectedDate }: { selectedDate?: string }) {
             {viewPodsModal.pods.map((pod, idx) => {
               const url = pod.url.replace(/\\/g, '/');
               const srcUrl = (url.startsWith('http') || url.startsWith('data:') || url.startsWith('/')) ? url : `/${url}`;
-              const dateStr = pod.date ? format(new Date(pod.date), "dd MMM yyyy, HH:mm") : "Unknown Date";
+              const dateStr = safeFormatDate(pod.date, "dd MMM yyyy, HH:mm") || "Unknown Date";
               
               return (
                 <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex flex-col min-h-[300px]">
