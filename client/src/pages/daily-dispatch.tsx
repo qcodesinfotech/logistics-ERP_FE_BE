@@ -43,7 +43,7 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
-  Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle,
+  Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search,
 } from "lucide-react";
 
 // ===== Types =====
@@ -1205,12 +1205,15 @@ export default function DailyDispatchPage() {
     storageType: "Dry",
     routeId: "",
     toNo: "",
+    uom: "",
   });
 
   const [globalAddModal, setGlobalAddModal] = useState({
     isOpen: false,
     selectedOutletCode: "",
   });
+
+  const [summarySearchQuery, setSummarySearchQuery] = useState("");
 
   const [boardRouteFilter, setBoardRouteFilter] = useState("all");
   const [boardOutletFilter, setBoardOutletFilter] = useState("all");
@@ -1502,7 +1505,7 @@ export default function DailyDispatchPage() {
 
   // Item Management mutations
   const addItemMutation = useMutation({
-    mutationFn: async (data: { sheetId: string; outletCode: string; itemCode: string; description: string; requestedQty: number; storageType: string; routeId?: string; toNo?: string }) => {
+    mutationFn: async (data: { sheetId: string; outletCode: string; itemCode: string; description: string; requestedQty: number; storageType: string; routeId?: string; toNo?: string; uom?: string }) => {
       const res = await apiRequest("POST", `/api/dispatch/sheets/${data.sheetId}/items`, data);
       return res.json();
     },
@@ -1517,6 +1520,7 @@ export default function DailyDispatchPage() {
         storageType: "Dry",
         routeId: "",
         toNo: "",
+        uom: "",
       });
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
@@ -2255,6 +2259,15 @@ export default function DailyDispatchPage() {
 
             {boardSheetId && reportData && (
               <div className="ml-auto flex items-center gap-2 print:hidden">
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search items, description, outlets..." 
+                    value={summarySearchQuery}
+                    onChange={e => setSummarySearchQuery(e.target.value)}
+                    className="pl-7 w-60 h-8 text-xs bg-white border-slate-200"
+                  />
+                </div>
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
                   <Printer className="h-4 w-4" /> Print
                 </Button>
@@ -2283,6 +2296,18 @@ export default function DailyDispatchPage() {
                 const itemGroups: Record<string, any> = {};
                 let grandTotal = 0;
 
+                const normalizeOutletCode = (code: string | number | null | undefined): string => {
+                  if (code === null || code === undefined) return "";
+                  return String(code).trim().toLowerCase().replace(/^0+/, "");
+                };
+
+                const outletLookup = new Map<string, string>();
+                outlets.forEach(o => {
+                  if (o.code) {
+                    outletLookup.set(normalizeOutletCode(o.code), o.name);
+                  }
+                });
+
                 reportData.items.forEach(item => {
                   const key = item.itemCode;
                   if (!itemGroups[key]) {
@@ -2301,20 +2326,39 @@ export default function DailyDispatchPage() {
 
                   // Add outlet info
                   const outletKey = item.outletCode;
-                  const existingOutlet = itemGroups[key].outlets.find((o: any) => o.outletCode === outletKey);
+                  const normalizedCode = normalizeOutletCode(outletKey);
+                  const matchedName = outletLookup.get(normalizedCode) || item.outletName || item.toSubDesc || "Unnamed Outlet";
+
+                  const existingOutlet = itemGroups[key].outlets.find((o: any) => normalizeOutletCode(o.outletCode) === normalizedCode);
                   if (existingOutlet) {
                     existingOutlet.qty += qty;
                   } else {
                     itemGroups[key].outlets.push({
                       outletCode: item.outletCode,
-                      outletName: item.outletName || item.toSubDesc || "Unnamed Outlet",
+                      outletName: matchedName,
                       qty: qty
                     });
                   }
-                  grandTotal += qty;
                 });
 
                 const sortedItems = Object.values(itemGroups).sort((a: any, b: any) => a.itemCode.localeCompare(b.itemCode));
+
+                let filteredItems = sortedItems;
+                const query = summarySearchQuery.toLowerCase().trim();
+                if (query) {
+                  filteredItems = sortedItems.filter(item => {
+                    if (item.itemCode.toLowerCase().includes(query)) return true;
+                    if (item.description && item.description.toLowerCase().includes(query)) return true;
+                    if (item.storageType && item.storageType.toLowerCase().includes(query)) return true;
+                    return item.outlets.some((o: any) => 
+                      o.outletName.toLowerCase().includes(query) || 
+                      o.outletCode.toLowerCase().includes(query)
+                    );
+                  });
+                }
+
+                // Recalculate grand total based on filtered items
+                grandTotal = filteredItems.reduce((sum, it) => sum + it.totalQty, 0);
 
                 return (
                   <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
@@ -2330,7 +2374,7 @@ export default function DailyDispatchPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {sortedItems.map((item: any, idx) => {
+                        {filteredItems.map((item: any, idx) => {
                           const isExpanded = !!expandedSummaryItems[item.itemCode];
                           return (
                             <React.Fragment key={idx}>
@@ -2871,7 +2915,7 @@ export default function DailyDispatchPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">Storage Type</label>
+                  <label className="block text-slate-500 mb-1 font-semibold">Storage Type</label>
                   <select
                     value={newItemForm.storageType || "Dry"}
                     onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
@@ -2880,6 +2924,8 @@ export default function DailyDispatchPage() {
                     <option value="Dry">Dry</option>
                     <option value="Chilled">Chilled</option>
                     <option value="Frozen">Frozen</option>
+                    <option value="Packaging">Packaging</option>
+                    <option value="Cleaning">Cleaning</option>
                   </select>
                 </div>
                 <div>
@@ -2896,7 +2942,7 @@ export default function DailyDispatchPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">Quantity *</label>
+                  <label className="block text-slate-500 mb-1 font-semibold">Quantity *</label>
                   <Input
                     type="number"
                     step="any"
@@ -2912,6 +2958,15 @@ export default function DailyDispatchPage() {
                     placeholder="e.g. TO-12502"
                     value={newItemForm.toNo || ""}
                     onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1">UOM (Optional)</label>
+                  <Input
+                    placeholder="e.g. CT, PKT, EA"
+                    value={newItemForm.uom || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, uom: e.target.value }))}
                     className="h-8 text-xs"
                   />
                 </div>
@@ -2933,6 +2988,7 @@ export default function DailyDispatchPage() {
                         storageType: newItemForm.storageType,
                         routeId: newItemForm.routeId || undefined,
                         toNo: newItemForm.toNo || undefined,
+                        uom: newItemForm.uom || undefined,
                       });
                     }}
                     disabled={addItemMutation.isPending}
@@ -3048,6 +3104,8 @@ export default function DailyDispatchPage() {
                   <option value="Dry">Dry</option>
                   <option value="Chilled">Chilled</option>
                   <option value="Frozen">Frozen</option>
+                  <option value="Packaging">Packaging</option>
+                  <option value="Cleaning">Cleaning</option>
                 </select>
               </div>
               <div>
@@ -3064,14 +3122,25 @@ export default function DailyDispatchPage() {
                 </select>
               </div>
             </div>
-            <div>
-              <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
-              <Input
-                placeholder="e.g. TO-12502"
-                value={newItemForm.toNo || ""}
-                onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
-                className="h-8 text-xs"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
+                <Input
+                  placeholder="e.g. TO-12502"
+                  value={newItemForm.toNo || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-500 mb-1">UOM (Optional)</label>
+                <Input
+                  placeholder="e.g. CT, PKT"
+                  value={newItemForm.uom || ""}
+                  onChange={e => setNewItemForm(prev => ({ ...prev, uom: e.target.value }))}
+                  className="h-8 text-xs"
+                />
+              </div>
             </div>
           </div>
 
@@ -3100,6 +3169,7 @@ export default function DailyDispatchPage() {
                   storageType: newItemForm.storageType,
                   routeId: newItemForm.routeId || undefined,
                   toNo: newItemForm.toNo || undefined,
+                  uom: newItemForm.uom || undefined,
                 }, {
                   onSuccess: () => {
                     setGlobalAddModal(prev => ({ ...prev, isOpen: false }));

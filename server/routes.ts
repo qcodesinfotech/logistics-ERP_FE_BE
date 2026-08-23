@@ -7760,7 +7760,7 @@ export async function registerRoutes(
   app.post("/api/dispatch/sheets/:sheetId/items", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { sheetId } = req.params;
-      const { outletCode, itemCode, description, requestedQty, storageType, routeId, toNo } = req.body;
+      const { outletCode, itemCode, description, requestedQty, storageType, routeId, toNo, uom } = req.body;
       
       if (!outletCode || !itemCode || !requestedQty) {
         return res.status(400).json({ error: "outletCode, itemCode, and requestedQty are required" });
@@ -7784,6 +7784,7 @@ export async function registerRoutes(
         weight: String(requestedQty),
         storageType: storageType || "Dry",
         toNo: toNo || null,
+        uom: uom || null,
       }).returning();
 
       await recalculateTruckCapacities(sheetId);
