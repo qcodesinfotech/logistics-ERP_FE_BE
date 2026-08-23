@@ -7859,6 +7859,14 @@ export class DatabaseStorage implements IStorage {
     const list = await query;
     const driversList = await this.getDrivers();
     const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+    
+    // Also include all users to map admin/supervisor IDs properly
+    const allUsersList = await db.select({ id: users.id, name: users.name, username: users.username }).from(users);
+    for (const u of allUsersList) {
+      if (!driverMap.has(u.id)) {
+        driverMap.set(u.id, u.name || u.username);
+      }
+    }
 
     return list.map(item => ({
       ...item,
@@ -7925,6 +7933,14 @@ export class DatabaseStorage implements IStorage {
     const list = await query;
     const driversList = await this.getDrivers();
     const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+
+    // Also include all users to map admin/supervisor IDs properly
+    const allUsersList = await db.select({ id: users.id, name: users.name, username: users.username }).from(users);
+    for (const u of allUsersList) {
+      if (!driverMap.has(u.id)) {
+        driverMap.set(u.id, u.name || u.username);
+      }
+    }
 
     // Fetch overrides and assignments for uniqueSheetIds to resolve actual zones dynamically
     const uniqueSheetIds = Array.from(new Set(list.map(item => item.sheetId).filter(Boolean))) as string[];
