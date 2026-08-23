@@ -1818,6 +1818,7 @@ export const rfqs = pgTable("rfqs", {
   requestedDeliveryDate: timestamp("requested_delivery_date"),
   additionalRequirements: text("additional_requirements"),
   notes: text("notes"),
+  validityDays: integer("validity_days").default(30),
 
   createdAt: timestamp("created_at").defaultNow(),
 });

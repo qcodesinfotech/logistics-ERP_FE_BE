@@ -7182,10 +7182,19 @@ export class DatabaseStorage implements IStorage {
     const conditions = [];
     if (driverId) conditions.push(eq(trips.driverId, driverId));
     if (status) conditions.push(eq(trips.status, status));
+    
+    let resultTrips = [];
     if (conditions.length > 0) {
-      return db.select().from(trips).where(and(...conditions));
+      resultTrips = await db.select().from(trips).where(and(...conditions));
+    } else {
+      resultTrips = await db.select().from(trips);
     }
-    return db.select().from(trips);
+    
+    const allTripOrders = await db.select().from(tripOrders);
+    return resultTrips.map(trip => {
+      const orderIds = allTripOrders.filter(to => to.tripId === trip.id).map(to => to.orderId);
+      return { ...trip, orderIds } as any;
+    });
   }
 
   async getTrip(id: string): Promise<Trip | undefined> {
@@ -7404,6 +7413,15 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(trips.id, tripId))
       .returning();
+
+    // Update the associated orders to completed
+    const tripOrdersList = await db.select().from(tripOrders).where(eq(tripOrders.tripId, tripId));
+    for (const to of tripOrdersList) {
+      await db.update(orders)
+        .set({ status: "completed" })
+        .where(eq(orders.id, to.orderId));
+    }
+
     return trip;
   }
 

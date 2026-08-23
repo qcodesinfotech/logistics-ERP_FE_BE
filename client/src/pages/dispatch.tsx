@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   BarChart3, Plus, Truck, User, ArrowRight, CheckCircle2, 
-  AlertTriangle, Play, Check, Eye, FileUp, XCircle, Clock, RefreshCw
+  AlertTriangle, Play, Check, Eye, FileUp, XCircle, Clock, RefreshCw, Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,6 +49,12 @@ export default function DispatchPage() {
   const [selectedTrailerNumber, setSelectedTrailerNumber] = useState("");
   const [tripPrice, setTripPrice] = useState("0.000");
 
+  const [truckSource, setTruckSource] = useState<"owned" | "rented">("owned");
+  const [rentedTruckType, setRentedTruckType] = useState("");
+  const [rentedTruckNumber, setRentedTruckNumber] = useState("");
+  const [rentedCapacity, setRentedCapacity] = useState("");
+  const [rentedTruckPrice, setRentedTruckPrice] = useState("0.000");
+
   // Depart / Pickup Loading States
   const [isDepartDialogOpen, setIsDepartDialogOpen] = useState(false);
   const [departTrip, setDepartTrip] = useState<Trip | null>(null);
@@ -63,12 +69,9 @@ export default function DispatchPage() {
   const [transitTrip, setTransitTrip] = useState<Trip | null>(null);
   const [transitLocation, setTransitLocation] = useState("");
   const [transitGps, setTransitGps] = useState("");
-  const [transitDelayReason, setTransitDelayReason] = useState("");
-  const [transitDelayHours, setTransitDelayHours] = useState("");
-  const [transitIncidentDesc, setTransitIncidentDesc] = useState("");
-  const [transitIncidentCost, setTransitIncidentCost] = useState("");
-  const [transitExpenseName, setTransitExpenseName] = useState("");
-  const [transitExpenseCost, setTransitExpenseCost] = useState("");
+  const [transitDelays, setTransitDelays] = useState<{reason: string; durationHours: string}[]>([{reason: "", durationHours: ""}]);
+  const [transitIncidents, setTransitIncidents] = useState<{description: string; cost: string}[]>([{description: "", cost: ""}]);
+  const [transitExpenses, setTransitExpenses] = useState<{name: string; cost: string}[]>([{name: "", cost: ""}]);
   const [selectedOrderIdForPOD, setSelectedOrderIdForPOD] = useState<string>("");
   const [podStatus, setPodStatus] = useState<string>("delivered");
   const [podUrl, setPodUrl] = useState<string>("");
@@ -130,17 +133,28 @@ export default function DispatchPage() {
     enabled: !!selectedOutletIdForHistory && isHistoryDialogOpen,
   });
 
+  const activeTrips = tripsList?.filter(t => t.status === "pending" || t.status === "in_transit") || [];
+  const activeAssignedOrderIds = activeTrips.flatMap((t: any) => [...(t.orderIds || []), t.orderId].filter(Boolean));
+  const allAssignedOrderIds = tripsList?.flatMap((t: any) => [...(t.orderIds || []), t.orderId].filter(Boolean)) || [];
+
   // Filter orders that are not assigned to active trips
   // and have status as 'pending' or 'confirmed'
-  const unassignedOrders = ordersList?.filter(o => 
-    (o.status === "pending" || o.status === "confirmed" || o.status === "incomplete")
-  ) || [];
+  const unassignedOrders = ordersList?.filter(o => {
+    if (o.status === "pending" || o.status === "confirmed") {
+      return !allAssignedOrderIds.includes(o.id);
+    }
+    if (o.status === "incomplete") {
+      return !activeAssignedOrderIds.includes(o.id);
+    }
+    return false;
+  }) || [];
 
-  const availableVehicles = vehiclesList?.filter(v => v.status === "available") || [];
+  const activeVehicleIds = tripsList?.filter(t => t.status === "pending" || t.status === "in_transit").map(t => t.vehicleId) || [];
+  const availableVehicles = vehiclesList?.filter(v => v.status === "available" && !activeVehicleIds.includes(v.id)) || [];
 
   // Mutations
   const createTripMutation = useMutation({
-    mutationFn: (data: {
+    mutationFn: async (data: {
       vehicleId: string;
       driverId: string;
       orderIds: string[];
@@ -149,7 +163,39 @@ export default function DispatchPage() {
       startTime: Date;
       trailerNumber?: string;
       sellingRate?: string;
-    }) => apiRequest("POST", "/api/trips", data),
+      isRented?: boolean;
+    }) => {
+      let finalVehicleId = data.vehicleId;
+      let additionalExpenses = [];
+      let otherTripExpenses = "0.000";
+
+      if (data.isRented) {
+        const vehicleRes = await apiRequest("POST", "/api/vehicles", {
+          name: rentedTruckType || "Rented Truck",
+          plateNumber: rentedTruckNumber || "N/A",
+          type: "outsourced",
+          capacity: rentedCapacity || "0",
+          status: "in_transit"
+        });
+        const newVehicle = await vehicleRes.json();
+        finalVehicleId = newVehicle.id;
+
+        if (rentedTruckPrice && parseFloat(rentedTruckPrice) > 0) {
+          additionalExpenses.push({
+            name: "Rented Truck Cost",
+            cost: parseFloat(rentedTruckPrice)
+          });
+          otherTripExpenses = rentedTruckPrice;
+        }
+      }
+
+      return apiRequest("POST", "/api/trips", {
+        ...data,
+        vehicleId: finalVehicleId,
+        additionalExpenses,
+        otherTripExpenses
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -163,6 +209,11 @@ export default function DispatchPage() {
       setTripRoute("");
       setSelectedTrailerNumber("");
       setTripPrice("0.000");
+      setTruckSource("owned");
+      setRentedTruckType("");
+      setRentedTruckNumber("");
+      setRentedCapacity("");
+      setRentedTruckPrice("0.000");
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -528,12 +579,9 @@ export default function DispatchPage() {
                                      setTransitTrip(trip);
                                      setTransitLocation(trip.currentLocation || "");
                                      setTransitGps(trip.gpsLocation || "");
-                                     setTransitDelayReason("");
-                                     setTransitDelayHours("0");
-                                     setTransitIncidentDesc("");
-                                     setTransitIncidentCost("0");
-                                     setTransitExpenseName("");
-                                     setTransitExpenseCost("0");
+                                     setTransitDelays([{reason: "", durationHours: ""}]);
+                                     setTransitIncidents([{description: "", cost: ""}]);
+                                     setTransitExpenses([{name: "", cost: ""}]);
                                      setIsTransitDialogOpen(true);
                                    }}
                                  >
@@ -616,18 +664,71 @@ export default function DispatchPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Select Vehicle / Truck *</label>
-              <Select onValueChange={setSelectedVehicleId} value={selectedVehicleId}>
+              <label className="text-sm font-medium">Truck Source *</label>
+              <Select onValueChange={(val: any) => setTruckSource(val)} value={truckSource}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select available vehicle" />
+                  <SelectValue placeholder="Select truck source" />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableVehicles.map(v => (
-                    <SelectItem key={v.id} value={v.id}>{v.name} ({v.plateNumber}) - Cap: {v.capacity || "N/A"}</SelectItem>
-                  ))}
+                  <SelectItem value="owned">Owned / Internal</SelectItem>
+                  <SelectItem value="rented">Rented / Outsourced</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {truckSource === 'owned' ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Select Vehicle / Truck *</label>
+                <Select onValueChange={setSelectedVehicleId} value={selectedVehicleId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select available vehicle" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableVehicles.map(v => (
+                      <SelectItem key={v.id} value={v.id}>{v.name} ({v.plateNumber}) - Cap: {v.capacity || "N/A"}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Truck Type *</label>
+                  <Input 
+                    value={rentedTruckType} 
+                    onChange={(e) => setRentedTruckType(e.target.value)} 
+                    placeholder="e.g. Flatbed, Reefer"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Plate Number *</label>
+                  <Input 
+                    value={rentedTruckNumber} 
+                    onChange={(e) => setRentedTruckNumber(e.target.value)} 
+                    placeholder="e.g. 12345"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Capacity (Tons) *</label>
+                  <Input 
+                    type="number"
+                    value={rentedCapacity} 
+                    onChange={(e) => setRentedCapacity(e.target.value)} 
+                    placeholder="e.g. 10"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Truck Price (BD) *</label>
+                  <Input 
+                    type="number"
+                    step="0.001"
+                    value={rentedTruckPrice} 
+                    onChange={(e) => setRentedTruckPrice(e.target.value)} 
+                    placeholder="0.000"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Select Authorized Driver *</label>
@@ -680,7 +781,7 @@ export default function DispatchPage() {
             <Button 
               type="button" 
               onClick={() => createTripMutation.mutate({
-                vehicleId: selectedVehicleId,
+                vehicleId: truckSource === 'owned' ? selectedVehicleId : "temp-rented",
                 driverId: selectedDriverId,
                 orderIds: selectedOrderIds,
                 route: tripRoute,
@@ -688,8 +789,13 @@ export default function DispatchPage() {
                 startTime: new Date(),
                 trailerNumber: selectedTrailerNumber || undefined,
                 sellingRate: tripPrice,
+                isRented: truckSource === 'rented',
               })}
-              disabled={!selectedVehicleId || !selectedDriverId || !tripRoute || createTripMutation.isPending}
+              disabled={
+                truckSource === 'owned'
+                  ? (!selectedVehicleId || !selectedDriverId || !tripRoute || createTripMutation.isPending)
+                  : (!rentedTruckType || !rentedTruckNumber || !rentedCapacity || !selectedDriverId || !tripRoute || createTripMutation.isPending)
+              }
             >
               {createTripMutation.isPending ? "Launching..." : "Launch Trip"}
             </Button>
@@ -1172,7 +1278,14 @@ export default function DispatchPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-xs font-medium">Current Location (City/Hub)</label>
+                  <datalist id="route-leg-cities">
+                    {Array.from(new Set(
+                      (ordersList?.filter(o => transitTrip?.orderIds?.includes(o.id)) || [])
+                        .flatMap(o => (o.routeLegs as any[] || []).flatMap(leg => [leg.originCity, leg.destinationCity]))
+                    )).filter(Boolean).map(city => <option key={city} value={city} />)}
+                  </datalist>
                   <Input 
+                    list="route-leg-cities"
                     value={transitLocation}
                     onChange={(e) => setTransitLocation(e.target.value)}
                     placeholder="e.g. Haima City Hub"
@@ -1191,76 +1304,142 @@ export default function DispatchPage() {
 
             {/* Delay log */}
             <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Delay (Optional)</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Delay Reason</label>
-                  <Input 
-                    value={transitDelayReason}
-                    onChange={(e) => setTransitDelayReason(e.target.value)}
-                    placeholder="e.g. Border Custom Delay"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Duration (Hours)</label>
-                  <Input 
-                    type="number"
-                    value={transitDelayHours}
-                    onChange={(e) => setTransitDelayHours(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
+              <div className="flex justify-between items-center">
+                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Delays (Optional)</h3>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setTransitDelays([...transitDelays, {reason: "", durationHours: ""}])}>
+                  <Plus className="h-3 w-3 mr-1"/> Add Delay
+                </Button>
               </div>
+              {transitDelays.map((delay, index) => (
+                <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Delay Reason</label>
+                    <Input 
+                      value={delay.reason}
+                      onChange={(e) => {
+                        const newDelays = [...transitDelays];
+                        newDelays[index].reason = e.target.value;
+                        setTransitDelays(newDelays);
+                      }}
+                      placeholder="e.g. Border Custom Delay"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Duration (Hours)</label>
+                    <Input 
+                      type="number"
+                      value={delay.durationHours}
+                      onChange={(e) => {
+                        const newDelays = [...transitDelays];
+                        newDelays[index].durationHours = e.target.value;
+                        setTransitDelays(newDelays);
+                      }}
+                      placeholder="0"
+                    />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
+                    const newDelays = [...transitDelays];
+                    newDelays.splice(index, 1);
+                    setTransitDelays(newDelays);
+                  }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
             </div>
 
             {/* Incident log */}
             <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Incident (Optional)</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Incident Description</label>
-                  <Input 
-                    value={transitIncidentDesc}
-                    onChange={(e) => setTransitIncidentDesc(e.target.value)}
-                    placeholder="e.g. Flat tire, minor breakdown"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Estimated Cost (BD)</label>
-                  <Input 
-                    type="number"
-                    step="0.001"
-                    value={transitIncidentCost}
-                    onChange={(e) => setTransitIncidentCost(e.target.value)}
-                    placeholder="0.000"
-                  />
-                </div>
+              <div className="flex justify-between items-center">
+                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Incidents (Optional)</h3>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setTransitIncidents([...transitIncidents, {description: "", cost: ""}])}>
+                  <Plus className="h-3 w-3 mr-1"/> Add Incident
+                </Button>
               </div>
+              {transitIncidents.map((incident, index) => (
+                <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Incident Description</label>
+                    <Input 
+                      value={incident.description}
+                      onChange={(e) => {
+                        const newIncidents = [...transitIncidents];
+                        newIncidents[index].description = e.target.value;
+                        setTransitIncidents(newIncidents);
+                      }}
+                      placeholder="e.g. Flat tire"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Estimated Cost (BD)</label>
+                    <Input 
+                      type="number"
+                      step="0.001"
+                      value={incident.cost}
+                      onChange={(e) => {
+                        const newIncidents = [...transitIncidents];
+                        newIncidents[index].cost = e.target.value;
+                        setTransitIncidents(newIncidents);
+                      }}
+                      placeholder="0.000"
+                    />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
+                    const newIncidents = [...transitIncidents];
+                    newIncidents.splice(index, 1);
+                    setTransitIncidents(newIncidents);
+                  }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
             </div>
 
             {/* Expense log */}
             <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Additional Trip Expense (Optional)</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Expense Title</label>
-                  <Input 
-                    value={transitExpenseName}
-                    onChange={(e) => setTransitExpenseName(e.target.value)}
-                    placeholder="e.g. Road Tolls, Helper Fee"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Cost Amount (BD)</label>
-                  <Input 
-                    type="number"
-                    step="0.001"
-                    value={transitExpenseCost}
-                    onChange={(e) => setTransitExpenseCost(e.target.value)}
-                    placeholder="0.000"
-                  />
-                </div>
+              <div className="flex justify-between items-center">
+                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Additional Expenses (Optional)</h3>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setTransitExpenses([...transitExpenses, {name: "", cost: ""}])}>
+                  <Plus className="h-3 w-3 mr-1"/> Add Expense
+                </Button>
               </div>
+              {transitExpenses.map((expense, index) => (
+                <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Expense Title</label>
+                    <Input 
+                      value={expense.name}
+                      onChange={(e) => {
+                        const newExpenses = [...transitExpenses];
+                        newExpenses[index].name = e.target.value;
+                        setTransitExpenses(newExpenses);
+                      }}
+                      placeholder="e.g. Road Tolls"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Cost Amount (BD)</label>
+                    <Input 
+                      type="number"
+                      step="0.001"
+                      value={expense.cost}
+                      onChange={(e) => {
+                        const newExpenses = [...transitExpenses];
+                        newExpenses[index].cost = e.target.value;
+                        setTransitExpenses(newExpenses);
+                      }}
+                      placeholder="0.000"
+                    />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
+                    const newExpenses = [...transitExpenses];
+                    newExpenses.splice(index, 1);
+                    setTransitExpenses(newExpenses);
+                  }}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
             </div>
           </div>
           <DialogFooter className="pt-4">
@@ -1273,32 +1452,38 @@ export default function DispatchPage() {
                 if (transitTrip) {
                   // Merge/append delays
                   const newDelays = [...(transitTrip.delays as any[] || [])];
-                  if (transitDelayReason && parseFloat(transitDelayHours) > 0) {
-                    newDelays.push({
-                      reason: transitDelayReason,
-                      durationHours: parseFloat(transitDelayHours),
-                      date: new Date().toISOString(),
-                    });
-                  }
+                  transitDelays.forEach(d => {
+                    if (d.reason && parseFloat(d.durationHours) > 0) {
+                      newDelays.push({
+                        reason: d.reason,
+                        durationHours: parseFloat(d.durationHours),
+                        date: new Date().toISOString(),
+                      });
+                    }
+                  });
 
                   // Merge/append incidents
                   const newIncidents = [...(transitTrip.incidents as any[] || [])];
-                  if (transitIncidentDesc) {
-                    newIncidents.push({
-                      description: transitIncidentDesc,
-                      cost: parseFloat(transitIncidentCost) || 0,
-                      date: new Date().toISOString(),
-                    });
-                  }
+                  transitIncidents.forEach(i => {
+                    if (i.description) {
+                      newIncidents.push({
+                        description: i.description,
+                        cost: parseFloat(i.cost) || 0,
+                        date: new Date().toISOString(),
+                      });
+                    }
+                  });
 
                   // Merge/append expenses
                   const newExpenses = [...(transitTrip.additionalExpenses as any[] || [])];
-                  if (transitExpenseName && parseFloat(transitExpenseCost) > 0) {
-                    newExpenses.push({
-                      name: transitExpenseName,
-                      cost: parseFloat(transitExpenseCost),
-                    });
-                  }
+                  transitExpenses.forEach(e => {
+                    if (e.name && parseFloat(e.cost) > 0) {
+                      newExpenses.push({
+                        name: e.name,
+                        cost: parseFloat(e.cost),
+                      });
+                    }
+                  });
 
                   updateTripMutation.mutate({
                     id: transitTrip.id,

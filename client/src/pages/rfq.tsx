@@ -87,6 +87,7 @@ const locationSchema = z.object({
 
 export default function RfqPage() {
   const [isRfqDialogOpen, setIsRfqDialogOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
   const [isLocationDialogOpen, setIsLocationDialogOpen] = useState(false);
   const [selectedRfq, setSelectedRfq] = useState<Rfq | null>(null);
   const [isViewOnly, setIsViewOnly] = useState(false);
@@ -413,19 +414,20 @@ export default function RfqPage() {
             notes: "",
           });
           setIsViewOnly(false);
+          setCurrentStep(1);
           setIsRfqDialogOpen(true);
         }} className="gap-2">
-          <Plus className="h-4 w-4" /> Create RFQ
+          <Plus className="h-4 w-4" /> Create Enquiry
         </Button>
       </PageHeader>
 
-      <Tabs defaultValue="rfq" className="space-y-6">
+      <Tabs defaultValue="enquiries" className="space-y-6">
         <TabsList className="grid w-[400px] grid-cols-2 bg-muted/60">
-          <TabsTrigger value="rfq">RFQ Pipeline</TabsTrigger>
-          <TabsTrigger value="quotation">Customer Quotations</TabsTrigger>
+          <TabsTrigger value="enquiries">Enquiries</TabsTrigger>
+          <TabsTrigger value="quotations">Quotations</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="rfq">
+        <TabsContent value="enquiries">
           <div className="space-y-6">
             <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
               <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
@@ -460,7 +462,7 @@ export default function RfqPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rfqsList.map((rfq) => {
+                      {rfqsList.filter(r => r.status === "pending").map((rfq) => {
                         const client = clientsList?.find(c => c.id === rfq.customerId);
                         const trans = parseFloat(String(rfq.transportationCharges)) || 0;
                         const extraTotal = (rfq.extraCharges as any[])?.reduce((sum: number, item: any) => sum + (Number(item.cost) || 0), 0) || 0;
@@ -592,7 +594,7 @@ export default function RfqPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="quotation">
+        <TabsContent value="quotations">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
             <CardHeader className="pb-3 border-b flex flex-row items-center justify-between">
               <div>
