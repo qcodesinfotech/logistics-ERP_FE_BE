@@ -3557,6 +3557,11 @@ export class DatabaseStorage implements IStorage {
       deliveryEndTime: deliveryData.deliveryEndTime ? new Date(deliveryData.deliveryEndTime) : undefined,
     };
 
+    if (finalDeliveryData.status === "pending") {
+      await db.delete(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
+      return null;
+    }
+
     const existing = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, dispatchItemId));
     if (existing.length > 0) {
       const [updated] = await db.update(dispatchDeliveries)

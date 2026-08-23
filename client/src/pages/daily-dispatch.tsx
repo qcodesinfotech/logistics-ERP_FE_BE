@@ -267,6 +267,7 @@ function MoveOverrideDialog({
 // ===== Outlet Card =====
 function OutletCard({
   outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect, onManageItems,
+  onQuickComplete, onRevertDelivery,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
@@ -276,6 +277,8 @@ function OutletCard({
   selectedDate: string;
   onSelect?: () => void;
   onManageItems: (outlet: OutletGroup) => void;
+  onQuickComplete?: (item: DispatchItem) => void;
+  onRevertDelivery?: (item: DispatchItem) => void;
 }) {
   const { user } = useAuth();
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
@@ -394,6 +397,18 @@ function OutletCard({
                       Move
                     </Button>
                   )}
+                  {isSupervisor && status === "pending" && onQuickComplete && (
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-emerald-600 border-emerald-200 hover:bg-emerald-50 flex-shrink-0"
+                      onClick={() => onQuickComplete(item)}>
+                      <Check className="h-3.5 w-3.5 mr-0.5" />Complete
+                    </Button>
+                  )}
+                  {isSupervisor && status !== "pending" && onRevertDelivery && (
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50 flex-shrink-0"
+                      onClick={() => onRevertDelivery(item)}>
+                      <RefreshCw className="h-3 w-3 mr-0.5" />Revert
+                    </Button>
+                  )}
                   {status === "pending" && (
                     <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
                       disabled={isFuture || (isDriver && !isToday)}
@@ -413,10 +428,10 @@ function OutletCard({
 }
 
 // ===== Zone Column =====
-// ===== Zone Column =====
 function ZoneColumn({
   zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
   onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails, onManageItems,
+  onQuickComplete, onRevertDelivery, initialZoneData,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
@@ -429,6 +444,9 @@ function ZoneColumn({
   selectedOutletForDetails: any | null;
   onCloseDetails: () => void;
   onManageItems: (outlet: OutletGroup) => void;
+  onQuickComplete?: (item: DispatchItem) => void;
+  onRevertDelivery?: (item: DispatchItem) => void;
+  initialZoneData?: ZoneGroup;
 }) {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
@@ -535,6 +553,33 @@ function ZoneColumn({
   const formattedTotalQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
   const formattedDeliveredQty = deliveredQty % 1 === 0 ? deliveredQty.toFixed(0) : deliveredQty.toFixed(1);
   const completionPercentage = totalQty > 0 ? Math.round((deliveredQty / totalQty) * 100) : 0;
+
+  // Unfiltered (initial) stats calculation
+  const initialOutlets = initialZoneData?.outlets || zone.outlets;
+  const initialOutletsCount = initialOutlets.length;
+  
+  const initialTotalQty = initialOutlets.reduce((sumOutlet, o) => {
+    return sumOutlet + o.items.reduce((sumItem, i) => sumItem + parseNumber(i.requestedQty || i.weight), 0);
+  }, 0);
+
+  const initialDeliveredQty = initialOutlets.reduce((sumOutlet, o) => {
+    return sumOutlet + o.items.reduce((sumItem, i) => {
+      if (i.delivery?.status === "delivered") {
+        return sumItem + parseNumber(i.delivery.deliveredQty || i.requestedQty || i.weight);
+      }
+      return sumItem;
+    }, 0);
+  }, 0);
+
+  const initialCompletionPercentage = initialTotalQty > 0 ? Math.round((initialDeliveredQty / initialTotalQty) * 100) : 0;
+
+  const initialCompletedOutletsCount = initialOutlets.filter(o => 
+    o.items.length > 0 && o.items.every(i => (i.delivery?.status || "pending") !== "pending")
+  ).length;
+
+  const formattedInitialTotalQty = initialTotalQty % 1 === 0 ? initialTotalQty.toFixed(0) : initialTotalQty.toFixed(1);
+  const formattedInitialDeliveredQty = initialDeliveredQty % 1 === 0 ? initialDeliveredQty.toFixed(0) : initialDeliveredQty.toFixed(1);
+
   const isUnassigned = zone.zoneId === "unassigned";
 
   const renderOutletItems = (items: any[]) => {
@@ -589,20 +634,42 @@ function ZoneColumn({
               </div>
               <div>
                 <h3 className="font-bold text-sm">{zone.zoneName}</h3>
-                <p className="text-xs text-muted-foreground">{zone.outlets.length} outlets · Qty: {formattedTotalQty}</p>
+                <p className="text-xs text-muted-foreground">
+                  {zone.outlets.length === initialOutletsCount 
+                    ? `${initialOutletsCount} outlets` 
+                    : `${zone.outlets.length}/${initialOutletsCount} outlets`}
+                  {" · "}
+                  Qty: {formattedTotalQty === formattedInitialTotalQty 
+                    ? formattedTotalQty 
+                    : `${formattedTotalQty}/${formattedInitialTotalQty}`}
+                </p>
               </div>
             </div>
-            <Badge className={`${deliveredQty === totalQty && totalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
-              {formattedDeliveredQty}/{formattedTotalQty} ({completionPercentage}%)
+            <Badge className={`${initialDeliveredQty === initialTotalQty && initialTotalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
+              {formattedInitialDeliveredQty}/{formattedInitialTotalQty} ({initialCompletionPercentage}%)
             </Badge>
           </div>
-          {totalQty > 0 && (
-            <div className="mb-3 space-y-1">
-              <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                <span>Delivery Completion</span>
-                <span className="font-semibold text-primary">{completionPercentage}%</span>
+          {initialTotalQty > 0 && (
+            <div className="mb-3 space-y-2">
+              <div className="space-y-0.5">
+                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                  <span>Qty Completion</span>
+                  <span className="font-semibold text-primary">{initialCompletionPercentage}%</span>
+                </div>
+                <Progress value={initialCompletionPercentage} className="h-1 bg-slate-100 dark:bg-slate-800" />
               </div>
-              <Progress value={completionPercentage} className="h-1.5 bg-slate-100 dark:bg-slate-800" />
+              <div className="space-y-0.5">
+                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                  <span>Outlets Completion</span>
+                  <span className="font-semibold text-indigo-600">
+                    {initialCompletedOutletsCount}/{initialOutletsCount} ({initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}%)
+                  </span>
+                </div>
+                <Progress 
+                  value={initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0} 
+                  className="h-1 bg-slate-100 dark:bg-slate-800" 
+                />
+              </div>
             </div>
           )}
           {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
@@ -666,6 +733,8 @@ function ZoneColumn({
                     selectedDate={selectedDate}
                     onSelect={() => onSelectOutlet(outlet)}
                     onManageItems={onManageItems}
+                    onQuickComplete={onQuickComplete}
+                    onRevertDelivery={onRevertDelivery}
                   />
                 </div>
               );
@@ -1063,6 +1132,7 @@ export default function DailyDispatchPage() {
 
   // State
   const [activeTab, setActiveTab] = useState("board");
+  const [expandedSummaryItems, setExpandedSummaryItems] = useState<Record<string, boolean>>({});
   const [selectedDate, setSelectedDate] = useState(() => {
     return localStorage.getItem("dispatchSelectedDate") || format(new Date(), "yyyy-MM-dd");
   });
@@ -1385,6 +1455,29 @@ export default function DailyDispatchPage() {
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
+
+  const handleQuickComplete = (item: DispatchItem) => {
+    deliveryMutation.mutate({
+      itemId: item.id,
+      data: {
+        status: "delivered",
+        deliveredQty: item.requestedQty || item.weight || "0",
+        remainingQty: "0",
+        damagedQty: "0",
+        damageReason: "",
+        remark: "Completed by Supervisor",
+      },
+    });
+  };
+
+  const handleRevert = (item: DispatchItem) => {
+    deliveryMutation.mutate({
+      itemId: item.id,
+      data: {
+        status: "pending",
+      },
+    });
+  };
 
   // Override mutation
   const overrideMutation = useMutation({
@@ -1893,6 +1986,9 @@ export default function DailyDispatchPage() {
                     <div>
                       <p className="text-xl font-bold tracking-tight text-slate-900">
                         {stats.completedQty % 1 === 0 ? stats.completedQty.toFixed(0) : stats.completedQty.toFixed(1)}
+                        <span className="text-xs font-normal text-slate-500 ml-1.5">
+                          ({stats.totalQtyAssigned > 0 ? Math.round((stats.completedQty / stats.totalQtyAssigned) * 100) : 0}%)
+                        </span>
                       </p>
                       <p className="text-xs font-medium text-slate-500">Completed Qty</p>
                     </div>
@@ -2071,6 +2167,9 @@ export default function DailyDispatchPage() {
                           isExpanded={selectedRouteForDetails?.zoneId === zone.zoneId}
                           selectedOutletForDetails={selectedOutletForDetails}
                           onCloseDetails={handleCloseDetailsPanel}
+                          onQuickComplete={handleQuickComplete}
+                          onRevertDelivery={handleRevert}
+                          initialZoneData={boardData.zones.find(z => z.zoneId === zone.zoneId)}
                         />
                       ));
                   })()}
@@ -2193,15 +2292,29 @@ export default function DailyDispatchPage() {
                       uom: item.uom,
                       fromOrg: item.fromOrg,
                       storageType: item.storageType,
-                      totalQty: 0
+                      totalQty: 0,
+                      outlets: []
                     };
                   }
                   const qty = Number(item.requestedQty || item.weight || 0);
                   itemGroups[key].totalQty += qty;
+
+                  // Add outlet info
+                  const outletKey = item.outletCode;
+                  const existingOutlet = itemGroups[key].outlets.find((o: any) => o.outletCode === outletKey);
+                  if (existingOutlet) {
+                    existingOutlet.qty += qty;
+                  } else {
+                    itemGroups[key].outlets.push({
+                      outletCode: item.outletCode,
+                      outletName: item.outletName || item.toSubDesc || "Unnamed Outlet",
+                      qty: qty
+                    });
+                  }
                   grandTotal += qty;
                 });
 
-                const sortedItems = Object.values(itemGroups).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+                const sortedItems = Object.values(itemGroups).sort((a: any, b: any) => a.itemCode.localeCompare(b.itemCode));
 
                 return (
                   <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
@@ -2217,16 +2330,44 @@ export default function DailyDispatchPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {sortedItems.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/50 break-inside-avoid">
-                            <td className="py-1.5 px-3 border-r text-slate-600 font-medium">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
-                            <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
-                            <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
-                          </tr>
-                        ))}
+                        {sortedItems.map((item: any, idx) => {
+                          const isExpanded = !!expandedSummaryItems[item.itemCode];
+                          return (
+                            <React.Fragment key={idx}>
+                              <tr 
+                                className="hover:bg-slate-50/50 cursor-pointer break-inside-avoid"
+                                onClick={() => setExpandedSummaryItems(prev => ({ ...prev, [item.itemCode]: !isExpanded }))}
+                              >
+                                <td className="py-1.5 px-3 border-r text-slate-600 font-medium flex items-center gap-1.5">
+                                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-primary" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                                  {item.itemCode}
+                                </td>
+                                <td className="py-1.5 px-3 border-r text-slate-600">{item.description}</td>
+                                <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
+                                <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
+                                <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
+                                <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-slate-50/30">
+                                  <td colSpan={6} className="p-3 border-b">
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 max-w-2xl mx-auto shadow-inner space-y-1.5">
+                                      <p className="font-semibold text-xs text-slate-700 border-b border-slate-200 pb-1">Outlet-wise Breakdown</p>
+                                      <div className="divide-y divide-slate-200/60 text-xs">
+                                        {item.outlets.map((o: any, oIdx: number) => (
+                                          <div key={oIdx} className="flex justify-between py-1.5">
+                                            <span className="text-slate-600 font-medium">{o.outletName} ({o.outletCode})</span>
+                                            <span className="text-slate-900 font-bold">{o.qty}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                       <tfoot className="bg-slate-100/80 border-t">
                         <tr>

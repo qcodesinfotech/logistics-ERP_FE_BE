@@ -7615,6 +7615,14 @@ export async function registerRoutes(
 
       const result = await storage.updateDispatchDelivery(req.params.id, { ...req.body, driverId: req.user?.id });
       
+      if (req.body.status === "pending") {
+        try {
+          await db.delete(schema.fmcgInvoiceItems).where(eq(schema.fmcgInvoiceItems.dispatchItemId, req.params.id));
+        } catch (invoiceErr) {
+          console.error("Failed to remove FMCG invoice item on revert:", invoiceErr);
+        }
+      }
+      
       // Auto-generate fmcg invoice logic
       if (req.body.status === "delivered" || req.body.status === "partial") {
         try {
@@ -10117,6 +10125,20 @@ export async function registerRoutes(
       const outletName = outletRow?.name || `Outlet ${outletId}`;
       const outletCode = outletRow?.code || "N/A";
 
+      const conditions = [
+        eq(schema.dispatchItems.sheetId, sheetId),
+        eq(schema.dispatchItems.outletId, outletId)
+      ];
+
+      if (storageType !== "all" && storageType !== "All") {
+        const types = storageType.split(",").map(t => t.trim()).filter(Boolean);
+        if (types.length === 1) {
+          conditions.push(eq(schema.dispatchItems.storageType, types[0]));
+        } else if (types.length > 1) {
+          conditions.push(inArray(schema.dispatchItems.storageType, types));
+        }
+      }
+
       // Fetch completed deliveries matching this outlet and storageType
       const deliveriesQuery = await db.select({
         id: schema.dispatchDeliveries.id,
@@ -10147,13 +10169,7 @@ export async function registerRoutes(
       })
       .from(schema.dispatchDeliveries)
       .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
-      .where(
-        and(
-          eq(schema.dispatchItems.sheetId, sheetId),
-          eq(schema.dispatchItems.outletId, outletId),
-          eq(schema.dispatchItems.storageType, storageType)
-        )
-      );
+      .where(and(...conditions));
 
       if (deliveriesQuery.length === 0) {
         return res.status(404).json({ error: "No completed delivery items found." });
@@ -10199,7 +10215,9 @@ export async function registerRoutes(
         doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
         doc.moveDown(1.5);
 
-        const requiresTemp = ["frozen", "chilled", "assorted"].includes(storageType.toLowerCase());
+        const requiresTemp = storageType.split(",").some(st => 
+          ["frozen", "chilled", "assorted"].includes(st.trim().toLowerCase())
+        );
 
         doc.fillColor("#1F2937").fontSize(10);
         let currentY = doc.y;
