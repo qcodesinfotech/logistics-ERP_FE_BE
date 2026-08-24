@@ -60,6 +60,7 @@ const orderFormSchema = z.object({
   cargoDetails: z.string().min(1, "Cargo details are required"),
   weight: z.string().transform((v) => parseFloat(v) || 0),
   loadType: z.enum(["FTL", "LTL"]),
+  numberOfShipments: z.string().transform(v => parseInt(v, 10) || 1).or(z.number()).optional().default(1),
   
   orderDate: z.string().optional(),
   paymentDueDate: z.string().optional(),
@@ -137,6 +138,10 @@ export default function OrdersPage() {
     queryKey: ["/api/zones"],
   });
 
+  const { data: tripsList = [] } = useQuery<any[]>({
+    queryKey: ["/api/trips"],
+  });
+
   // Form
   const form = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
@@ -146,6 +151,7 @@ export default function OrdersPage() {
       cargoDetails: "",
       weight: "0",
       loadType: "FTL",
+      numberOfShipments: 1,
       orderDate: new Date().toISOString().substring(0, 10),
       paymentDueDate: new Date(Date.now() + 30*24*60*60*1000).toISOString().substring(0, 10),
       truckOwnership: "rented",
@@ -181,6 +187,31 @@ export default function OrdersPage() {
   // Calculate grand total dynamically based on charges array
   const watchedCharges = form.watch("charges") || [];
   const grandTotal = watchedCharges.reduce((acc, curr) => acc + (parseFloat((curr as any).qty as string || "0") * parseFloat((curr as any).unitRate as string || "0")), 0);
+
+  const generateInvoiceMutation = useMutation({
+    mutationFn: (tripId: string) => apiRequest("POST", `/api/invoices`, { tripId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({ title: "Invoice generated successfully! Go to Trucking Invoices to view/collect payment." });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
+  const generateCombinedInvoiceMutation = useMutation({
+    mutationFn: ({ orderId, tripIds }: { orderId: string; tripIds?: string[] }) => 
+      apiRequest("POST", `/api/invoices`, { orderId, tripIds }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({ title: "Combined invoice generated successfully! Go to Trucking Invoices to view/collect payment." });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
 
   // Mutations
   const createOrderMutation = useMutation({
@@ -440,6 +471,7 @@ export default function OrdersPage() {
             cargoDetails: "",
             weight: "0",
             loadType: "FTL",
+            numberOfShipments: 1,
             orderDate: new Date().toISOString().substring(0, 10),
             paymentDueDate: new Date(Date.now() + 30*24*60*60*1000).toISOString().substring(0, 10),
             truckOwnership: "rented",
@@ -521,7 +553,7 @@ export default function OrdersPage() {
                               {order.cargoDetails}
                             </div>
                             <div className="text-muted-foreground">
-                              {order.weight ? `${parseFloat(String(order.weight)).toFixed(3)} tons` : "0.000 tons"} • {order.loadType}
+                              {order.weight ? `${parseFloat(String(order.weight)).toFixed(3)} tons` : "0.000 tons"} • {order.loadType} • {order.numberOfShipments || 1} shipment(s)
                             </div>
                             {order.documents && (order.documents as any).length > 0 && (
                               <DropdownMenu>
@@ -586,6 +618,7 @@ export default function OrdersPage() {
                                   cargoDetails: orderData.cargoDetails,
                                   weight: String(orderData.weight),
                                   loadType: orderData.loadType as any,
+                                  numberOfShipments: orderData.numberOfShipments !== undefined ? Number(orderData.numberOfShipments) : 1,
                                   orderDate: orderData.orderDate ? new Date(orderData.orderDate).toISOString().substring(0, 10) : "",
                                   paymentDueDate: orderData.paymentDueDate ? new Date(orderData.paymentDueDate).toISOString().substring(0, 10) : "",
                                   truckOwnership: orderData.truckOwnership || "rented",
@@ -744,7 +777,7 @@ export default function OrdersPage() {
                   )}
                 />
 
-                <div className="grid grid-cols-2 gap-4 col-span-2">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 col-span-2">
                   <FormField
                     control={form.control}
                     name="weight"
@@ -775,6 +808,19 @@ export default function OrdersPage() {
                             <SelectItem value="LTL">LTL (Less than Truck Load)</SelectItem>
                           </SelectContent>
                         </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="numberOfShipments"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Number of Shipments *</FormLabel>
+                        <FormControl>
+                          <Input type="number" min="1" placeholder="1" {...field} />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1344,6 +1390,92 @@ export default function OrdersPage() {
                   </Table>
                 </div>
               )}
+
+              {/* Shipments/Trips List */}
+              <div className="print:hidden border-t pt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Dispatched Shipments / Trips</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Progress: {tripsList.filter((t: any) => [...(t.orderIds || []), t.orderId].includes(viewOrder.id) && t.status === "completed").length} completed of {viewOrder.numberOfShipments || 1} total shipments
+                    </p>
+                  </div>
+                  {(() => {
+                    const orderTrips = tripsList.filter((t: any) => [...(t.orderIds || []), t.orderId].includes(viewOrder.id));
+                    const uninvoicedTrips = orderTrips.filter((t: any) => t.status === "completed" && t.podVerificationStatus === "verified" && !t.invoiceId);
+                    if (uninvoicedTrips.length > 0) {
+                      return (
+                        <Button
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-medium flex items-center gap-1.5"
+                          onClick={() => generateCombinedInvoiceMutation.mutate({ orderId: viewOrder.id })}
+                          disabled={generateCombinedInvoiceMutation.isPending}
+                        >
+                          {generateCombinedInvoiceMutation.isPending ? "Generating..." : `Invoice Completed (${uninvoicedTrips.length})`}
+                        </Button>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+
+                {(() => {
+                  const orderTrips = tripsList.filter((t: any) => [...(t.orderIds || []), t.orderId].includes(viewOrder.id));
+                  if (orderTrips.length === 0) {
+                    return <p className="text-xs text-slate-500 italic">No shipments dispatched yet.</p>;
+                  }
+                  return (
+                    <Table className="border rounded-md">
+                      <TableHeader className="bg-slate-50">
+                        <TableRow>
+                          <TableHead className="h-8 text-xs font-semibold">Trip Number</TableHead>
+                          <TableHead className="h-8 text-xs font-semibold">Driver</TableHead>
+                          <TableHead className="h-8 text-xs font-semibold">Status</TableHead>
+                          <TableHead className="h-8 text-xs font-semibold">POD Status</TableHead>
+                          <TableHead className="h-8 text-xs font-semibold text-right">Invoicing</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {orderTrips.map((trip: any) => (
+                          <TableRow key={trip.id} className="hover:bg-slate-50/50">
+                            <TableCell className="py-2 text-xs font-medium">{trip.tripNumber}</TableCell>
+                            <TableCell className="py-2 text-xs">{trip.driverName || "N/A"}</TableCell>
+                            <TableCell className="py-2 text-xs">
+                              <StatusBadge status={trip.status} />
+                            </TableCell>
+                            <TableCell className="py-2 text-xs">
+                              {trip.podVerificationStatus === 'verified' ? (
+                                <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                                  <Check className="h-3 w-3" /> Verified
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">Pending</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2 text-xs text-right">
+                              {trip.invoiceId ? (
+                                <span className="text-xs font-semibold text-emerald-600">Invoiced</span>
+                              ) : (trip.status === 'completed' && trip.podVerificationStatus === 'verified') ? (
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  className="h-6 text-[10px] py-0.5 px-2 border-blue-200 text-blue-600 hover:bg-blue-50"
+                                  onClick={() => generateInvoiceMutation.mutate(trip.id)}
+                                  disabled={generateInvoiceMutation.isPending}
+                                >
+                                  {generateInvoiceMutation.isPending ? "..." : "Invoice Single"}
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-slate-400">Pending Completion</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  );
+                })()}
+              </div>
 
               {/* Grand Total */}
               <div className="flex justify-end pt-4 border-t">

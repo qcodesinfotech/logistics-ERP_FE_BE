@@ -135,16 +135,14 @@ export default function DispatchPage() {
 
   const activeTrips = tripsList?.filter(t => t.status === "pending" || t.status === "in_transit") || [];
   const activeAssignedOrderIds = activeTrips.flatMap((t: any) => [...(t.orderIds || []), t.orderId].filter(Boolean));
-  const allAssignedOrderIds = tripsList?.flatMap((t: any) => [...(t.orderIds || []), t.orderId].filter(Boolean)) || [];
 
-  // Filter orders that are not assigned to active trips
-  // and have status as 'pending' or 'confirmed'
+  // Filter orders that still have shipments to be dispatched
+  // and have status as 'pending', 'confirmed', or 'incomplete'
   const unassignedOrders = ordersList?.filter(o => {
-    if (o.status === "pending" || o.status === "confirmed") {
-      return !allAssignedOrderIds.includes(o.id);
-    }
-    if (o.status === "incomplete") {
-      return !activeAssignedOrderIds.includes(o.id);
+    if (o.status === "pending" || o.status === "confirmed" || o.status === "incomplete") {
+      const orderTripsCount = tripsList?.filter(t => [...(t.orderIds || []), t.orderId].includes(o.id)).length || 0;
+      const totalShipments = o.numberOfShipments || 1;
+      return orderTripsCount < totalShipments;
     }
     return false;
   }) || [];
@@ -418,6 +416,8 @@ export default function DispatchPage() {
                     const pickup = locationsList?.find((l: Location) => l.id === order.pickupLocationId);
                     const delivery = locationsList?.find((l: Location) => l.id === order.deliveryLocationId);
                     const isSelected = selectedOrderIds.includes(order.id);
+                    
+                    const orderTripsCount = tripsList?.filter(t => [...(t.orderIds || []), t.orderId].includes(order.id)).length || 0;
 
                     return (
                       <div 
@@ -436,7 +436,12 @@ export default function DispatchPage() {
                         <div className="space-y-1 flex-1 min-w-0">
                           <div className="flex justify-between items-center">
                             <span className="font-semibold text-xs text-foreground">{order.orderNumber}</span>
-                            <StatusBadge status={order.status} />
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full font-medium">
+                                Shipment {orderTripsCount + 1}/{order.numberOfShipments || 1}
+                              </span>
+                              <StatusBadge status={order.status} />
+                            </div>
                           </div>
                           <p className="text-xs text-muted-foreground truncate font-medium">{client?.name}</p>
                           <p className="text-[11px] text-muted-foreground truncate">{order.cargoDetails}</p>

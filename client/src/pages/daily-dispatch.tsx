@@ -4723,7 +4723,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                             e.stopPropagation();
                                             const firstItem = outlet.items[0];
                                             if (firstItem) {
-                                              const url = `/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}&includeAttachments=${includeAttachments}`;
+                                              const url = `/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${storageTypeFilter}&includeAttachments=${includeAttachments}`;
                                               window.open(url, "_blank");
                                             }
                                           }}
@@ -4738,7 +4738,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                             e.stopPropagation();
                                             const firstItem = outlet.items[0];
                                             if (firstItem) {
-                                              const shareUrl = `${window.location.origin}/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${firstItem.storageType}&includeAttachments=${includeAttachments}`;
+                                              const shareUrl = `${window.location.origin}/api/reports/delivery-pod-pdf?sheetId=${firstItem.sheetId}&outletId=${firstItem.outletId}&storageType=${storageTypeFilter}&includeAttachments=${includeAttachments}`;
                                               navigator.clipboard.writeText(shareUrl);
                                               toast({
                                                 title: "Link Copied!",

@@ -1864,6 +1864,7 @@ export const orders = pgTable("orders", {
   temperatureRequirement: text("temperature_requirement"),
   specialInstructions: text("special_instructions"),
   customerReference: text("customer_reference"),
+  numberOfShipments: integer("number_of_shipments").default(1),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -1962,6 +1963,7 @@ export const trips = pgTable("trips", {
   totalTripCost: decimal("total_trip_cost", { precision: 12, scale: 3 }).default("0.000"),
   grossProfit: decimal("gross_profit", { precision: 12, scale: 3 }).default("0.000"),
   profitMargin: decimal("profit_margin", { precision: 5, scale: 2 }).default("0.00"),
+  invoiceId: varchar("invoice_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

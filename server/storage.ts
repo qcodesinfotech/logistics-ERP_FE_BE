@@ -7425,12 +7425,27 @@ export class DatabaseStorage implements IStorage {
       .where(eq(trips.id, tripId))
       .returning();
 
-    // Update the associated orders to completed
+    // Update the associated orders status based on shipment count
     const tripOrdersList = await db.select().from(tripOrders).where(eq(tripOrders.tripId, tripId));
     for (const to of tripOrdersList) {
-      await db.update(orders)
-        .set({ status: "completed" })
-        .where(eq(orders.id, to.orderId));
+      const order = await this.getOrder(to.orderId);
+      if (order) {
+        const allTripOrders = await db.select().from(tripOrders).where(eq(tripOrders.orderId, order.id));
+        const tripIds = allTripOrders.map(x => x.tripId);
+        
+        let completedCount = 0;
+        if (tripIds.length > 0) {
+          const associatedTrips = await db.select().from(trips).where(inArray(trips.id, tripIds));
+          completedCount = associatedTrips.filter(t => t.id === tripId || t.status === "completed").length;
+        }
+
+        const totalShipments = order.numberOfShipments || 1;
+        const targetStatus = completedCount >= totalShipments ? "completed" : "incomplete";
+
+        await db.update(orders)
+          .set({ status: targetStatus })
+          .where(eq(orders.id, order.id));
+      }
     }
 
     return trip;

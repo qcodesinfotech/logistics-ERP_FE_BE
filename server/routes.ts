@@ -8503,7 +8503,11 @@ export async function registerRoutes(
       const driverId = req.query.driverId as string | undefined;
       const status = req.query.status as string | undefined;
       const list = await storage.getTrips(driverId, status);
-      res.json(list);
+      const mappedList = list.map((t: any) => ({
+        ...t,
+        invoiceGenerated: !!t.invoiceId
+      }));
+      res.json(mappedList);
     } catch (error) {
       console.error("Get trips error:", error);
       res.status(500).json({ error: "Failed to fetch trips" });
@@ -8514,7 +8518,10 @@ export async function registerRoutes(
     try {
       const trip = await storage.getTrip(req.params.id);
       if (!trip) return res.status(404).json({ error: "Trip not found" });
-      res.json(trip);
+      res.json({
+        ...trip,
+        invoiceGenerated: !!trip.invoiceId
+      });
     } catch (error) {
       console.error("Get trip error:", error);
       res.status(500).json({ error: "Failed to fetch trip" });
@@ -8593,13 +8600,27 @@ export async function registerRoutes(
       if (req.body.status === "completed") {
         const tripOrdersList = await storage.getTripOrders(trip.id);
         for (const order of tripOrdersList) {
-          if (order.status !== "completed") {
-            await storage.updateOrder(order.id, { status: "completed" });
+          const allTripOrders = await db.select().from(schema.tripOrders).where(eq(schema.tripOrders.orderId, order.id));
+          const tripIds = allTripOrders.map(x => x.tripId);
+          
+          let completedCount = 0;
+          if (tripIds.length > 0) {
+            const associatedTrips = await db.select().from(schema.trips).where(inArray(schema.trips.id, tripIds));
+            completedCount = associatedTrips.filter(t => t.id === trip.id || t.status === "completed").length;
+          }
+
+          const totalShipments = order.numberOfShipments || 1;
+          const targetStatus = completedCount >= totalShipments ? "completed" : "incomplete";
+          if (order.status !== targetStatus) {
+            await storage.updateOrder(order.id, { status: targetStatus });
           }
         }
       }
 
-      res.json(trip);
+      res.json({
+        ...trip,
+        invoiceGenerated: !!trip.invoiceId
+      });
     } catch (error) {
       console.error("Update trip error:", error);
       res.status(500).json({ error: "Failed to update trip" });
@@ -8805,52 +8826,126 @@ export async function registerRoutes(
 
   app.post("/api/invoices", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { tripId } = req.body;
-      if (!tripId) return res.status(400).json({ error: "tripId is required" });
+      const { tripId, orderId, tripIds } = req.body;
+      
+      // Option A: Single Trip Invoice
+      if (tripId) {
+        const trip = await storage.getTrip(tripId);
+        if (!trip) return res.status(404).json({ error: "Trip not found" });
+        if (trip.status !== "completed" || trip.podVerificationStatus !== "verified") {
+          return res.status(400).json({ error: "Invoice can only be generated after Trip is Completed and POD is Verified" });
+        }
+        if (trip.invoiceId) {
+          return res.status(400).json({ error: "Invoice has already been generated for this trip" });
+        }
 
-      const trip = await storage.getTrip(tripId);
-      if (!trip) return res.status(404).json({ error: "Trip not found" });
-      if (trip.status !== "completed" || trip.podVerificationStatus !== "verified") {
-        return res.status(400).json({ error: "Invoice can only be generated after Trip is Completed and POD is Verified" });
+        const tripOrdersList = await storage.getTripOrders(tripId);
+        const order = tripOrdersList[0];
+        if (!order) return res.status(404).json({ error: "Order details not found for this trip" });
+
+        const invoiceCount = (await storage.getInvoices()).length;
+        const invoiceNumber = `INV-${(invoiceCount + 1).toString().padStart(6, "0")}`;
+
+        let sellingRate = parseFloat(trip.sellingRate || "0");
+        if (sellingRate === 0) {
+          sellingRate = parseFloat(order.grandTotal || "0");
+        }
+        const additionalCharges = parseFloat(trip.additionalCharges || "0");
+        const totalAmount = sellingRate + additionalCharges;
+
+        const invoice = await storage.createInvoice({
+          invoiceNumber,
+          type: "delivery",
+          customerId: order.customerId,
+          orderId: order.id,
+          tripId: trip.id,
+          subtotal: sellingRate.toFixed(3),
+          vatAmount: "0.000",
+          discount: "0.000",
+          total: totalAmount.toFixed(3),
+          status: "draft",
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          origin: trip.route ? trip.route.split(" → ")[0] : "Origin",
+          destination: trip.route ? trip.route.split(" → ").pop() : "Destination",
+          serviceDetails: `Trucking cargo hauling. Job Ref: ${order.orderNumber}. Trip Ref: ${trip.tripNumber}`,
+          quantity: "1.000",
+          rate: sellingRate.toFixed(3),
+          additionalCharges: additionalCharges.toFixed(3),
+          paymentTerms: "Net 30",
+          outstandingAmount: totalAmount.toFixed(3)
+        });
+
+        await storage.updateTrip(trip.id, { invoiceId: invoice.id });
+        return res.status(201).json(invoice);
+      }
+      
+      // Option B: Combined/Order Invoices
+      if (orderId) {
+        const order = await storage.getOrder(orderId);
+        if (!order) return res.status(404).json({ error: "Order not found" });
+
+        // Find all trips for this order
+        const tripsList = await storage.getTrips();
+        const allTripOrders = await db.select().from(schema.tripOrders).where(eq(schema.tripOrders.orderId, order.id));
+        const tripIdsForOrder = allTripOrders.map(to => to.tripId);
+        
+        let orderTrips = tripsList.filter(t => tripIdsForOrder.includes(t.id) || t.orderId === order.id);
+
+        if (tripIds && Array.isArray(tripIds)) {
+          orderTrips = orderTrips.filter(t => tripIds.includes(t.id));
+        }
+
+        const eligibleTrips = orderTrips.filter(t => t.status === "completed" && t.podVerificationStatus === "verified" && !t.invoiceId);
+        if (eligibleTrips.length === 0) {
+          return res.status(400).json({ error: "No completed, verified, and uninvoiced trips found for this order" });
+        }
+
+        let totalSellingRate = 0;
+        let totalAdditionalCharges = 0;
+        for (const trip of eligibleTrips) {
+          let rate = parseFloat(trip.sellingRate || "0");
+          if (rate === 0) {
+            rate = parseFloat(order.grandTotal || "0");
+          }
+          totalSellingRate += rate;
+          totalAdditionalCharges += parseFloat(trip.additionalCharges || "0");
+        }
+        const totalAmount = totalSellingRate + totalAdditionalCharges;
+
+        const invoiceCount = (await storage.getInvoices()).length;
+        const invoiceNumber = `INV-${(invoiceCount + 1).toString().padStart(6, "0")}`;
+
+        const invoice = await storage.createInvoice({
+          invoiceNumber,
+          type: "delivery",
+          customerId: order.customerId,
+          orderId: order.id,
+          tripId: null, // Combined invoice covers multiple trips
+          subtotal: totalSellingRate.toFixed(3),
+          vatAmount: "0.000",
+          discount: "0.000",
+          total: totalAmount.toFixed(3),
+          status: "draft",
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          origin: eligibleTrips[0]?.route ? eligibleTrips[0].route.split(" → ")[0] : "Multiple Origins",
+          destination: eligibleTrips[0]?.route ? eligibleTrips[0].route.split(" → ").pop() : "Multiple Destinations",
+          serviceDetails: `Trucking cargo hauling. Combined Invoice for Job Ref: ${order.orderNumber}. Shipments: ${eligibleTrips.map(t => t.tripNumber).join(", ")}`,
+          quantity: eligibleTrips.length.toFixed(3),
+          rate: (totalSellingRate / eligibleTrips.length).toFixed(3),
+          additionalCharges: totalAdditionalCharges.toFixed(3),
+          paymentTerms: "Net 30",
+          outstandingAmount: totalAmount.toFixed(3)
+        });
+
+        // Link all trips to the created invoice
+        for (const trip of eligibleTrips) {
+          await storage.updateTrip(trip.id, { invoiceId: invoice.id });
+        }
+
+        return res.status(201).json(invoice);
       }
 
-      const tripOrdersList = await storage.getTripOrders(tripId);
-      const order = tripOrdersList[0];
-      if (!order) return res.status(404).json({ error: "Order details not found for this trip" });
-
-      const invoiceCount = (await storage.getInvoices()).length;
-      const invoiceNumber = `INV-${(invoiceCount + 1).toString().padStart(6, "0")}`;
-
-      let sellingRate = parseFloat(trip.sellingRate || "0");
-      if (sellingRate === 0) {
-        sellingRate = parseFloat(order.grandTotal || "0");
-      }
-      const additionalCharges = parseFloat(trip.additionalCharges || "0");
-      const totalAmount = sellingRate + additionalCharges;
-
-      const invoice = await storage.createInvoice({
-        invoiceNumber,
-        type: "delivery",
-        customerId: order.customerId,
-        orderId: order.id,
-        tripId: trip.id,
-        subtotal: sellingRate.toFixed(3),
-        vatAmount: "0.000",
-        discount: "0.000",
-        total: totalAmount.toFixed(3),
-        status: "draft",
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        origin: trip.route ? trip.route.split(" → ")[0] : "Origin",
-        destination: trip.route ? trip.route.split(" → ").pop() : "Destination",
-        serviceDetails: `Trucking cargo hauling. Job Ref: ${order.orderNumber}`,
-        quantity: "1.000",
-        rate: sellingRate.toFixed(3),
-        additionalCharges: additionalCharges.toFixed(3),
-        paymentTerms: "Net 30",
-        outstandingAmount: totalAmount.toFixed(3)
-      });
-
-      res.status(201).json(invoice);
+      return res.status(400).json({ error: "tripId or orderId is required" });
     } catch (error: any) {
       console.error("Create invoice error:", error);
       res.status(500).json({ error: "Failed to generate invoice: " + error.message });
@@ -10194,9 +10289,21 @@ export async function registerRoutes(
 
       const firstRow = deliveriesQuery[0];
       
+      // Fetch all completed deliveries matching this outlet and sheet (regardless of storageType) to get ALL attachments
+      const allDeliveriesQuery = await db.select({
+        podUrl: schema.dispatchDeliveries.podUrl,
+        potUrl: schema.dispatchDeliveries.potUrl,
+      })
+      .from(schema.dispatchDeliveries)
+      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+      .where(and(
+        eq(schema.dispatchItems.sheetId, sheetId),
+        eq(schema.dispatchItems.outletId, outletId)
+      ));
+
       const podUrlsSet = new Set<string>();
       const potUrlsSet = new Set<string>();
-      for (const row of deliveriesQuery) {
+      for (const row of allDeliveriesQuery) {
         if (row.podUrl) {
           row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach(url => podUrlsSet.add(url));
         }
