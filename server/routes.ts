@@ -10184,7 +10184,19 @@ export async function registerRoutes(
       }
 
       const firstRow = deliveriesQuery[0];
-      const podUrls = firstRow.podUrl ? firstRow.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
+      
+      const podUrlsSet = new Set<string>();
+      const potUrlsSet = new Set<string>();
+      for (const row of deliveriesQuery) {
+        if (row.podUrl) {
+          row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach(url => podUrlsSet.add(url));
+        }
+        if (row.potUrl) {
+          row.potUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach(url => potUrlsSet.add(url));
+        }
+      }
+      const podUrls = Array.from(podUrlsSet);
+      const potUrls = Array.from(potUrlsSet);
 
       const doc = new PDFDocument({ margin: 40, size: "A4" });
 
@@ -10281,8 +10293,6 @@ export async function registerRoutes(
         doc.moveDown(1.5);
       }
 
-      const potUrls = firstRow.potUrl ? firstRow.potUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
-      
       const allAttachments = [
         ...podUrls.map(url => ({ type: "POD", url })),
         ...potUrls.map(url => ({ type: "POT", url }))
