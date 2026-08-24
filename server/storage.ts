@@ -7193,10 +7193,19 @@ export class DatabaseStorage implements IStorage {
     const conditions = [];
     if (driverId) conditions.push(eq(trips.driverId, driverId));
     if (status) conditions.push(eq(trips.status, status));
+    
+    let resultTrips = [];
     if (conditions.length > 0) {
-      return db.select().from(trips).where(and(...conditions));
+      resultTrips = await db.select().from(trips).where(and(...conditions));
+    } else {
+      resultTrips = await db.select().from(trips);
     }
-    return db.select().from(trips);
+    
+    const allTripOrders = await db.select().from(tripOrders);
+    return resultTrips.map(trip => {
+      const orderIds = allTripOrders.filter(to => to.tripId === trip.id).map(to => to.orderId);
+      return { ...trip, orderIds } as any;
+    });
   }
 
   async getTrip(id: string): Promise<Trip | undefined> {
@@ -7415,6 +7424,15 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(trips.id, tripId))
       .returning();
+
+    // Update the associated orders to completed
+    const tripOrdersList = await db.select().from(tripOrders).where(eq(tripOrders.tripId, tripId));
+    for (const to of tripOrdersList) {
+      await db.update(orders)
+        .set({ status: "completed" })
+        .where(eq(orders.id, to.orderId));
+    }
+
     return trip;
   }
 
@@ -7841,6 +7859,14 @@ export class DatabaseStorage implements IStorage {
     const list = await query;
     const driversList = await this.getDrivers();
     const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+    
+    // Also include all users to map admin/supervisor IDs properly
+    const allUsersList = await db.select({ id: users.id, name: users.name, username: users.username }).from(users);
+    for (const u of allUsersList) {
+      if (!driverMap.has(u.id)) {
+        driverMap.set(u.id, u.name || u.username);
+      }
+    }
 
     return list.map(item => ({
       ...item,
@@ -7907,6 +7933,14 @@ export class DatabaseStorage implements IStorage {
     const list = await query;
     const driversList = await this.getDrivers();
     const driverMap = new Map(driversList.map(d => [d.id, d.name]));
+
+    // Also include all users to map admin/supervisor IDs properly
+    const allUsersList = await db.select({ id: users.id, name: users.name, username: users.username }).from(users);
+    for (const u of allUsersList) {
+      if (!driverMap.has(u.id)) {
+        driverMap.set(u.id, u.name || u.username);
+      }
+    }
 
     // Fetch overrides and assignments for uniqueSheetIds to resolve actual zones dynamically
     const uniqueSheetIds = Array.from(new Set(list.map(item => item.sheetId).filter(Boolean))) as string[];

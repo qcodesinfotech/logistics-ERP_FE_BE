@@ -498,7 +498,7 @@ export default function OrdersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {ordersList.map((order) => {
+                    {[...(ordersList || [])].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()).map((order) => {
                       const client = clientsList?.find(c => c.id === order.customerId);
                       const pickup = locationsList?.find(l => l.id === order.pickupLocationId);
                       const delivery = locationsList?.find(l => l.id === order.deliveryLocationId);
@@ -1355,7 +1355,7 @@ export default function OrdersPage() {
                     </div>
                   )}
                   <div className="flex justify-between font-bold text-lg">
-                    <span>Grand Total:</span>
+                    <span>Confirmed Rate:</span>
                     <span>
                       {viewOrder.grandTotal ? parseFloat(String(viewOrder.grandTotal)).toFixed(3) : "0.000"}
                     </span>

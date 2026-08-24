@@ -4398,7 +4398,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isAdmin = user?.role?.toLowerCase().includes("admin");
   const isSupervisor = true; // TODO: link to user role
 
   const revertMutation = useMutation({
@@ -4621,8 +4621,8 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
               <p className="text-sm">Try adjusting your filters or date range.</p>
             </div>
           ) : (
-            <div className="bg-white border-t overflow-hidden text-sm rounded-b-xl">
-              <table className="w-full text-left border-collapse">
+            <div className="bg-white border-t overflow-x-auto text-sm rounded-b-xl">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
                 <thead className="bg-slate-100/80 border-b">
                   <tr>
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r w-80">Route / Outlet</th>

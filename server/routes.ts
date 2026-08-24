@@ -8360,9 +8360,9 @@ export async function registerRoutes(
     try {
       const rfq = await storage.createRfq(req.body);
       res.status(201).json(rfq);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Create rfq error:", error);
-      res.status(500).json({ error: "Failed to create RFQ" });
+      res.status(500).json({ error: "Failed to create RFQ", details: error?.message || error });
     }
   });
 
@@ -8588,6 +8588,15 @@ export async function registerRoutes(
 
       if (req.body.status === "completed" || req.body.status === "cancelled") {
         await storage.updateVehicle(trip.vehicleId, { status: "available" });
+      }
+
+      if (req.body.status === "completed") {
+        const tripOrdersList = await storage.getTripOrders(trip.id);
+        for (const order of tripOrdersList) {
+          if (order.status !== "completed") {
+            await storage.updateOrder(order.id, { status: "completed" });
+          }
+        }
       }
 
       res.json(trip);
