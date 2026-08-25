@@ -306,7 +306,7 @@ export async function ensureDriverTablesSchema() {
       WHERE invoices.order_id = orders.id AND (invoices.total = '0.000' OR invoices.total IS NULL);
 
       -- Backfill existing vendors (clients where is_vendor = true) into suppliers table
-      INSERT INTO suppliers (id, shop_id, branch_id, company_id, name, company_name, email, phone, vat_number, address, opening_balance, current_balance, status, created_at)
+      INSERT INTO suppliers (id, shop_id, branch_id, company_id, name, company_name, email, phone, vat_number, address, opening_balance, current_balance, status, create_date)
       SELECT 
         id, 
         shop_id, 

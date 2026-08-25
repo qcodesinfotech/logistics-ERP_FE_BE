@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
 import { 
   BarChart3, Plus, Truck, User, ArrowRight, CheckCircle2, 
-  AlertTriangle, Play, Check, Eye, FileUp, XCircle, Clock, RefreshCw, Trash2
+  AlertTriangle, Play, Check, Eye, FileUp, XCircle, Clock, RefreshCw, Trash2,
+  Calculator, Banknote
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +38,7 @@ interface MinimalEmployee {
 }
 
 export default function DispatchPage() {
+  const [location, setLocation] = useLocation();
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isPODDialogOpen, setIsPODDialogOpen] = useState(false);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
@@ -146,6 +149,42 @@ export default function DispatchPage() {
     }
     return false;
   }) || [];
+
+  const formatCurrency = (val: number) => `${val.toFixed(3)} BD`;
+  const totalRevenueVal = tripsList?.reduce((sum, t) => sum + parseFloat(t.totalRevenue || "0"), 0) || 0;
+  const totalCostVal = tripsList?.reduce((sum, t) => sum + parseFloat(t.totalTripCost || "0"), 0) || 0;
+  const grossProfitVal = totalRevenueVal - totalCostVal;
+  const marginPctVal = totalRevenueVal > 0 ? (grossProfitVal / totalRevenueVal) * 100 : 0;
+  const inTransitTripsCount = tripsList?.filter(t => t.status === "in_transit").length || 0;
+  const pendingCostingCount = tripsList?.filter(t => t.status === "completed" && t.driverSettlementStatus === "pending").length || 0;
+  const totalTripsCount = tripsList?.length || 0;
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get("orderId");
+    if (orderId && unassignedOrders.length > 0) {
+      const orderExists = unassignedOrders.some(o => o.id === orderId);
+      if (orderExists) {
+        setSelectedOrderIds([orderId]);
+        
+        // Auto-populate route and open trip dialog
+        const order = unassignedOrders.find(o => o.id === orderId);
+        if (order) {
+          let summary = "";
+          if (Array.isArray(order.routeLegs) && order.routeLegs.length > 0) {
+            summary = order.routeLegs.map((l: any) => `${l.originCity || ""} → ${l.destinationCity || ""}`).join(", ");
+          } else {
+            summary = `Route for ${order.orderNumber}`;
+          }
+          setTripRoute(summary);
+          setIsAssignDialogOpen(true);
+        }
+        
+        // Clean URL parameter so it doesn't reopen on manual page refreshes
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  }, [unassignedOrders, tripsList]);
 
   const activeVehicleIds = tripsList?.filter(t => t.status === "pending" || t.status === "in_transit").map(t => t.vehicleId) || [];
   const availableVehicles = vehiclesList?.filter(v => v.status === "available" && !activeVehicleIds.includes(v.id)) || [];
@@ -278,9 +317,22 @@ export default function DispatchPage() {
 
   const verifyPODMutation = useMutation({
     mutationFn: (tripId: string) => apiRequest("POST", `/api/trips/${tripId}/verify-pod`),
-    onSuccess: () => {
+    onSuccess: (data, tripId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
-      toast({ title: "POD verified successfully! Status marked as Completed." });
+      toast({ 
+        title: "POD verified successfully!", 
+        description: "Trip status is Completed. You can now generate the customer invoice.",
+        action: (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-xs font-semibold border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+            onClick={() => generateInvoiceMutation.mutate(tripId)}
+          >
+            Generate Invoice
+          </Button>
+        )
+      });
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -305,7 +357,21 @@ export default function DispatchPage() {
     mutationFn: (tripId: string) => apiRequest("POST", `/api/invoices`, { tripId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-      toast({ title: "Invoice generated successfully! Go to Trucking Invoices to view/collect payment." });
+      queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
+      toast({ 
+        title: "Invoice generated successfully!", 
+        description: "Review invoice details and record payment under Invoices.",
+        action: (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="h-8 text-xs font-semibold border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+            onClick={() => setLocation("/logistics/invoices")}
+          >
+            View Invoices
+          </Button>
+        )
+      });
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -387,6 +453,101 @@ export default function DispatchPage() {
           <Play className="h-4 w-4" /> Create Trip ({selectedOrderIds.length} orders)
         </Button>
       </PageHeader>
+
+      {/* Workflow Navigation Tracker */}
+      <div className="flex items-center gap-2 border bg-card/40 p-3 rounded-lg shadow-sm w-fit bg-slate-50/50">
+        <Link href="/logistics/rfq">
+          <Button 
+            variant="outline"
+            className="h-8 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border bg-slate-100 text-slate-600 text-[10px] mr-2 font-bold">1</span>
+            RFQ & Enquiry
+          </Button>
+        </Link>
+        <div className="h-[2px] w-6 bg-slate-200" />
+        <Link href="/logistics/orders">
+          <Button 
+            variant="outline"
+            className="h-8 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border bg-slate-100 text-slate-600 text-[10px] mr-2 font-bold">2</span>
+            Order Book
+          </Button>
+        </Link>
+        <div className="h-[2px] w-6 bg-slate-200" />
+        <Link href="/logistics/dispatch">
+          <Button 
+            variant="default"
+            className="h-8 px-3 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-indigo-600 text-[10px] mr-2 font-bold shadow-sm">3</span>
+            Trip Dispatch
+          </Button>
+        </Link>
+      </div>
+
+      {/* Financial Margin & Operating Ribbon */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="shadow-sm border-muted bg-card/60 backdrop-blur-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Revenue</CardTitle>
+            <Banknote className="h-4 w-4 text-emerald-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg font-bold text-emerald-600">
+              {formatCurrency(totalRevenueVal)}
+            </div>
+            <p className="text-[10px] text-muted-foreground">Across {totalTripsCount} total registered trips</p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm border-muted bg-card/60 backdrop-blur-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fleet Operating Cost</CardTitle>
+            <Truck className="h-4 w-4 text-rose-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg font-bold text-rose-600">
+              {formatCurrency(totalCostVal)}
+            </div>
+            <p className="text-[10px] text-muted-foreground">Drivers, fuel, tolls & outsourced costs</p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm border-muted bg-card/60 backdrop-blur-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Operating Net Profit</CardTitle>
+            <Calculator className="h-4 w-4 text-indigo-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-baseline gap-2">
+              <span className={`text-lg font-bold ${grossProfitVal >= 0 ? "text-indigo-600" : "text-rose-600"}`}>
+                {formatCurrency(grossProfitVal)}
+              </span>
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${grossProfitVal >= 0 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                {marginPctVal.toFixed(1)}% Margin
+              </span>
+            </div>
+            <p className="text-[10px] text-muted-foreground">Average operating gross profit margin</p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm border-muted bg-card/60 backdrop-blur-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active Operations</CardTitle>
+            <Clock className="h-4 w-4 text-amber-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg font-bold text-amber-600">
+              {inTransitTripsCount} In Transit
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {pendingCostingCount} completed trips awaiting settlement
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         

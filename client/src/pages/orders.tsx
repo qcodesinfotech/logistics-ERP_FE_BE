@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { ClipboardList, Plus, FileText, Upload, Trash2, MapPin, RefreshCw, Layers, Eye, Printer } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { ClipboardList, Plus, FileText, Upload, Trash2, MapPin, RefreshCw, Layers, Eye, Printer, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -100,6 +101,7 @@ const orderFormSchema = z.object({
 type OrderFormData = z.input<typeof orderFormSchema>;
 
 export default function OrdersPage() {
+  const [, setLocation] = useLocation();
   const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -498,6 +500,39 @@ export default function OrdersPage() {
         </Button>
       </PageHeader>
 
+      {/* Workflow Navigation Tracker */}
+      <div className="flex items-center gap-2 border bg-card/40 p-3 rounded-lg shadow-sm w-fit bg-slate-50/50">
+        <Link href="/logistics/rfq">
+          <Button 
+            variant="outline"
+            className="h-8 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border bg-slate-100 text-slate-600 text-[10px] mr-2 font-bold">1</span>
+            RFQ & Enquiry
+          </Button>
+        </Link>
+        <div className="h-[2px] w-6 bg-slate-200" />
+        <Link href="/logistics/orders">
+          <Button 
+            variant="default"
+            className="h-8 px-3 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-indigo-600 text-[10px] mr-2 font-bold shadow-sm">2</span>
+            Order Book
+          </Button>
+        </Link>
+        <div className="h-[2px] w-6 bg-slate-200" />
+        <Link href="/logistics/dispatch">
+          <Button 
+            variant="outline"
+            className="h-8 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border bg-slate-100 text-slate-600 text-[10px] mr-2 font-bold">3</span>
+            Trip Dispatch
+          </Button>
+        </Link>
+      </div>
+
       <div className="grid grid-cols-1 gap-6">
         <div className="col-span-1">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
@@ -591,6 +626,17 @@ export default function OrdersPage() {
                             <StatusBadge status={order.status} />
                           </TableCell>
                           <TableCell className="text-right space-x-1">
+                            {order.status === "pending" && (
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-8 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium"
+                                onClick={() => setLocation(`/logistics/dispatch?orderId=${order.id}`)}
+                              >
+                                <ArrowRight className="h-3 w-3 mr-1" />
+                                Dispatch
+                              </Button>
+                            )}
                             <Button variant="ghost" size="icon" onClick={() => setViewOrder(order)}>
                               <Eye className="h-4 w-4 text-blue-500" />
                             </Button>
