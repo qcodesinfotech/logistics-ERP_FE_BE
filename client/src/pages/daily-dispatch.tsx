@@ -1155,13 +1155,30 @@ export default function DailyDispatchPage() {
   const [boardClientId, setBoardClientId] = useState<string>(() => {
     return localStorage.getItem("dispatchBoardClientId") || "all";
   });
+  const [boardBrandId, setBoardBrandId] = useState<string>(() => {
+    return localStorage.getItem("dispatchBoardBrandId") || "all";
+  });
   const [uploadClientId, setUploadClientId] = useState<string>("");
 
   useEffect(() => {
     localStorage.setItem("dispatchBoardClientId", boardClientId);
+    setBoardBrandId("all");
+    localStorage.setItem("dispatchBoardBrandId", "all");
   }, [boardClientId]);
 
+  useEffect(() => {
+    localStorage.setItem("dispatchBoardBrandId", boardBrandId);
+  }, [boardBrandId]);
+
   const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
+  const { data: brandList = [] } = useQuery<any[]>({ queryKey: ["/api/brands"] });
+
+  const filteredBrands = useMemo(() => {
+    if (boardClientId === "all") {
+      return brandList;
+    }
+    return brandList.filter((b: any) => b.clientId === boardClientId);
+  }, [brandList, boardClientId]);
 
 
 
@@ -1215,6 +1232,7 @@ export default function DailyDispatchPage() {
   });
 
   const [summarySearchQuery, setSummarySearchQuery] = useState("");
+  const [pivotSearchQuery, setPivotSearchQuery] = useState("");
 
   const [boardRouteFilter, setBoardRouteFilter] = useState("all");
   const [boardOutletFilter, setBoardOutletFilter] = useState("all");
@@ -1255,14 +1273,6 @@ export default function DailyDispatchPage() {
   const { data: drivers = [] } = useQuery<Driver[]>({ queryKey: ["/api/drivers"] });
   const { data: driverZones = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/driver-zones"] });
   const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
-
-  const allOutletOptions = useMemo(() => {
-    return (outlets || []).map((o: any) => ({
-      value: o.code || "",
-      label: `${o.name || "Unnamed"} (${o.code || "No Code"})`
-    }));
-  }, [outlets]);
-
   // Sync boardSheetId with sheets matching the selectedDate and boardClientId automatically
   useEffect(() => {
     if (!sheetsLoading) {
@@ -1285,6 +1295,55 @@ export default function DailyDispatchPage() {
     queryKey: ["/api/vehicles"],
   });
 
+  const brandFilteredOutletsMap = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const o of outlets || []) {
+      map.set(o.id, o);
+      if (o.code) {
+        map.set(o.code.trim().toLowerCase().replace(/^0+/, ""), o);
+      }
+    }
+    return map;
+  }, [outlets]);
+
+  const allOutletOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }>();
+
+    // 1. Add outlets from the active boardData sheet
+    if (boardData && boardData.zones) {
+      boardData.zones.forEach(z => {
+        z.outlets.forEach((o: any) => {
+          const code = o.outletCode;
+          if (code) {
+            map.set(code.trim().toLowerCase(), {
+              value: code,
+              label: `${o.outletName || "Unnamed"} (${code})`
+            });
+          }
+        });
+      });
+    }
+
+    // 2. Add outlets from global list, filtered by client/brand context
+    const filteredGlobalOutlets = (outlets || []).filter((o: any) => {
+      if (boardClientId !== "all" && o.clientId !== boardClientId) return false;
+      if (boardBrandId !== "all" && o.brandId !== boardBrandId) return false;
+      return true;
+    });
+
+    filteredGlobalOutlets.forEach((o: any) => {
+      const code = o.code;
+      if (code) {
+        map.set(code.trim().toLowerCase(), {
+          value: code,
+          label: `${o.name || "Unnamed"} (${code})`
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [outlets, boardData, boardClientId, boardBrandId]);
+
   const activeZones = useMemo(() => {
     if (!boardData || !boardData.zones) return zones || [];
     const activeIds = new Set(boardData.zones.map((z: any) => z.zoneId));
@@ -1306,12 +1365,25 @@ export default function DailyDispatchPage() {
     boardData.zones.forEach(z => {
       z.trucks?.forEach(t => {
         if (t.vehicle?.id) {
+          if (boardBrandId !== "all") {
+            const hasBrandOutlet = z.outlets.some((o: any) => {
+              const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+              return fullOutlet?.brandId === boardBrandId && o.truckAssignmentId === t.id;
+            });
+            if (!hasBrandOutlet) return;
+          }
           assignedTrucksSet.add(t.vehicle.id);
         }
       });
 
       z.outlets.forEach(o => {
         const outletKey = o.outletId || o.outletCode;
+        
+        const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+        if (boardBrandId !== "all" && fullOutlet?.brandId !== boardBrandId) {
+          return;
+        }
+
         totalOutletsSet.add(outletKey);
 
         let hasPending = false;
@@ -1357,7 +1429,7 @@ export default function DailyDispatchPage() {
       pendingQty,
       assignedTrucksCount: assignedTrucksSet.size
     };
-  }, [boardData]);
+  }, [boardData, brandFilteredOutletsMap, boardBrandId]);
 
   const outletOptions = useMemo(() => {
     if (!boardData) return [{ value: "all", label: "All Outlets" }];
@@ -1365,6 +1437,10 @@ export default function DailyDispatchPage() {
     boardData.zones.forEach(z => z.outlets.forEach(o => {
       const id = o.outletId || o.outletCode;
       if (id) {
+        const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+        if (boardBrandId !== "all" && fullOutlet?.brandId !== boardBrandId) {
+          return;
+        }
         outlets.set(id, `${o.outletName || "Unnamed"} (${o.outletCode || "No Code"})`);
       }
     }));
@@ -1372,22 +1448,40 @@ export default function DailyDispatchPage() {
       { value: "all", label: "All Outlets" },
       ...Array.from(outlets.entries()).map(([id, name]) => ({ value: id, label: name }))
     ];
-  }, [boardData]);
+  }, [boardData, brandFilteredOutletsMap, boardBrandId]);
 
   const routeOptions = useMemo(() => {
     if (!boardData) return [{ value: "all", label: "All Routes" }];
     const routes = new Map();
-    boardData.zones.forEach(z => { if (z.zoneId !== "unassigned") routes.set(z.zoneId, z.zoneName); });
+    boardData.zones.forEach(z => {
+      if (z.zoneId !== "unassigned") {
+        if (boardBrandId !== "all") {
+          const hasBrandOutlet = z.outlets.some((o: any) => {
+            const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+            return fullOutlet?.brandId === boardBrandId;
+          });
+          if (!hasBrandOutlet) return;
+        }
+        routes.set(z.zoneId, z.zoneName);
+      }
+    });
     return [
       { value: "all", label: "All Routes" },
       ...Array.from(routes.entries()).map(([id, name]) => ({ value: id, label: name }))
     ];
-  }, [boardData]);
+  }, [boardData, brandFilteredOutletsMap, boardBrandId]);
 
   const driverOptions = useMemo(() => {
     if (!boardData) return [{ value: "all", label: "All Drivers" }];
     const driversMap = new Map();
     boardData.zones.forEach(z => {
+      if (boardBrandId !== "all") {
+        const hasBrandOutlet = z.outlets.some((o: any) => {
+          const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+          return fullOutlet?.brandId === boardBrandId;
+        });
+        if (!hasBrandOutlet) return;
+      }
       z.trucks?.forEach(t => { if (t.driver) driversMap.set(t.driver.id, t.driver.name); });
       z.drivers?.forEach(d => { if (d) driversMap.set(d.id, d.name); });
     });
@@ -1395,17 +1489,26 @@ export default function DailyDispatchPage() {
       { value: "all", label: "All Drivers" },
       ...Array.from(driversMap.entries()).map(([id, name]) => ({ value: id, label: name }))
     ];
-  }, [boardData]);
+  }, [boardData, brandFilteredOutletsMap, boardBrandId]);
 
   const truckOptions = useMemo(() => {
     if (!boardData) return [{ value: "all", label: "All Trucks" }];
     const trucksMap = new Map();
-    boardData.zones.forEach(z => z.trucks?.forEach(t => { if (t.vehicle) trucksMap.set(t.vehicle.id, t.vehicle.plateNumber || t.vehicle.name); }));
+    boardData.zones.forEach(z => {
+      if (boardBrandId !== "all") {
+        const hasBrandOutlet = z.outlets.some((o: any) => {
+          const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+          return fullOutlet?.brandId === boardBrandId;
+        });
+        if (!hasBrandOutlet) return;
+      }
+      z.trucks?.forEach(t => { if (t.vehicle) trucksMap.set(t.vehicle.id, t.vehicle.plateNumber || t.vehicle.name); });
+    });
     return [
       { value: "all", label: "All Trucks" },
       ...Array.from(trucksMap.entries()).map(([id, name]) => ({ value: id, label: name }))
     ];
-  }, [boardData]);
+  }, [boardData, brandFilteredOutletsMap, boardBrandId]);
 
   const statusOptions = [
     { value: "all", label: "All Status" },
@@ -1891,18 +1994,18 @@ export default function DailyDispatchPage() {
 
         {/* ===== BOARD TAB ===== */}
         <TabsContent value="board" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden">
-          <div className="px-6 py-3 border-b flex items-center gap-4 flex-wrap bg-background">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
+          <div className="px-6 py-3 border-b flex items-center gap-3 bg-background flex-nowrap overflow-x-auto scrollbar-none">
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
               <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-                className="w-40 h-8 text-sm" />
+                className="w-36 h-8 text-xs px-2" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Client:</span>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Client:</span>
               <select
                 value={boardClientId}
                 onChange={e => setBoardClientId(e.target.value)}
-                className="h-8 border rounded-md px-2 bg-transparent text-xs min-w-[140px]"
+                className="h-8 border rounded-md px-2 bg-transparent text-xs w-36"
               >
                 <option value="all">All Clients</option>
                 {clientList.map((c: any) => (
@@ -1910,23 +2013,36 @@ export default function DailyDispatchPage() {
                 ))}
               </select>
             </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Brand:</span>
+              <select
+                value={boardBrandId}
+                onChange={e => setBoardBrandId(e.target.value)}
+                className="h-8 border rounded-md px-2 bg-transparent text-xs w-36"
+              >
+                <option value="all">All Brands</option>
+                {filteredBrands.map((b: any) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
             {sheetForDate ? (
               <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
-                onClick={() => setBoardSheetId(sheetForDate.id)}>
+                onClick={() => setBoardSheetId(sheetForDate.id)} className="flex-shrink-0 h-8 text-xs">
                 <Eye className="h-3.5 w-3.5 mr-1" />
                 {boardSheetId === sheetForDate.id ? "Viewing Board" : "Load Board"}
               </Button>
             ) : (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <FileText className="h-4 w-4" />
-                No sheet for this date.
-                <Button size="sm" variant="ghost" onClick={() => { setUploadDate(selectedDate); setActiveTab("upload"); }}>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-shrink-0">
+                <FileText className="h-3.5 w-3.5" />
+                No sheet.
+                <Button size="sm" variant="ghost" className="h-8 text-xs px-1" onClick={() => { setUploadDate(selectedDate); setActiveTab("upload"); }}>
                   Upload one →
                 </Button>
               </div>
             )}
             {boardSheetId && (
-              <Button size="sm" variant="ghost" onClick={() => refetchBoard()}>
+              <Button size="sm" variant="ghost" onClick={() => refetchBoard()} className="flex-shrink-0 h-8 text-xs">
                 <RefreshCw className="h-3.5 w-3.5 mr-1" />Refresh
               </Button>
             )}
@@ -1934,16 +2050,16 @@ export default function DailyDispatchPage() {
               <Button 
                 size="sm" 
                 variant="outline" 
-                className="border-orange-200 text-orange-700 hover:bg-orange-50"
+                className="border-orange-200 text-orange-700 hover:bg-orange-50 flex-shrink-0 h-8 text-xs"
                 onClick={() => setGlobalAddModal({ isOpen: true, selectedOutletCode: "" })}
               >
                 <PlusCircle className="h-3.5 w-3.5 mr-1" />Add Item / Outlet
               </Button>
             )}
             {boardData && boardData.overrides.length > 0 && (
-              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1">
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1 flex-shrink-0 h-6">
                 <AlertTriangle className="h-3 w-3" />
-                {boardData.overrides.length} zone override(s) active
+                {boardData.overrides.length} override(s) active
               </Badge>
             )}
           </div>
@@ -2137,6 +2253,9 @@ export default function DailyDispatchPage() {
                       if (boardRouteFilter !== "all" && zone.zoneId !== boardRouteFilter) return null;
 
                       const filteredOutlets = zone.outlets.map(outlet => {
+                        const fullOutlet = (outlet.outletId ? brandFilteredOutletsMap.get(outlet.outletId) : null) || (outlet.outletCode ? brandFilteredOutletsMap.get(outlet.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
+                        if (boardBrandId !== "all" && fullOutlet?.brandId !== boardBrandId) return null;
+
                         if (boardOutletFilter !== "all" && outlet.outletId !== boardOutletFilter && outlet.outletCode !== boardOutletFilter) return null;
 
                         const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
@@ -2170,7 +2289,7 @@ export default function DailyDispatchPage() {
                         return { ...outlet, items: filteredItems };
                       }).filter(Boolean) as OutletGroup[];
 
-                      if (filteredOutlets.length === 0 && (boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all")) {
+                      if (filteredOutlets.length === 0 && (boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all" || boardBrandId !== "all")) {
                         return null;
                       }
 
@@ -2237,6 +2356,15 @@ export default function DailyDispatchPage() {
 
             {boardSheetId && boardData && (
               <div className="ml-auto flex items-center gap-2 print:hidden">
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input 
+                    placeholder="Search route, outlet, item..." 
+                    value={pivotSearchQuery}
+                    onChange={e => setPivotSearchQuery(e.target.value)}
+                    className="pl-7 w-60 h-8 text-xs bg-white border-slate-200"
+                  />
+                </div>
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
                   <Printer className="h-4 w-4" /> Print
                 </Button>
@@ -2257,7 +2385,7 @@ export default function DailyDispatchPage() {
           ) : !boardData ? (
             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load summary.</div>
           ) : (
-            <PivotSummaryTab boardData={boardData} />
+            <PivotSummaryTab boardData={boardData} searchQuery={pivotSearchQuery} />
           )}
         </TabsContent>
 
@@ -3230,12 +3358,63 @@ export default function DailyDispatchPage() {
 }
 
 // ===== PIVOT SUMMARY TAB =====
-function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
+function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; searchQuery?: string }) {
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
 
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
   const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const query = (searchQuery || "").toLowerCase().trim();
+
+  const filteredZones = useMemo(() => {
+    if (!query) return boardData.zones;
+
+    return boardData.zones
+      .map(zone => {
+        const zoneMatches = zone.zoneName.toLowerCase().includes(query);
+
+        if (zoneMatches) {
+          return zone;
+        }
+
+        const filteredOutlets = zone.outlets
+          .map(outlet => {
+            const outletMatches =
+              outlet.outletName.toLowerCase().includes(query) ||
+              (outlet.outletCode && String(outlet.outletCode).toLowerCase().includes(query));
+
+            if (outletMatches) {
+              return outlet;
+            }
+
+            const matchingItems = outlet.items.filter(item =>
+              item.itemCode.toLowerCase().includes(query) ||
+              (item.description && item.description.toLowerCase().includes(query))
+            );
+
+            if (matchingItems.length > 0) {
+              return {
+                ...outlet,
+                items: matchingItems,
+              };
+            }
+
+            return null;
+          })
+          .filter(Boolean) as typeof zone.outlets;
+
+        if (filteredOutlets.length > 0) {
+          return {
+            ...zone,
+            outlets: filteredOutlets,
+          };
+        }
+
+        return null;
+      })
+      .filter(Boolean) as typeof boardData.zones;
+  }, [boardData.zones, query]);
 
   return (
     <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
@@ -3252,7 +3431,7 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
-            {boardData.zones.map(zone => {
+            {filteredZones.map(zone => {
               if (zone.outlets.length === 0) return null;
               const routeTotal = zone.outlets.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number((i as any).requestedQty || i.weight || 0), 0), 0);
               const isRouteExpanded = expandedRoutes[zone.zoneId] !== false; // Default true
@@ -3274,7 +3453,9 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
                   {isRouteExpanded && zone.outlets.map(outlet => {
                     const outletTotal = outlet.items.reduce((s, i) => s + Number((i as any).requestedQty || i.weight || 0), 0);
                     const outletId = `${zone.zoneId}-${outlet.outletCode}`;
-                    const isOutletExpanded = !!expandedOutlets[outletId]; // Default false
+                    const isOutletExpanded = query 
+                      ? expandedOutlets[outletId] !== false 
+                      : !!expandedOutlets[outletId]; // Default true if search query is active
 
                     return (
                       <React.Fragment key={outletId}>
@@ -3282,7 +3463,8 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
                           <td className="py-1.5 px-3 border-r"></td>
                           <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6">
                             {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
-                            {outlet.outletName}
+                            <span>{outlet.outletName}</span>
+                            <span className="text-xs text-slate-400 font-normal ml-1">({outlet.outletCode})</span>
                           </td>
                           <td className="py-1.5 px-3 border-r"></td>
                           <td className="py-1.5 px-3 border-r"></td>
@@ -3317,8 +3499,8 @@ function PivotSummaryTab({ boardData }: { boardData: BoardData }) {
 function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelectSheet, sheets }: any) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "" });
-  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string } | null>(null);
+  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "", tripNumber: 1 });
+  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string; tripNumber: number } | null>(null);
   const [expandedStorageTypes, setExpandedStorageTypes] = useState<Record<string, boolean>>({});
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [planningTab, setPlanningTab] = useState("unassigned");
@@ -3345,7 +3527,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Truck added to dispatch!" });
-      setTruckForm({ truckId: "", driverId: "", zoneId: "" });
+      setTruckForm({ truckId: "", driverId: "", zoneId: "", tripNumber: 1 });
     },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
@@ -3359,8 +3541,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   });
 
   const updateTruckAssignmentMutation = useMutation({
-    mutationFn: (data: { id: string; truckId: string; driverId: string | null }) =>
-      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId }),
+    mutationFn: (data: { id: string; truckId: string; driverId: string | null; tripNumber: number }) =>
+      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId, tripNumber: data.tripNumber }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Assignment updated successfully!" });
@@ -3565,7 +3747,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
               <CardDescription>Select a zone first, then assign a vehicle and optional driver.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 {/* Zone — primary field */}
                 <div className="space-y-2">
                   <Label>Zone <span className="text-red-500">*</span></Label>
@@ -3625,6 +3807,21 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                           </SelectItem>
                         );
                       })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Trip Number */}
+                <div className="space-y-2">
+                  <Label>Trip Number <span className="text-red-500">*</span></Label>
+                  <Select
+                    value={String(truckForm.tripNumber)}
+                    onValueChange={v => setTruckForm(f => ({ ...f, tripNumber: parseInt(v) }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select Trip..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">Trip 1</SelectItem>
+                      <SelectItem value="2">Trip 2</SelectItem>
+                      <SelectItem value="3">Trip 3</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -3713,11 +3910,13 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-1 font-semibold">
                                   <Truck className="h-3 w-3 text-primary shrink-0" />
-                                  <span className="truncate max-w-[80px]" title={veh?.plateNumber}>{veh?.plateNumber || "Truck"}</span>
+                                  <span className="truncate max-w-[120px]" title={`${veh?.plateNumber || "Truck"} (Trip ${ta.tripNumber})`}>
+                                    {veh?.plateNumber || "Truck"} (Trip {ta.tripNumber})
+                                  </span>
                                 </div>
                                 <div className="flex items-center shrink-0">
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
-                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "" })}>
+                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", tripNumber: ta.tripNumber })}>
                                     <Edit2 className="h-3 w-3" />
                                   </Button>
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
@@ -3810,14 +4009,34 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                           <Badge key={st} variant="outline" className="text-[9px] h-4 px-1 bg-slate-50">{st}</Badge>
                                         ))}
                                       </div>
+                                      
+                                      {/* Items list - view only */}
+                                      <div className="mt-2 pl-3 border-l-2 border-slate-200 dark:border-slate-800 space-y-1">
+                                        {outlet.items.map((item: any, iIdx: number) => {
+                                          const qty = parseFloat(item.weight || item.requestedQty || "0");
+                                          return (
+                                            <div key={item.id || iIdx} className="text-[11px] text-muted-foreground/80 flex items-center justify-between max-w-xl">
+                                              <span className="truncate pr-4">
+                                                {item.itemCode} - {item.description || "No description"}
+                                                {item.storageType && (
+                                                  <span className="text-[9px] ml-1.5 px-1 py-0.2 bg-slate-100 dark:bg-slate-800 rounded font-normal text-muted-foreground">
+                                                    {item.storageType}
+                                                  </span>
+                                                )}
+                                              </span>
+                                              <span className="font-mono font-semibold shrink-0">{qty.toFixed(0)} Boxes</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
                                     </div>
                                   </TableCell>
-                                  <TableCell className="text-right">
+                                  <TableCell className="text-right align-top pt-4">
                                     <span className={`font-mono text-sm font-semibold ${outletWeightT > 100 ? "text-amber-600" : "text-foreground"}`}>
                                       {outletWeightT.toFixed(0)} Boxes
                                     </span>
                                   </TableCell>
-                                  <TableCell className="text-right pr-4">
+                                  <TableCell className="text-right pr-4 align-top pt-4">
                                     {isFullyCompleted ? (
                                       <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                                         <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -3849,11 +4068,11 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                               key={ta.id} 
                                               variant="outline" 
                                               size="sm" 
-                                              className="h-7 px-2 text-[10px] border-dashed hover:border-primary hover:text-primary"
+                                              className="h-7 px-2 text-[10px] border-dashed hover:border-primary hover:text-primary animate-none"
                                               onClick={() => handleAssign(outlet, outletWeightT, ta.id)}
                                             >
                                               <Truck className="h-3 w-3 mr-1" />
-                                              {veh?.plateNumber || "Truck"}
+                                              {veh?.plateNumber || "Truck"} (T{ta.tripNumber})
                                             </Button>
                                           );
                                         })}
@@ -3879,7 +4098,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 
                                               return (
                                                 <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
-                                                  {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
+                                                  {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"}) (Trip {ta.tripNumber})
                                                   {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
                                                   {wouldOverflow ? " ⚠" : ""}
                                                 </SelectItem>
@@ -3934,7 +4153,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                             <div className="flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
                                               <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 text-[10px] h-5">
                                                 <Truck className="h-2.5 w-2.5" />
-                                                {stAssignedVeh?.plateNumber || "Truck"}
+                                                {stAssignedVeh?.plateNumber || "Truck"} (Trip {stAssignedTruck.tripNumber})
                                               </Badge>
                                               <Button
                                                 variant="ghost" size="sm"
@@ -3960,11 +4179,11 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                                     key={ta.id} 
                                                     variant="outline" 
                                                     size="sm" 
-                                                    className="h-6 px-1.5 text-[10px] border-dashed hover:border-primary hover:text-primary"
+                                                    className="h-6 px-1.5 text-[10px] border-dashed hover:border-primary hover:text-primary animate-none"
                                                     onClick={() => handleAssign(outlet, stWeightT, ta.id, st)}
                                                   >
                                                     <Truck className="h-2.5 w-2.5 mr-1" />
-                                                    {veh?.plateNumber || "Truck"}
+                                                    {veh?.plateNumber || "Truck"} (T{ta.tripNumber})
                                                   </Button>
                                                 );
                                               })}
@@ -3990,7 +4209,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 
                                                     return (
                                                       <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
-                                                        {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"})
+                                                        {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"}) (Trip {ta.tripNumber})
                                                         {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
                                                         {wouldOverflow ? " ⚠" : ""}
                                                       </SelectItem>
@@ -4113,13 +4332,28 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Trip Number</Label>
+                <Select
+                  value={String(editAssignment.tripNumber || 1)}
+                  onValueChange={(val) => setEditAssignment((prev) => prev ? { ...prev, tripNumber: parseInt(val) } : null)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select trip" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Trip 1</SelectItem>
+                    <SelectItem value="2">Trip 2</SelectItem>
+                    <SelectItem value="3">Trip 3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setEditAssignment(null)}>Cancel</Button>
                 <Button
                   onClick={() => updateTruckAssignmentMutation.mutate({
                     id: editAssignment.id,
                     truckId: editAssignment.truckId,
-                    driverId: editAssignment.driverId || null
+                    driverId: editAssignment.driverId || null,
+                    tripNumber: editAssignment.tripNumber || 1,
                   })}
                   disabled={updateTruckAssignmentMutation.isPending}
                 >
@@ -4487,14 +4721,19 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   const isSupervisor = true; // TODO: link to user role
 
   const revertMutation = useMutation({
-    mutationFn: async (dispatchItemId: string) => {
-      return apiRequest("PATCH", `/api/dispatch/items/${dispatchItemId}/delivery`, {
-        status: "pending",
-        deliveredQty: "0",
-        remainingQty: "0",
-        remark: "Reverted by admin",
-        podUrl: ""
-      });
+    mutationFn: async (dispatchItemIds: string | string[]) => {
+      const ids = Array.isArray(dispatchItemIds) ? dispatchItemIds : [dispatchItemIds];
+      await Promise.all(
+        ids.map(id =>
+          apiRequest("PATCH", `/api/dispatch/items/${id}/delivery`, {
+            status: "pending",
+            deliveredQty: "0",
+            remainingQty: "0",
+            remark: "Reverted by admin",
+            podUrl: ""
+          })
+        )
+      );
     },
     onSuccess: () => {
       toast({ title: "Reverted to pending successfully" });
@@ -4834,6 +5073,23 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                         >
                                           <Share2 className="h-3 w-3 mr-1" /> Share PDF
                                         </Button>
+                                        {(isSupervisor || isAdmin) && (
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (confirm(`Are you sure you want to revert all ${outlet.items.length} deliveries for ${outlet.outletName} to pending?`)) {
+                                                const itemIds = outlet.items.map((i: any) => i.dispatchItemId || i.id);
+                                                revertMutation.mutate(itemIds);
+                                              }
+                                            }}
+                                            disabled={revertMutation.isPending}
+                                          >
+                                            <RefreshCw className="h-3 w-3 mr-1" /> Revert
+                                          </Button>
+                                        )}
                                       </>
                                     )}
                                   </div>
@@ -4861,23 +5117,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                       {p.driverName}
                                     </td>
                                     {isAdmin && (
-                                      <td className="py-1.5 px-3 text-right">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-6 text-[10px] px-2 text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 font-semibold shadow-sm inline-flex items-center gap-1"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (confirm("Are you sure you want to revert this delivery to pending?")) {
-                                              revertMutation.mutate(p.dispatchItemId);
-                                            }
-                                          }}
-                                          disabled={revertMutation.isPending}
-                                        >
-                                          <RefreshCw className="h-2.5 w-2.5" />
-                                          Revert
-                                        </Button>
-                                      </td>
+                                      <td className="py-1.5 px-3 text-right"></td>
                                     )}
                                   </tr>
                                 );

@@ -3493,6 +3493,7 @@ export class DatabaseStorage implements IStorage {
 
       board[effectiveZoneId].outlets[outletKey].items.push({
         ...item,
+        truckAssignmentId: tAssignId,
         delivery: deliveryMap.get(item.id) || null,
       });
     }
@@ -7807,18 +7808,29 @@ export class DatabaseStorage implements IStorage {
     const employeesList = await this.getEmployees();
     const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
     
-    return list.map(item => ({
-      ...item,
-      driverName: employeeMap.get(item.driverId) || "Unknown Driver",
-      crewMemberName: item.crewMemberId ? (employeeMap.get(item.crewMemberId) || "Unknown Crew Member") : null
-    }));
+    return list.map(item => {
+      const opening = item.openingKm !== null && item.openingKm !== undefined ? parseInt(item.openingKm.toString()) : null;
+      const closing = item.closingKm !== null && item.closingKm !== undefined ? parseInt(item.closingKm.toString()) : null;
+      const totalKm = (opening !== null && closing !== null) ? (closing - opening) : null;
+      return {
+        ...item,
+        driverName: employeeMap.get(item.driverId) || "Unknown Driver",
+        crewMemberName: item.crewMemberId ? (employeeMap.get(item.crewMemberId) || "Unknown Crew Member") : null,
+        totalKm
+      };
+    });
   }
 
   async getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]> {
     await ensureDriverTablesSchema();
     const conditions = [];
     if (driverId) {
-      conditions.push(eq(dispatchDeliveries.driverId, driverId));
+      const associatedUsers = await db.select({ id: users.id })
+        .from(users)
+        .where(eq(users.employeeId, driverId));
+      const userIds = associatedUsers.map(u => u.id);
+      const matchIds = [driverId, ...userIds];
+      conditions.push(inArray(dispatchDeliveries.driverId, matchIds));
     }
     if (startDate) {
       conditions.push(sql`dispatch_sheets.date >= ${startDate}`);

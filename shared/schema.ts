@@ -2365,6 +2365,7 @@ export const dispatchTruckAssignments = pgTable("dispatch_truck_assignments", {
   driverId: varchar("driver_id"),
   zoneId: varchar("zone_id").notNull(),
   usedCapacity: decimal("used_capacity", { precision: 10, scale: 3 }).default("0"),
+  tripNumber: integer("trip_number").notNull().default(1),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

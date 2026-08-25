@@ -487,11 +487,55 @@ export default function Reports() {
   };
 
   const renderReceivablesAging = () => {
+    const groupedReceivables = receivablesReport.reduce((acc: any[], inv: any) => {
+      const outstanding = parseFloat(inv.outstandingAmount || "0");
+      if (outstanding <= 0) return acc;
+
+      const custName = inv.customerName || "Unknown";
+      let entry = acc.find(c => c.companyName === custName);
+      if (!entry) {
+        entry = {
+          companyName: custName,
+          name: custName,
+          totalOutstanding: 0,
+          agingSegments: {
+            current: 0,
+            days30to60: 0,
+            days60to90: 0,
+            daysOver90: 0
+          }
+        };
+        acc.push(entry);
+      }
+
+      entry.totalOutstanding += outstanding;
+      const days = inv.daysOutstanding ?? 0;
+      if (days <= 30) {
+        entry.agingSegments.current += outstanding;
+      } else if (days <= 60) {
+        entry.agingSegments.days30to60 += outstanding;
+      } else if (days <= 90) {
+        entry.agingSegments.days60to90 += outstanding;
+      } else {
+        entry.agingSegments.daysOver90 += outstanding;
+      }
+      return acc;
+    }, []);
+
+    const csvData = groupedReceivables.map(r => ({
+      Customer: r.companyName,
+      "Total Owed": r.totalOutstanding,
+      "Current (0-30 days)": r.agingSegments.current,
+      "31 - 60 days": r.agingSegments.days30to60,
+      "61 - 90 days": r.agingSegments.days60to90,
+      "Over 90 days": r.agingSegments.daysOver90
+    }));
+
     return (
       <div className="space-y-4">
         <div className="flex justify-between items-center no-print">
           <h2 className="text-xl font-bold">Receivables Aging Report</h2>
-          <Button onClick={() => exportToCSV("receivables-aging", receivablesReport)} variant="outline">
+          <Button onClick={() => exportToCSV("receivables-aging", csvData)} variant="outline">
             <Printer className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
@@ -508,10 +552,10 @@ export default function Reports() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {receivablesReport.length === 0 ? (
+            {groupedReceivables.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="text-center py-6 text-muted-foreground">No data found</TableCell></TableRow>
             ) : (
-              receivablesReport.map((r, idx) => (
+              groupedReceivables.map((r, idx) => (
                 <TableRow key={idx}>
                   <TableCell className="font-semibold">{r.companyName || r.name}</TableCell>
                   <TableCell className="text-right font-mono font-semibold text-primary">{formatCurrency(r.totalOutstanding)}</TableCell>
@@ -1669,6 +1713,7 @@ export default function Reports() {
       "Crew Check Out": item.crewCheckOutTime ? format(new Date(item.crewCheckOutTime), "hh:mm a") : "-",
       "Opening KM": item.openingKm ?? "-",
       "Closing KM": item.closingKm ?? "-",
+      "Total KM": item.totalKm ?? "-",
       "Shift Type": item.shiftType || "-",
       "Shift Hours": item.shiftHours ?? "-",
       "Overtime Hours": item.overtimeHours ?? "-",
@@ -1747,6 +1792,7 @@ export default function Reports() {
                   <TableHead>Crew Check-out</TableHead>
                   <TableHead className="text-right">Opening KM</TableHead>
                   <TableHead className="text-right">Closing KM</TableHead>
+                  <TableHead className="text-right">Total KM</TableHead>
                   <TableHead className="text-right">Hours</TableHead>
                   <TableHead className="text-right">Overtime</TableHead>
                   <TableHead>Shift</TableHead>
@@ -1775,6 +1821,7 @@ export default function Reports() {
                     </TableCell>
                     <TableCell className="text-right font-mono">{row.openingKm ?? "-"}</TableCell>
                     <TableCell className="text-right font-mono">{row.closingKm ?? "-"}</TableCell>
+                    <TableCell className="text-right font-mono font-bold text-indigo-600 bg-indigo-50/30">{row.totalKm ?? "-"}</TableCell>
                     <TableCell className="text-right font-mono">{row.shiftHours || "0.00"}</TableCell>
                     <TableCell className="text-right font-mono">{row.overtimeHours || "0.00"}</TableCell>
                     <TableCell className="capitalize text-xs text-muted-foreground">{row.shiftType}</TableCell>
@@ -1787,7 +1834,7 @@ export default function Reports() {
                 ))}
                 {driverAttendanceReport.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                       No attendance records found.
                     </TableCell>
                   </TableRow>

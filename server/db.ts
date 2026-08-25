@@ -160,6 +160,8 @@ export async function ensureDriverTablesSchema() {
         "created_at" timestamp DEFAULT now()
       );
 
+      ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "trip_number" integer DEFAULT 1;
+
       CREATE TABLE IF NOT EXISTS "dispatch_outlet_truck_assignments" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         "truck_assignment_id" varchar NOT NULL,
