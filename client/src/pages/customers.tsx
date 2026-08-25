@@ -301,7 +301,7 @@ export default function CustomersPage() {
             </EmptyState>
           ) : (
             <div className="space-y-4">
-              <div className="rounded-md border overflow-hidden">
+              <div className="rounded-md border overflow-x-auto">
                 <table className="w-full text-sm text-left border-collapse border-slate-200">
                   <thead className="bg-muted/50 text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-slate-200">
                     <tr>
