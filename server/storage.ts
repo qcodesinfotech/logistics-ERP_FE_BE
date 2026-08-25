@@ -8347,6 +8347,8 @@ export class DatabaseStorage implements IStorage {
       
       return {
         ...r.delivery,
+        id: r.delivery?.id || r.item.id,
+        dispatchItemId: r.item.id,
         date: r.sheet.date,
         sheetId: r.sheet.id,
         itemCode: r.item.itemCode,

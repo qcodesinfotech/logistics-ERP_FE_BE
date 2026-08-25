@@ -4095,6 +4095,11 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 
 // ===== PENDING QUANTITIES TAB =====
 function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase().includes("admin");
+  const { toast } = useToast();
+
   const [startDate, setStartDate] = useState(selectedDate || "");
   const [endDate, setEndDate] = useState(selectedDate || "");
 
@@ -4108,6 +4113,24 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
   const [outletFilter, setOutletFilter] = useState("all");
   const [driverFilter, setDriverFilter] = useState("all");
   const [storageTypeFilter, setStorageTypeFilter] = useState("all");
+
+  const completeMutation = useMutation({
+    mutationFn: async ({ dispatchItemId, reqQty }: { dispatchItemId: string; reqQty: string }) => {
+      return apiRequest("PATCH", `/api/dispatch/items/${dispatchItemId}/delivery`, {
+        status: "delivered",
+        deliveredQty: reqQty,
+        remainingQty: "0",
+        damagedQty: "0",
+        damageReason: "",
+        remark: "Completed by admin",
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Delivery completed successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+    },
+    onError: (err: any) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
 
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
@@ -4256,8 +4279,8 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
               <p className="text-sm">All deliveries matching the criteria are completed.</p>
             </div>
           ) : (
-            <div className="bg-white border-t overflow-hidden text-sm rounded-b-xl">
-              <table className="w-full text-left border-collapse">
+            <div className="bg-white border-t overflow-x-auto text-sm rounded-b-xl">
+              <table className="w-full text-left border-collapse min-w-[1100px]">
                 <thead className="bg-slate-100/80 border-b">
                   <tr>
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r w-64">Route / Outlet</th>
@@ -4265,9 +4288,10 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r">Item Code</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r">Description</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 border-r">Assigned To</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20">Req Qty</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20">Remaining</th>
-                    <th className="py-2 px-3 font-semibold text-slate-700 w-24">Status</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20 border-r">Req Qty</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20 border-r">Remaining</th>
+                    <th className="py-2 px-3 font-semibold text-slate-700 w-24 border-r">Status</th>
+                    {isAdmin && <th className="py-2 px-3 font-semibold text-slate-700 w-24 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -4277,7 +4301,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                     return (
                       <React.Fragment key={zone.zoneName}>
                         <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneName)}>
-                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={8}>
+                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={isAdmin ? 9 : 8}>
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
@@ -4301,7 +4325,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
-                                <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={8}>
+                                <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={isAdmin ? 9 : 8}>
                                   {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                                   {outlet.outletName}
                                   <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
@@ -4341,9 +4365,28 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                                     </td>
                                     <td className="py-1.5 px-3 border-r text-right font-medium">{reqQty.toFixed(2)}</td>
                                     <td className="py-1.5 px-3 border-r text-right font-bold text-amber-600">{remQty.toFixed(2)}</td>
-                                    <td className="py-1.5 px-3 text-xs">
+                                    <td className="py-1.5 px-3 text-xs border-r">
                                       <StatusBadge status={p.status || "pending"} />
                                     </td>
+                                    {isAdmin && (
+                                      <td className="py-1.5 px-3 text-right">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-[10px] px-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 font-semibold shadow-sm inline-flex items-center gap-1"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (confirm(`Mark item ${p.itemCode} as completed/delivered?`)) {
+                                              completeMutation.mutate({ dispatchItemId: p.dispatchItemId || p.id, reqQty: String(reqQty) });
+                                            }
+                                          }}
+                                          disabled={completeMutation.isPending}
+                                        >
+                                          <Check className="h-2.5 w-2.5" />
+                                          Complete
+                                        </Button>
+                                      </td>
+                                    )}
                                   </tr>
                                 );
                               })}
@@ -4778,9 +4821,9 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                     {isAdmin && (
                                       <td className="py-1.5 px-3 text-right">
                                         <Button
-                                          variant="ghost"
+                                          variant="outline"
                                           size="sm"
-                                          className="h-6 text-[10px] px-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                          className="h-6 text-[10px] px-2 text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 font-semibold shadow-sm inline-flex items-center gap-1"
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             if (confirm("Are you sure you want to revert this delivery to pending?")) {
@@ -4789,6 +4832,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                           }}
                                           disabled={revertMutation.isPending}
                                         >
+                                          <RefreshCw className="h-2.5 w-2.5" />
                                           Revert
                                         </Button>
                                       </td>
