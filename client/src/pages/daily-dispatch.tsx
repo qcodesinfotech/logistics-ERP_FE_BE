@@ -1166,6 +1166,7 @@ export default function DailyDispatchPage() {
 
 
   const [csvPreview, setCsvPreview] = useState<Record<string, string>[] | null>(null);
+  const [skippedRowsInfo, setSkippedRowsInfo] = useState<{ total: number; missingOutlet: number; missingItemOrQty: number } | null>(null);
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [isDragging, setIsDragging] = useState(false);
@@ -1427,6 +1428,7 @@ export default function DailyDispatchPage() {
       toast({ title: `Sheet uploaded! ${result.itemCount} items loaded.` });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
       setCsvPreview(null);
+      setSkippedRowsInfo(null);
       setCsvFileName("");
       setActiveTab("board");
       setBoardSheetId(result.sheet.id);
@@ -1701,21 +1703,44 @@ export default function DailyDispatchPage() {
         parsed = allParsed;
       }
 
+      let missingOutletCount = 0;
+      let missingItemOrQtyCount = 0;
+
       // Filter out total/summary rows and invalid lines
       const filteredParsed = parsed.filter(row => {
         const outletCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
         const itemCode = row.item_number || row.item_code || row.itemCode || "";
         
-        if (!outletCode.trim() || !itemCode.trim()) return false;
+        const hasOutlet = !!outletCode.trim();
+        const hasItem = !!itemCode.trim();
+
+        if (!hasOutlet) {
+          missingOutletCount++;
+          return false;
+        }
+
+        if (!hasItem) {
+          missingItemOrQtyCount++;
+          return false;
+        }
         
         const lowerOutletCode = outletCode.toLowerCase();
         if (lowerOutletCode.includes("total") || lowerOutletCode.includes("summary") || lowerOutletCode.includes("count")) return false;
 
         const qtyVal = row.fus_requested_qty || row.weight || row.requestedQty || row.qty || "0";
         const parsedQty = parseFloat(qtyVal);
-        if (isNaN(parsedQty) || parsedQty <= 0) return false;
+        if (isNaN(parsedQty) || parsedQty <= 0) {
+          missingItemOrQtyCount++;
+          return false;
+        }
 
         return true;
+      });
+
+      setSkippedRowsInfo({
+        total: missingOutletCount + missingItemOrQtyCount,
+        missingOutlet: missingOutletCount,
+        missingItemOrQty: missingItemOrQtyCount
       });
 
       const today = new Date();
@@ -2559,10 +2584,27 @@ export default function DailyDispatchPage() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-medium text-muted-foreground">{csvPreview.length} rows parsed — Preview:</p>
-                      <Button variant="ghost" size="sm" onClick={() => { setCsvPreview(null); setCsvFileName(""); }}>
+                      <Button variant="ghost" size="sm" onClick={() => { setCsvPreview(null); setCsvFileName(""); setSkippedRowsInfo(null); }}>
                         <X className="h-3.5 w-3.5 mr-1" />Clear
                       </Button>
                     </div>
+
+                    {skippedRowsInfo && skippedRowsInfo.total > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-xs space-y-1">
+                        <p className="font-semibold flex items-center gap-1.5 text-amber-900">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                          Notice: {skippedRowsInfo.total} rows skipped during parsing
+                        </p>
+                        <ul className="list-disc pl-4 space-y-0.5 text-amber-700">
+                          {skippedRowsInfo.missingOutlet > 0 && (
+                            <li><strong>{skippedRowsInfo.missingOutlet} rows</strong> skipped due to missing/invalid Outlet Code.</li>
+                          )}
+                          {skippedRowsInfo.missingItemOrQty > 0 && (
+                            <li><strong>{skippedRowsInfo.missingItemOrQty} rows</strong> skipped due to missing Item Code or invalid quantity.</li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
                     <div className="rounded-lg border overflow-auto max-h-64">
                       <Table>
                         <TableHeader>
