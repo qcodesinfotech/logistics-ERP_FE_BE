@@ -44,8 +44,10 @@ import type { Rfq, Location, Client } from "@shared/schema";
 const rfqFormSchema = z.object({
   customerId: z.string().min(1, "Customer is required"),
   transitRoute: z.string().min(1, "Transit route summary is required"),
-  transportationCharges: z.string().transform((v) => parseFloat(v) || 0),
-  outsourcedTruckCost: z.string().transform((v) => parseFloat(v) || 0),
+  transportationCharges: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
+  outsourcedTruckCost: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
+  noOfTrips: z.string().optional().transform((v) => v ? parseInt(v) : 1),
+  noOfTrucks: z.string().optional().transform((v) => v ? parseInt(v) : 1),
   status: z.enum(["pending", "approved", "rejected", "converted"]),
   cargoType: z.string().optional(),
   truckType: z.string().optional(),
@@ -78,6 +80,29 @@ const rfqFormSchema = z.object({
 
 type RfqFormData = z.input<typeof rfqFormSchema>;
 
+const quotationRevisionSchema = z.object({
+  sellingRate: z.string().min(1, "Transportation Charges are required").transform((v) => parseFloat(v) || 0),
+  outsourcedTruckCost: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
+  noOfTrips: z.string().transform((v) => parseInt(v) || 1),
+  noOfTrucks: z.string().transform((v) => parseInt(v) || 1),
+  cargoType: z.string().optional(),
+  truckType: z.string().optional(),
+  freightType: z.string().optional(),
+  detentionChargesPerDay: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
+  cargoDetails: z.string().optional(),
+  temperatureRequirement: z.string().optional(),
+  weight: z.string().optional(),
+  volume: z.string().optional(),
+  additionalCharges: z.array(z.object({
+    name: z.string().min(1, "Name required"),
+    qty: z.number().min(0).default(1),
+    unitRate: z.number().min(0).default(0),
+    cost: z.number().min(0)
+  })).default([]),
+});
+
+type QuotationRevisionData = z.input<typeof quotationRevisionSchema>;
+
 const locationSchema = z.object({
   code: z.string().min(1, "Location code is required"),
   name: z.string().min(1, "Name is required"),
@@ -95,6 +120,8 @@ export default function RfqPage() {
   const [isViewOnly, setIsViewOnly] = useState(false);
   const [actioningRfqId, setActioningRfqId] = useState<string | null>(null);
   const [isQuickClientDialogOpen, setIsQuickClientDialogOpen] = useState(false);
+  const [isQuotationRevisionDialogOpen, setIsQuotationRevisionDialogOpen] = useState(false);
+  const [revisingQuotation, setRevisingQuotation] = useState<any>(null);
   const [quickClientName, setQuickClientName] = useState("");
   const [quickClientCompany, setQuickClientCompany] = useState("");
   const [quickClientPhone, setQuickClientPhone] = useState("");
@@ -144,6 +171,8 @@ export default function RfqPage() {
       transitRoute: "",
       transportationCharges: "0",
       outsourcedTruckCost: "0",
+      noOfTrips: "1",
+      noOfTrucks: "1",
       status: "pending",
       cargoType: "",
       truckType: "",
@@ -182,6 +211,59 @@ export default function RfqPage() {
       longitude: "",
     },
   });
+
+  const revisionForm = useForm<QuotationRevisionData>({
+    resolver: zodResolver(quotationRevisionSchema),
+    defaultValues: {
+      sellingRate: "0.000",
+      outsourcedTruckCost: "0.000",
+      noOfTrips: "1",
+      noOfTrucks: "1",
+      cargoType: "",
+      truckType: "",
+      freightType: "",
+      detentionChargesPerDay: "0.000",
+      cargoDetails: "",
+      temperatureRequirement: "",
+      weight: "0.000",
+      volume: "0.000",
+      additionalCharges: [],
+    }
+  });
+
+  const { fields: revisionExtraFields, append: appendRevisionExtra, remove: removeRevisionExtra } = useFieldArray({
+    control: revisionForm.control,
+    name: "additionalCharges"
+  });
+
+  const handleRevisionSubmit = (data: any) => {
+    const totalExtra = data.additionalCharges?.reduce((sum: number, c: any) => sum + (parseFloat(c.cost) || 0), 0) || 0;
+    const total = (parseFloat(data.sellingRate) + totalExtra).toFixed(3);
+
+    reviseQuotationMutation.mutate({
+      id: revisingQuotation.id,
+      data: {
+        sellingRate: parseFloat(data.sellingRate).toFixed(3),
+        outsourcedTruckCost: parseFloat(data.outsourcedTruckCost).toFixed(3),
+        noOfTrips: parseInt(data.noOfTrips) || 1,
+        noOfTrucks: parseInt(data.noOfTrucks) || 1,
+        cargoType: data.cargoType,
+        truckType: data.truckType,
+        freightType: data.freightType,
+        detentionChargesPerDay: parseFloat(data.detentionChargesPerDay || "0").toFixed(3),
+        cargoDetails: data.cargoDetails,
+        temperatureRequirement: data.temperatureRequirement,
+        weight: data.weight,
+        volume: data.volume,
+        additionalCharges: data.additionalCharges,
+        total: total,
+      }
+    }, {
+      onSuccess: () => {
+        setIsQuotationRevisionDialogOpen(false);
+      }
+    });
+  };
 
   // Watch fields for live calculations
   const watchedTransportation = form.watch("transportationCharges");
@@ -452,6 +534,8 @@ export default function RfqPage() {
             transitRoute: "",
             transportationCharges: "0",
             outsourcedTruckCost: "0",
+            noOfTrips: "1",
+            noOfTrucks: "1",
             status: "pending",
             cargoType: "",
             truckType: "",
@@ -543,6 +627,7 @@ export default function RfqPage() {
                         <TableHead>RFQ Number</TableHead>
                         <TableHead>Customer</TableHead>
                         <TableHead>Route</TableHead>
+                        <TableHead>Trips / Trucks</TableHead>
                         <TableHead>Charges Summary</TableHead>
                         <TableHead>Profit Margin</TableHead>
                         <TableHead>Status</TableHead>
@@ -565,6 +650,10 @@ export default function RfqPage() {
                             <TableCell>
                               <div className="font-medium">{rfq.transitRoute}</div>
                               {rfq.freightType && <div className="text-xs text-muted-foreground">Type: {rfq.freightType} | Truck: {rfq.truckType}</div>}
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-medium">{rfq.noOfTrips || 1} Trip(s)</div>
+                              <div className="text-xs text-muted-foreground">{rfq.noOfTrucks || 1} Truck(s)</div>
                             </TableCell>
                             <TableCell>
                               <div className="font-semibold text-primary">{formatCurrency(total)}</div>
@@ -627,6 +716,8 @@ export default function RfqPage() {
                                   transitRoute: rfq.transitRoute || "",
                                   transportationCharges: String(rfq.transportationCharges),
                                   outsourcedTruckCost: String(rfq.outsourcedTruckCost),
+                                  noOfTrips: String(rfq.noOfTrips || 1),
+                                  noOfTrucks: String(rfq.noOfTrucks || 1),
                                   status: rfq.status as any,
                                   cargoType: rfq.cargoType || "",
                                   truckType: rfq.truckType || "",
@@ -655,6 +746,8 @@ export default function RfqPage() {
                                   transitRoute: rfq.transitRoute || "",
                                   transportationCharges: String(rfq.transportationCharges),
                                   outsourcedTruckCost: String(rfq.outsourcedTruckCost),
+                                  noOfTrips: String(rfq.noOfTrips || 1),
+                                  noOfTrucks: String(rfq.noOfTrucks || 1),
                                   status: rfq.status as any,
                                   cargoType: rfq.cargoType || "",
                                   truckType: rfq.truckType || "",
@@ -727,6 +820,7 @@ export default function RfqPage() {
                       <TableHead>Quotation No</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Cargo details</TableHead>
+                      <TableHead>Trips / Trucks</TableHead>
                       <TableHead>Rate & Charges</TableHead>
                       <TableHead>Valid Until</TableHead>
                       <TableHead>Status</TableHead>
@@ -749,6 +843,10 @@ export default function RfqPage() {
                           <TableCell>{client?.companyName || client?.name || "Unknown"}</TableCell>
                           <TableCell className="max-w-[200px] truncate">{q.cargoDetails}</TableCell>
                           <TableCell>
+                            <div className="font-medium">{q.noOfTrips || 1} Trip(s)</div>
+                            <div className="text-xs text-muted-foreground">{q.noOfTrucks || 1} Truck(s)</div>
+                          </TableCell>
+                          <TableCell>
                             <div className="font-semibold text-primary">{formatCurrency(total)}</div>
                             <div className="text-xs text-muted-foreground">Rate: {formatCurrency(sellingRate)}</div>
                           </TableCell>
@@ -769,6 +867,8 @@ export default function RfqPage() {
                                   transitRoute: rfq?.transitRoute || q.cargoDetails || "",
                                   transportationCharges: String(q.sellingRate),
                                   outsourcedTruckCost: String(rfq?.outsourcedTruckCost || "0"),
+                                  noOfTrips: String(q.noOfTrips || rfq?.noOfTrips || 1),
+                                  noOfTrucks: String(q.noOfTrucks || rfq?.noOfTrucks || 1),
                                   status: q.status as any,
                                   cargoType: rfq?.cargoType || "general",
                                   truckType: rfq?.truckType || "",
@@ -807,13 +907,24 @@ export default function RfqPage() {
                                   size="sm" 
                                   className="h-8 text-xs text-amber-600 font-medium"
                                   onClick={() => {
-                                    const newRate = prompt("Enter revised selling rate amount (BD):", q.sellingRate);
-                                    if (newRate !== null) {
-                                      const parsed = parseFloat(newRate);
-                                      if (!isNaN(parsed)) {
-                                        reviseQuotationMutation.mutate({ id: q.id, data: { sellingRate: parsed.toFixed(3), total: parsed.toFixed(3) } });
-                                      }
-                                    }
+                                    setRevisingQuotation(q);
+                                    const rfq = rfqsList?.find(r => r.id === q.rfqId);
+                                    revisionForm.reset({
+                                      sellingRate: String(q.sellingRate || "0.000"),
+                                      outsourcedTruckCost: String(q.outsourcedTruckCost || rfq?.outsourcedTruckCost || "0.000"),
+                                      noOfTrips: String(q.noOfTrips || rfq?.noOfTrips || 1),
+                                      noOfTrucks: String(q.noOfTrucks || rfq?.noOfTrucks || 1),
+                                      cargoType: q.cargoType || rfq?.cargoType || "",
+                                      truckType: q.truckType || rfq?.truckType || "",
+                                      freightType: q.freightType || rfq?.freightType || "",
+                                      detentionChargesPerDay: String(q.detentionChargesPerDay || rfq?.detentionChargesPerDay || "0.000"),
+                                      cargoDetails: q.cargoDetails || rfq?.cargoDetails || "",
+                                      temperatureRequirement: q.temperatureRequirement || rfq?.temperatureRequirement || "",
+                                      weight: String(q.weight || rfq?.weight || "0.000"),
+                                      volume: String(q.volume || rfq?.volume || "0.000"),
+                                      additionalCharges: (q.additionalCharges as any[]) || [],
+                                    });
+                                    setIsQuotationRevisionDialogOpen(true);
                                   }}
                                 >
                                   Revise
@@ -912,12 +1023,12 @@ export default function RfqPage() {
 
                 <FormField
                   control={form.control}
-                  name="transportationCharges"
+                  name="noOfTrips"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Transportation Charges (BD) *</FormLabel>
+                      <FormLabel>No. of Trips *</FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        <Input type="number" placeholder="1" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -926,12 +1037,12 @@ export default function RfqPage() {
 
                 <FormField
                   control={form.control}
-                  name="outsourcedTruckCost"
+                  name="noOfTrucks"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Outsourced Cost (BD) (Optional)</FormLabel>
+                      <FormLabel>No. of Trucks *</FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        <Input type="number" placeholder="1" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -1358,6 +1469,7 @@ export default function RfqPage() {
                     <p className="mb-1"><span className="font-semibold inline-block w-24">Freight Type:</span> {form.getValues().freightType || "N/A"}</p>
                     <p className="mb-1"><span className="font-semibold inline-block w-24">Temperature:</span> {form.getValues().temperatureRequirement || "N/A"}</p>
                     <p className="mb-1"><span className="font-semibold inline-block w-24">Weight/Vol:</span> {form.getValues().weight || "0.000"} Tons / {form.getValues().volume || "0.000"} CBM</p>
+                    <p className="mb-1"><span className="font-semibold inline-block w-24">Trips/Trucks:</span> {form.getValues().noOfTrips || 1} Trip(s) / {form.getValues().noOfTrucks || 1} Truck(s)</p>
                   </div>
                 </div>
 
@@ -1445,6 +1557,285 @@ export default function RfqPage() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Quotation Revision Dialog */}
+      <Dialog open={isQuotationRevisionDialogOpen} onOpenChange={setIsQuotationRevisionDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Revise Quotation: {revisingQuotation?.quotationNumber}</DialogTitle>
+            <DialogDescription>
+              Update the pricing, truck type, trips count, and additional charges for this quotation. A new version will be generated.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...revisionForm}>
+            <form onSubmit={revisionForm.handleSubmit(handleRevisionSubmit)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={revisionForm.control}
+                  name="sellingRate"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Transportation Charges (BD) *</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="outsourcedTruckCost"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Outsourced Cost (BD) (Optional)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="noOfTrips"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>No. of Trips *</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="1" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="noOfTrucks"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>No. of Trucks *</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="1" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="truckType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Truck Type</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Flatbed, Reefer" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="freightType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Freight Type</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. FTL, LTL" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="detentionChargesPerDay"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Detention Charges / Day (BD)</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="cargoDetails"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Cargo Details / Description</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Palletized cargo, heavy machinery" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
+                  name="temperatureRequirement"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Temperature Requirement</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. -18C, Ambient" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <FormField
+                    control={revisionForm.control}
+                    name="weight"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Weight (Tons)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={revisionForm.control}
+                    name="volume"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Volume (CBM)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+
+              {/* Revision Extra Charges */}
+              <div className="space-y-4 pt-4 border-t">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <FormLabel className="text-base font-semibold">Additional / Extra Charges</FormLabel>
+                    <p className="text-xs text-muted-foreground">Add specific operational costs or extra delivery charges.</p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => appendRevisionExtra({ name: "Toll", qty: 1, unitRate: 0, cost: 0 })}>
+                    <Plus className="h-3 w-3 mr-1" /> Add Charge
+                  </Button>
+                </div>
+                {revisionExtraFields.map((field, index) => (
+                  <div key={field.id} className="grid grid-cols-12 gap-3 items-end mb-3 bg-background/50 p-2 rounded-md border">
+                    <FormField control={revisionForm.control} name={`additionalCharges.${index}.name`} render={({ field: f }) => {
+                      const predefined = ["Toll", "Port", "Border Crossing", "Customs Fee"];
+                      const isPredefined = predefined.includes(f.value);
+
+                      return (
+                        <FormItem className="col-span-12 sm:col-span-4">
+                          <FormLabel className="text-xs">Charge Type</FormLabel>
+                          {isPredefined || !f.value ? (
+                            <Select onValueChange={(val) => {
+                              if (val === "Other") {
+                                f.onChange("Other charge");
+                              } else {
+                                f.onChange(val);
+                              }
+                            }} value={f.value || ""}>
+                              <FormControl><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Type" /></SelectTrigger></FormControl>
+                              <SelectContent>
+                                {predefined.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                                <SelectItem value="Other">Other (Custom)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div className="flex gap-1">
+                              <FormControl>
+                                <Input 
+                                  className="h-8 text-xs" 
+                                  {...f} 
+                                  placeholder="Enter charge name..." 
+                                  autoFocus 
+                                  onBlur={(e) => f.onChange(e.target.value.trim())} 
+                                />
+                              </FormControl>
+                              <Button 
+                                type="button" 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-muted-foreground shrink-0 border" 
+                                onClick={() => f.onChange("")}
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }} />
+                    
+                    <FormField control={revisionForm.control} name={`additionalCharges.${index}.qty`} render={({ field: f }) => (
+                      <FormItem className="col-span-4 sm:col-span-2">
+                        <FormLabel className="text-xs">Qty</FormLabel>
+                        <FormControl><Input type="number" className="h-8 text-xs" {...f} onChange={e => {
+                          const val = parseInt(e.target.value) || 0;
+                          f.onChange(val);
+                          const rate = revisionForm.getValues(`additionalCharges.${index}.unitRate`) || 0;
+                          revisionForm.setValue(`additionalCharges.${index}.cost`, val * rate);
+                        }} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={revisionForm.control} name={`additionalCharges.${index}.unitRate`} render={({ field: f }) => (
+                      <FormItem className="col-span-4 sm:col-span-3">
+                        <FormLabel className="text-xs">Unit Rate (BD)</FormLabel>
+                        <FormControl><Input type="number" step="0.001" className="h-8 text-xs" {...f} onChange={e => {
+                          const val = parseFloat(e.target.value) || 0;
+                          f.onChange(val);
+                          const qty = revisionForm.getValues(`additionalCharges.${index}.qty`) || 0;
+                          revisionForm.setValue(`additionalCharges.${index}.cost`, val * qty);
+                        }} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={revisionForm.control} name={`additionalCharges.${index}.cost`} render={({ field: f }) => (
+                      <FormItem className="col-span-3 sm:col-span-2">
+                        <FormLabel className="text-xs">Total (BD)</FormLabel>
+                        <FormControl><Input type="number" step="0.001" className="h-8 text-xs bg-slate-50 font-semibold" readOnly {...f} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <div className="col-span-1 sm:col-span-1 flex justify-end pb-0.5">
+                      <Button type="button" variant="ghost" size="sm" className="text-red-500 h-8 w-8 p-0 border bg-white hover:bg-red-50" onClick={() => removeRevisionExtra(index)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <DialogFooter className="pt-4">
+                <Button type="button" variant="outline" onClick={() => setIsQuotationRevisionDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={reviseQuotationMutation.isPending}>
+                  {reviseQuotationMutation.isPending ? "Saving..." : "Save Revision"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
 

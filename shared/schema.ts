@@ -1094,6 +1094,8 @@ export const quotations = pgTable("quotations", {
   paymentTerms: text("payment_terms"),
   version: integer("version").default(1),
   parentId: varchar("parent_id"),
+  noOfTrips: integer("no_of_trips").default(1),
+  noOfTrucks: integer("no_of_trucks").default(1),
 });
 
 export const quotationItems = pgTable("quotation_items", {
@@ -1819,6 +1821,8 @@ export const rfqs = pgTable("rfqs", {
   additionalRequirements: text("additional_requirements"),
   notes: text("notes"),
   validityDays: integer("validity_days").default(30),
+  noOfTrips: integer("no_of_trips").default(1),
+  noOfTrucks: integer("no_of_trucks").default(1),
 
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -1865,6 +1869,8 @@ export const orders = pgTable("orders", {
   specialInstructions: text("special_instructions"),
   customerReference: text("customer_reference"),
   numberOfShipments: integer("number_of_shipments").default(1),
+  noOfTrips: integer("no_of_trips").default(1),
+  noOfTrucks: integer("no_of_trucks").default(1),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

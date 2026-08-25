@@ -190,6 +190,8 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "requested_delivery_date" timestamp;
       ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "additional_requirements" text;
       ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "notes" text;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "no_of_trips" integer DEFAULT 1;
+      ALTER TABLE "rfqs" ADD COLUMN IF NOT EXISTS "no_of_trucks" integer DEFAULT 1;
 
       -- quotations
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "rfq_id" varchar;
@@ -204,6 +206,8 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "payment_terms" text;
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "version" integer DEFAULT 1;
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "parent_id" varchar;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "no_of_trips" integer DEFAULT 1;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "no_of_trucks" integer DEFAULT 1;
 
       -- orders
       ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "quotation_id" varchar;
@@ -211,6 +215,8 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "temperature_requirement" text;
       ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "special_instructions" text;
       ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "customer_reference" text;
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "no_of_trips" integer DEFAULT 1;
+      ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "no_of_trucks" integer DEFAULT 1;
 
       -- trips
       ALTER TABLE "trips" ADD COLUMN IF NOT EXISTS "order_id" varchar;

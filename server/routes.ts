@@ -8417,6 +8417,8 @@ export async function registerRoutes(
         additionalCharges: (rfq.extraCharges as any[]) || [],
         paymentTerms: "Net 30",
         version: 1,
+        noOfTrips: rfq.noOfTrips || 1,
+        noOfTrucks: rfq.noOfTrucks || 1,
         total: (parseFloat(rfq.transportationCharges || "0") + 
                 ((rfq.extraCharges as any[]) || []).reduce((sum, c) => sum + parseFloat(c.cost || "0"), 0)).toFixed(3),
         validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -8721,6 +8723,8 @@ export async function registerRoutes(
         detentionChargesPerDay: "0.000",
         grandTotal: quotation.total || "0.000",
         temperatureRequirement: quotation.temperatureRequirement,
+        noOfTrips: quotation.noOfTrips || 1,
+        noOfTrucks: quotation.noOfTrucks || 1,
         orderDate: new Date(),
         paymentDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         charges: [
