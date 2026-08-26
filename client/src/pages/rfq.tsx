@@ -1080,9 +1080,23 @@ export default function RfqPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Cargo Type</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. General, Hazardous" {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Cargo Type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="General">General</SelectItem>
+                          <SelectItem value="Hazardous">Hazardous</SelectItem>
+                          <SelectItem value="Fragile">Fragile</SelectItem>
+                          <SelectItem value="Perishable">Perishable</SelectItem>
+                          <SelectItem value="Cold Chain">Cold Chain</SelectItem>
+                          <SelectItem value="Flatbed / Oversized">Flatbed / Oversized</SelectItem>
+                          <SelectItem value="Dry Van">Dry Van</SelectItem>
+                          <SelectItem value="Assorted">Assorted</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1093,9 +1107,23 @@ export default function RfqPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Truck Type</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Flatbed, Reefer" {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Truck Type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Flatbed">Flatbed</SelectItem>
+                          <SelectItem value="Reefer">Reefer</SelectItem>
+                          <SelectItem value="Box Truck">Box Truck</SelectItem>
+                          <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
+                          <SelectItem value="Lowboy">Lowboy</SelectItem>
+                          <SelectItem value="Container Carrier">Container Carrier</SelectItem>
+                          <SelectItem value="Tanker">Tanker</SelectItem>
+                          <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1106,9 +1134,17 @@ export default function RfqPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Freight Type</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. FTL, LTL" {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Freight Type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="FTL">FTL (Full Truck Load)</SelectItem>
+                          <SelectItem value="LTL">LTL (Less than Truck Load)</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1630,13 +1666,55 @@ export default function RfqPage() {
 
                 <FormField
                   control={revisionForm.control}
+                  name="cargoType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cargo Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Cargo Type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="General">General</SelectItem>
+                          <SelectItem value="Hazardous">Hazardous</SelectItem>
+                          <SelectItem value="Fragile">Fragile</SelectItem>
+                          <SelectItem value="Perishable">Perishable</SelectItem>
+                          <SelectItem value="Cold Chain">Cold Chain</SelectItem>
+                          <SelectItem value="Flatbed / Oversized">Flatbed / Oversized</SelectItem>
+                          <SelectItem value="Dry Van">Dry Van</SelectItem>
+                          <SelectItem value="Assorted">Assorted</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={revisionForm.control}
                   name="truckType"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Truck Type</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Flatbed, Reefer" {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Truck Type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Flatbed">Flatbed</SelectItem>
+                          <SelectItem value="Reefer">Reefer</SelectItem>
+                          <SelectItem value="Box Truck">Box Truck</SelectItem>
+                          <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
+                          <SelectItem value="Lowboy">Lowboy</SelectItem>
+                          <SelectItem value="Container Carrier">Container Carrier</SelectItem>
+                          <SelectItem value="Tanker">Tanker</SelectItem>
+                          <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -1648,9 +1726,17 @@ export default function RfqPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Freight Type</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. FTL, LTL" {...field} />
-                      </FormControl>
+                      <Select onValueChange={field.onChange} value={field.value || ""}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Freight Type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="FTL">FTL (Full Truck Load)</SelectItem>
+                          <SelectItem value="LTL">LTL (Less than Truck Load)</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

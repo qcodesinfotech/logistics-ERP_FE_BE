@@ -858,14 +858,24 @@ export default function DispatchPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Truck Type *</label>
-                  <Input 
-                    value={rentedTruckType} 
-                    onChange={(e) => setRentedTruckType(e.target.value)} 
-                    placeholder="e.g. Flatbed, Reefer"
-                  />
-                </div>
+                 <div className="space-y-2">
+                   <label className="text-sm font-medium">Truck Type *</label>
+                   <Select onValueChange={setRentedTruckType} value={rentedTruckType}>
+                     <SelectTrigger>
+                       <SelectValue placeholder="Select Truck Type" />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="Flatbed">Flatbed</SelectItem>
+                       <SelectItem value="Reefer">Reefer</SelectItem>
+                       <SelectItem value="Box Truck">Box Truck</SelectItem>
+                       <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
+                       <SelectItem value="Lowboy">Lowboy</SelectItem>
+                       <SelectItem value="Container Carrier">Container Carrier</SelectItem>
+                       <SelectItem value="Tanker">Tanker</SelectItem>
+                       <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
+                     </SelectContent>
+                   </Select>
+                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Plate Number *</label>
                   <Input 

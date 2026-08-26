@@ -877,9 +877,23 @@ export default function OrdersPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Type of Cargo</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. Hazardous, Fragile" {...field} />
-                        </FormControl>
+                        <Select onValueChange={field.onChange} value={field.value || ""}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select Cargo Type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="General">General</SelectItem>
+                            <SelectItem value="Hazardous">Hazardous</SelectItem>
+                            <SelectItem value="Fragile">Fragile</SelectItem>
+                            <SelectItem value="Perishable">Perishable</SelectItem>
+                            <SelectItem value="Cold Chain">Cold Chain</SelectItem>
+                            <SelectItem value="Flatbed / Oversized">Flatbed / Oversized</SelectItem>
+                            <SelectItem value="Dry Van">Dry Van</SelectItem>
+                            <SelectItem value="Assorted">Assorted</SelectItem>
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -890,9 +904,20 @@ export default function OrdersPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Freight Type</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g. Ocean, Air, Land" {...field} />
-                        </FormControl>
+                        <Select onValueChange={field.onChange} value={field.value || ""}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select Freight Type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="FTL">FTL (Full Truck Load)</SelectItem>
+                            <SelectItem value="LTL">LTL (Less than Truck Load)</SelectItem>
+                            <SelectItem value="Ocean">Ocean</SelectItem>
+                            <SelectItem value="Air">Air</SelectItem>
+                            <SelectItem value="Land">Land</SelectItem>
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -929,9 +954,23 @@ export default function OrdersPage() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel>Type of Truck</FormLabel>
-                          <FormControl>
-                            <Input placeholder="e.g. Flatbed, Reefer" {...field} />
-                          </FormControl>
+                          <Select onValueChange={field.onChange} value={field.value || ""}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select Truck Type" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="Flatbed">Flatbed</SelectItem>
+                              <SelectItem value="Reefer">Reefer</SelectItem>
+                              <SelectItem value="Box Truck">Box Truck</SelectItem>
+                              <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
+                              <SelectItem value="Lowboy">Lowboy</SelectItem>
+                              <SelectItem value="Container Carrier">Container Carrier</SelectItem>
+                              <SelectItem value="Tanker">Tanker</SelectItem>
+                              <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
+                            </SelectContent>
+                          </Select>
                           <FormMessage />
                         </FormItem>
                       )}
