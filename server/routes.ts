@@ -9949,6 +9949,16 @@ export async function registerRoutes(
     }
   });
 
+  const formatToDDMMYYYY = (dateVal: any): string => {
+    if (!dateVal) return "Today";
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
   app.get("/api/reports/route-pod-pdf", async (req: Request, res) => {
     try {
       const sheetId = req.query.sheetId as string;
@@ -9964,7 +9974,7 @@ export async function registerRoutes(
 
       // 2. Fetch sheet info
       const [sheetRow] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, sheetId));
-      const sheetDate = sheetRow?.date || "Today";
+      const sheetDate = sheetRow?.date ? formatToDDMMYYYY(sheetRow.date) : "Today";
 
       // 3. Fetch completed deliveries matching this sheet and route
       const deliveriesQuery = await db.select({
@@ -10069,7 +10079,7 @@ export async function registerRoutes(
       doc.fillColor("#1F2937").fontSize(10);
       doc.text(`Route Name: ${routeName}`, 40, doc.y);
       doc.text(`Sheet Date: ${sheetDate}`, 300, doc.y - 12);
-      doc.text(`Generated At: ${new Date().toLocaleString()}`, 40, doc.y + 6);
+      doc.text(`Generated At: ${formatToDDMMYYYY(new Date())} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`, 40, doc.y + 6);
       doc.moveDown(2);
 
       // Horizontal separator line
@@ -10145,18 +10155,40 @@ export async function registerRoutes(
           doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
           doc.moveDown(0.4);
 
+          let totalOrdered = 0;
+          let totalDelivered = 0;
           for (const it of items) {
             y = doc.y;
-            if (y > 750) {
+            if (y > 730) {
               doc.addPage();
               y = doc.y;
             }
+            const reqQty = parseFloat(it.requestedQty || it.weight || "0");
+            const delQty = parseFloat(it.deliveredQty || "0");
+            totalOrdered += reqQty;
+            totalDelivered += delQty;
+
             doc.fillColor("#1F2937").text(it.itemCode, 40, y);
             doc.text(it.description || "N/A", 120, y, { width: 220 });
-            doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
-            doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
+            doc.text(reqQty.toFixed(1), 350, y);
+            doc.text(delQty.toFixed(1), 450, y);
             doc.moveDown(1.2);
           }
+          
+          y = doc.y;
+          if (y > 750) {
+            doc.addPage();
+            y = doc.y;
+          }
+          doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+          y += 5;
+          doc.font("Helvetica-Bold").fillColor("#1F2937").text("Total", 120, y);
+          doc.text(totalOrdered.toFixed(1), 350, y);
+          doc.text(totalDelivered.toFixed(1), 450, y);
+          doc.font("Helvetica");
+          y += 12;
+          doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+          doc.y = y + 10;
           doc.moveDown(1.5);
         }
 
@@ -10359,7 +10391,7 @@ export async function registerRoutes(
         
         currentY += 15;
         doc.text(`Route: ${routeName}`, 40, currentY);
-        doc.text(`Delivery Date: ${firstRow.deliveredAt ? new Date(firstRow.deliveredAt).toLocaleDateString() : "Today"}`, 300, currentY);
+        doc.text(`Delivery Date: ${firstRow.deliveredAt ? formatToDDMMYYYY(firstRow.deliveredAt) : "Today"}`, 300, currentY);
         
         currentY += 15;
         doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, currentY);
@@ -10398,18 +10430,40 @@ export async function registerRoutes(
         doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
         doc.moveDown(0.4);
 
+        let totalOrdered = 0;
+        let totalDelivered = 0;
         for (const it of items) {
           y = doc.y;
-          if (y > 750) {
+          if (y > 730) {
             doc.addPage();
             y = doc.y;
           }
+          const reqQty = parseFloat(it.requestedQty || it.weight || "0");
+          const delQty = parseFloat(it.deliveredQty || "0");
+          totalOrdered += reqQty;
+          totalDelivered += delQty;
+
           doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y);
           doc.text(it.description || "N/A", 120, y, { width: 220 });
-          doc.text(parseFloat(it.requestedQty || it.weight || "0").toFixed(1), 350, y);
-          doc.text(parseFloat(it.deliveredQty || "0").toFixed(1), 450, y);
+          doc.text(reqQty.toFixed(1), 350, y);
+          doc.text(delQty.toFixed(1), 450, y);
           doc.moveDown(1.2);
         }
+
+        y = doc.y;
+        if (y > 750) {
+          doc.addPage();
+          y = doc.y;
+        }
+        doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+        y += 5;
+        doc.font("Helvetica-Bold").fillColor("#1F2937").text("Total", 120, y);
+        doc.text(totalOrdered.toFixed(1), 350, y);
+        doc.text(totalDelivered.toFixed(1), 450, y);
+        doc.font("Helvetica");
+        y += 12;
+        doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+        doc.y = y + 10;
         doc.moveDown(1.5);
       }
 
