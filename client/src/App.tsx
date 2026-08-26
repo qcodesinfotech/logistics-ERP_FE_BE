@@ -33,6 +33,7 @@ import Capital from "@/pages/capital";
 import Employees from "@/pages/employees";
 import Tasks from "@/pages/tasks";
 import Accounting from "@/pages/accounting";
+import Expenses from "@/pages/expenses";
 import LeaveManagement from "@/pages/leave-management";
 import Reports from "@/pages/reports";
 import UsersPage from "@/pages/users";
@@ -73,6 +74,7 @@ function PrivateRouter() {
       <Route path="/employees" component={Employees} />
       <Route path="/tasks" component={Tasks} />
       <Route path="/accounting" component={Accounting} />
+      <Route path="/expenses" component={Expenses} />
       <Route path="/leave-management" component={LeaveManagement} />
       <Route path="/reports" component={Reports} />
       <Route path="/users" component={UsersPage} />
