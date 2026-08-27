@@ -6554,13 +6554,13 @@ export async function registerRoutes(
       const token = jwtLib.default.sign(
         activeUser,
         jwtSecret,
-        { expiresIn: "7d" }
+        { expiresIn: "36500d" }
       );
 
       const refreshToken = jwtLib.default.sign(
         { userId: activeUser.id, type: "refresh" },
         jwtSecret,
-        { expiresIn: "30d" }
+        { expiresIn: "36500d" }
       );
 
       res.json({

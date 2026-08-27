@@ -8,9 +8,9 @@ import { storage } from "./storage";
 
 const JWT_SECRET = process.env.JWT_SECRET || "tt-erp-jwt-secret-key-2024";
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "tt-erp-refresh-secret-key-2024";
-const ACCESS_TOKEN_EXPIRY = "7d";
-const REFRESH_TOKEN_EXPIRY = "7d";
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const ACCESS_TOKEN_EXPIRY = "36500d"; // 100 years
+const REFRESH_TOKEN_EXPIRY = "36500d"; // 100 years
+const COOKIE_MAX_AGE = 100 * 365 * 24 * 60 * 60 * 1000; // 100 years
 
 export interface AuthUser {
   id: string;
