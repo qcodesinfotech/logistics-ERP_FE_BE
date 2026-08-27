@@ -6853,7 +6853,7 @@ export class DatabaseStorage implements IStorage {
 
   // Logistics RFQs
   async getRfqs(): Promise<Rfq[]> {
-    return db.select().from(rfqs);
+    return db.select().from(rfqs).orderBy(desc(rfqs.createdAt));
   }
 
   async getRfq(id: string): Promise<Rfq | undefined> {
@@ -6882,9 +6882,9 @@ export class DatabaseStorage implements IStorage {
     if (zoneId) conditions.push(eq(orders.zoneId, zoneId));
     if (status) conditions.push(eq(orders.status, status));
     if (conditions.length > 0) {
-      return db.select().from(orders).where(and(...conditions));
+      return db.select().from(orders).where(and(...conditions)).orderBy(desc(orders.createdAt));
     }
-    return db.select().from(orders);
+    return db.select().from(orders).orderBy(desc(orders.createdAt));
   }
 
   async getOrder(id: string): Promise<Order | undefined> {

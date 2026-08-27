@@ -4667,7 +4667,7 @@ export async function registerRoutes(
     { name: "stampFile", maxCount: 1 },
   ]), async (req: AuthRequest, res) => {
     try {
-      const { signatureBase64 } = req.body;
+      const { signatureBase64, sellingRate, additionalCharges } = req.body;
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
       let managerSignature = "";
       let companyStamp = "";
@@ -4688,12 +4688,31 @@ export async function registerRoutes(
       if (files?.stampFile?.[0]) {
         companyStamp = `/uploads/quotations/${files.stampFile[0].filename}`;
       }
-
-      const quotation = await storage.updateQuotation(req.params.id, { 
+      
+      const updateData: any = { 
         status: "approved",
-        managerSignature,
-        companyStamp
-      });
+      };
+      
+      if (managerSignature) updateData.managerSignature = managerSignature;
+      if (companyStamp) updateData.companyStamp = companyStamp;
+
+      if (sellingRate !== undefined && sellingRate !== null) {
+        updateData.sellingRate = parseFloat(sellingRate).toFixed(3);
+        
+        let additionalTotal = 0;
+        if (additionalCharges !== undefined) {
+           updateData.additionalCharges = additionalCharges;
+           additionalTotal = additionalCharges.reduce((sum: number, c: any) => sum + (parseFloat(c.cost) || 0), 0);
+        } else {
+           const existingQuote = await storage.getQuotation(req.params.id);
+           if (existingQuote) {
+             additionalTotal = existingQuote.additionalCharges?.reduce((sum: number, c: any) => sum + (parseFloat(c.cost) || 0), 0) || 0;
+           }
+        }
+        updateData.total = (parseFloat(sellingRate) + additionalTotal).toFixed(3);
+      }
+
+      const quotation = await storage.updateQuotation(req.params.id, updateData);
 
       if (!quotation) return res.status(404).json({ error: "Quotation not found" });
       res.json(quotation);
@@ -8499,6 +8518,28 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/orders/:id/dispatch-plan", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { noOfTrips, noOfTrucks } = req.body;
+      if (!noOfTrips || !noOfTrucks) {
+        return res.status(400).json({ error: "noOfTrips and noOfTrucks are required" });
+      }
+      const numberOfShipments = Number(noOfTrips) * Number(noOfTrucks);
+      
+      const order = await storage.updateOrder(req.params.id, { 
+        noOfTrips: Number(noOfTrips), 
+        noOfTrucks: Number(noOfTrucks),
+        numberOfShipments
+      });
+      
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      res.json(order);
+    } catch (error) {
+      console.error("Update dispatch plan error:", error);
+      res.status(500).json({ error: "Failed to update dispatch plan" });
+    }
+  });
+
   // Logistics Trips API
   app.get("/api/trips", authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -8527,6 +8568,74 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Get trip error:", error);
       res.status(500).json({ error: "Failed to fetch trip" });
+    }
+  });
+
+  app.post("/api/trips/batch", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { tripsData, orderIds } = req.body;
+      if (!tripsData || !Array.isArray(tripsData)) {
+        return res.status(400).json({ error: "tripsData array is required" });
+      }
+
+      const createdTrips = [];
+      const currentTrips = await storage.getTrips();
+      let tripCount = currentTrips.length;
+
+      for (const tripData of tripsData) {
+        if (!tripData.vehicleId || !tripData.driverId) {
+          continue; // skip invalid
+        }
+
+        if (!tripData.isRented && tripData.vehicleId !== "temp-rented") {
+          const truck = await storage.getVehicle(tripData.vehicleId);
+          if (!truck) continue;
+          if (truck.status === 'maintenance') continue;
+
+          const activeVehicleTrips = await db.select().from(schema.trips).where(
+            and(
+              eq(schema.trips.vehicleId, tripData.vehicleId),
+              ne(schema.trips.status, 'completed'),
+              ne(schema.trips.status, 'cancelled')
+            )
+          );
+          if (activeVehicleTrips.length > 0) continue;
+        }
+
+        // Check if driver is already on an active trip (only if it's an internal driver ID)
+        if (tripData.driverId && tripData.driverId.length === 36) { // basic UUID check
+          const activeDriverTrips = await db.select().from(schema.trips).where(
+            and(
+              eq(schema.trips.driverId, tripData.driverId),
+              ne(schema.trips.status, 'completed'),
+              ne(schema.trips.status, 'cancelled')
+            )
+          );
+          if (activeDriverTrips.length > 0) continue;
+        }
+
+        const tripNumber = tripData.tripNumber || `TR-${(++tripCount).toString().padStart(6, "0")}`;
+
+        const parsedTripData = {
+          ...tripData,
+          tripNumber,
+          startTime: tripData.startTime ? new Date(tripData.startTime) : new Date(),
+          endTime: tripData.endTime ? new Date(tripData.endTime) : null,
+        };
+
+        const trip = await storage.createTrip({ ...parsedTripData, orderIds: orderIds || [] });
+        
+        if (!tripData.isRented && tripData.vehicleId !== "temp-rented") {
+          await storage.updateVehicle(tripData.vehicleId, { status: "in_transit" });
+        }
+        
+        createdTrips.push(trip);
+      }
+      
+      res.status(201).json(createdTrips);
+    } catch (error: any) {
+      console.error("Batch create trips error:", error);
+      res.status(500).json({ error: "Failed to create batch trips: " + error.message });
     }
   });
 

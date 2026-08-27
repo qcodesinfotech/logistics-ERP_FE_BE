@@ -46,17 +46,27 @@ export default function DispatchPage() {
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
-  const [selectedDriverId, setSelectedDriverId] = useState<string>("");
   const [tripRoute, setTripRoute] = useState("");
-  const [selectedTrailerNumber, setSelectedTrailerNumber] = useState("");
-  const [tripPrice, setTripPrice] = useState("0.000");
+  
+  const [launchTripsCount, setLaunchTripsCount] = useState("1");
+  const [launchTrucksCount, setLaunchTrucksCount] = useState("1");
+  const [launchTruckAssignments, setLaunchTruckAssignments] = useState<any[]>([{
+    truckSource: "owned",
+    vehicleId: "",
+    driverId: "",
+    manualDriverName: "",
+    trailerNumber: "",
+    tripPrice: "0.000",
+    rentedTruckType: "",
+    rentedTruckNumber: "",
+    rentedCapacity: "",
+    rentedTruckPrice: "0.000",
+  }]);
 
-  const [truckSource, setTruckSource] = useState<"owned" | "rented">("owned");
-  const [rentedTruckType, setRentedTruckType] = useState("");
-  const [rentedTruckNumber, setRentedTruckNumber] = useState("");
-  const [rentedCapacity, setRentedCapacity] = useState("");
-  const [rentedTruckPrice, setRentedTruckPrice] = useState("0.000");
+  const [isConfigureTripsDialogOpen, setIsConfigureTripsDialogOpen] = useState(false);
+  const [configuringOrder, setConfiguringOrder] = useState<any>(null);
+  const [configTrips, setConfigTrips] = useState("1");
+  const [configTrucks, setConfigTrucks] = useState("1");
 
   // Depart / Pickup Loading States
   const [isDepartDialogOpen, setIsDepartDialogOpen] = useState(false);
@@ -190,71 +200,99 @@ export default function DispatchPage() {
   const availableVehicles = vehiclesList?.filter(v => v.status === "available" && !activeVehicleIds.includes(v.id)) || [];
 
   // Mutations
-  const createTripMutation = useMutation({
+  const createBatchTripsMutation = useMutation({
     mutationFn: async (data: {
-      vehicleId: string;
-      driverId: string;
+      trips: any[];
       orderIds: string[];
-      route: string;
-      status: string;
-      startTime: Date;
-      trailerNumber?: string;
-      sellingRate?: string;
-      isRented?: boolean;
+      noOfTrips: number;
     }) => {
-      let finalVehicleId = data.vehicleId;
-      let additionalExpenses = [];
-      let otherTripExpenses = "0.000";
+      const preparedTrips = [];
+      for (const t of data.trips) {
+        let finalVehicleId = t.vehicleId;
+        let additionalExpenses = [];
+        let otherTripExpenses = "0.000";
 
-      if (data.isRented) {
-        const vehicleRes = await apiRequest("POST", "/api/vehicles", {
-          name: rentedTruckType || "Rented Truck",
-          plateNumber: rentedTruckNumber || "N/A",
-          type: "outsourced",
-          capacity: rentedCapacity || "0",
-          status: "in_transit"
-        });
-        const newVehicle = await vehicleRes.json();
-        finalVehicleId = newVehicle.id;
-
-        if (rentedTruckPrice && parseFloat(rentedTruckPrice) > 0) {
-          additionalExpenses.push({
-            name: "Rented Truck Cost",
-            cost: parseFloat(rentedTruckPrice)
+        if (t.truckSource === 'rented') {
+          const vehicleRes = await apiRequest("POST", "/api/vehicles", {
+            name: t.rentedTruckType || "Rented Truck",
+            plateNumber: t.rentedTruckNumber || "N/A",
+            type: "outsourced",
+            capacity: t.rentedCapacity || "0",
+            status: "in_transit"
           });
-          otherTripExpenses = rentedTruckPrice;
+          const newVehicle = await vehicleRes.json();
+          finalVehicleId = newVehicle.id;
+
+          if (t.rentedTruckPrice && parseFloat(t.rentedTruckPrice) > 0) {
+            additionalExpenses.push({
+              name: "Rented Truck Cost",
+              cost: parseFloat(t.rentedTruckPrice)
+            });
+            otherTripExpenses = t.rentedTruckPrice;
+          }
+        }
+
+        preparedTrips.push({
+          vehicleId: finalVehicleId,
+          driverId: t.driverId === 'manual' ? t.manualDriverName : t.driverId,
+          route: tripRoute,
+          status: "pending",
+          startTime: new Date(),
+          trailerNumber: t.trailerNumber || undefined,
+          sellingRate: t.tripPrice,
+          isRented: t.truckSource === 'rented',
+          additionalExpenses,
+          otherTripExpenses
+        });
+      }
+
+      if (data.orderIds.length > 0) {
+        for (const orderId of data.orderIds) {
+           await apiRequest("PATCH", `/api/orders/${orderId}/dispatch-plan`, { 
+             noOfTrips: data.noOfTrips, 
+             noOfTrucks: data.trips.length 
+           });
         }
       }
 
-      return apiRequest("POST", "/api/trips", {
-        ...data,
-        vehicleId: finalVehicleId,
-        additionalExpenses,
-        otherTripExpenses
+      return apiRequest("POST", "/api/trips/batch", {
+        tripsData: preparedTrips,
+        orderIds: data.orderIds
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
-      toast({ title: "Trip launched successfully! Vehicles and Drivers dispatched." });
+      toast({ title: "Trips launched successfully! Vehicles and Drivers dispatched." });
       setIsAssignDialogOpen(false);
-      // Reset
+      
       setSelectedOrderIds([]);
-      setSelectedVehicleId("");
-      setSelectedDriverId("");
       setTripRoute("");
-      setSelectedTrailerNumber("");
-      setTripPrice("0.000");
-      setTruckSource("owned");
-      setRentedTruckType("");
-      setRentedTruckNumber("");
-      setRentedCapacity("");
-      setRentedTruckPrice("0.000");
+      setLaunchTripsCount("1");
+      setLaunchTrucksCount("1");
+      setLaunchTruckAssignments([{
+        truckSource: "owned", vehicleId: "", driverId: "", manualDriverName: "",
+        trailerNumber: "", tripPrice: "0.000", rentedTruckType: "", rentedTruckNumber: "",
+        rentedCapacity: "", rentedTruckPrice: "0.000"
+      }]);
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
     },
+  });
+
+  const updateDispatchPlanMutation = useMutation({
+    mutationFn: (data: { orderId: string, noOfTrips: number, noOfTrucks: number }) => 
+      apiRequest("PATCH", `/api/orders/${data.orderId}/dispatch-plan`, { noOfTrips: data.noOfTrips, noOfTrucks: data.noOfTrucks }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Dispatch plan updated" });
+      setIsConfigureTripsDialogOpen(false);
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    }
   });
 
   const updateTripMutation = useMutation({
@@ -598,6 +636,20 @@ export default function DispatchPage() {
                           <div className="flex justify-between items-center">
                             <span className="font-semibold text-xs text-foreground">{order.orderNumber}</span>
                             <div className="flex items-center gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-5 text-[10px] px-2 py-0 border-blue-200 text-blue-600 hover:bg-blue-50"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfiguringOrder(order);
+                                  setConfigTrips(String(order.noOfTrips || 1));
+                                  setConfigTrucks(String(order.noOfTrucks || 1));
+                                  setIsConfigureTripsDialogOpen(true);
+                                }}
+                              >
+                                Configure Plan
+                              </Button>
                               <span className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full font-medium">
                                 Shipment {orderTripsCount + 1}/{order.numberOfShipments || 1}
                               </span>
@@ -668,7 +720,7 @@ export default function DispatchPage() {
                             </div>
                             <div className="flex items-center gap-1 text-muted-foreground">
                               <User className="h-3 w-3 text-muted-foreground" />
-                              {driver?.name || "Unassigned"}
+                              {driver?.name || (trip.driverId !== "unassigned" ? trip.driverId : null) || "Unassigned"}
                             </div>
                           </TableCell>
                           <TableCell className="text-xs">
@@ -829,95 +881,43 @@ export default function DispatchPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Truck Source *</label>
-              <Select onValueChange={(val: any) => setTruckSource(val)} value={truckSource}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select truck source" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="owned">Owned / Internal</SelectItem>
-                  <SelectItem value="rented">Rented / Outsourced</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {truckSource === 'owned' ? (
+            <div className="grid grid-cols-2 gap-4 bg-muted/30 p-3 rounded-md border">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Select Vehicle / Truck *</label>
-                <Select onValueChange={setSelectedVehicleId} value={selectedVehicleId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select available vehicle" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableVehicles.map(v => (
-                      <SelectItem key={v.id} value={v.id}>{v.name} ({v.plateNumber}) - Cap: {v.capacity || "N/A"}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label className="text-sm font-medium">Number of Trucks *</label>
+                <Input 
+                  type="number"
+                  min="1"
+                  value={launchTrucksCount} 
+                  onChange={(e) => {
+                    const count = parseInt(e.target.value) || 1;
+                    setLaunchTrucksCount(e.target.value);
+                    setLaunchTruckAssignments(prev => {
+                      const newArr = [...prev];
+                      if (count > prev.length) {
+                        for (let i = prev.length; i < count; i++) {
+                          newArr.push({
+                            truckSource: "owned", vehicleId: "", driverId: "", manualDriverName: "",
+                            trailerNumber: "", tripPrice: "0.000", rentedTruckType: "", rentedTruckNumber: "",
+                            rentedCapacity: "", rentedTruckPrice: "0.000"
+                          });
+                        }
+                      } else if (count < prev.length) {
+                        newArr.length = count;
+                      }
+                      return newArr;
+                    });
+                  }} 
+                />
               </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-4">
-                 <div className="space-y-2">
-                   <label className="text-sm font-medium">Truck Type *</label>
-                   <Select onValueChange={setRentedTruckType} value={rentedTruckType}>
-                     <SelectTrigger>
-                       <SelectValue placeholder="Select Truck Type" />
-                     </SelectTrigger>
-                     <SelectContent>
-                       <SelectItem value="Flatbed">Flatbed</SelectItem>
-                       <SelectItem value="Reefer">Reefer</SelectItem>
-                       <SelectItem value="Box Truck">Box Truck</SelectItem>
-                       <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
-                       <SelectItem value="Lowboy">Lowboy</SelectItem>
-                       <SelectItem value="Container Carrier">Container Carrier</SelectItem>
-                       <SelectItem value="Tanker">Tanker</SelectItem>
-                       <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
-                     </SelectContent>
-                   </Select>
-                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Plate Number *</label>
-                  <Input 
-                    value={rentedTruckNumber} 
-                    onChange={(e) => setRentedTruckNumber(e.target.value)} 
-                    placeholder="e.g. 12345"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Capacity (Tons) *</label>
-                  <Input 
-                    type="number"
-                    value={rentedCapacity} 
-                    onChange={(e) => setRentedCapacity(e.target.value)} 
-                    placeholder="e.g. 10"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Truck Price (BD) *</label>
-                  <Input 
-                    type="number"
-                    step="0.001"
-                    value={rentedTruckPrice} 
-                    onChange={(e) => setRentedTruckPrice(e.target.value)} 
-                    placeholder="0.000"
-                  />
-                </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Number of Trips *</label>
+                <Input 
+                  type="number"
+                  min="1"
+                  value={launchTripsCount} 
+                  onChange={(e) => setLaunchTripsCount(e.target.value)} 
+                />
               </div>
-            )}
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Select Authorized Driver *</label>
-              <Select onValueChange={setSelectedDriverId} value={selectedDriverId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select active driver" />
-                </SelectTrigger>
-                <SelectContent>
-                  {driversList?.map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="space-y-2">
@@ -925,29 +925,152 @@ export default function DispatchPage() {
               <Input 
                 value={tripRoute} 
                 onChange={(e) => setTripRoute(e.target.value)} 
-                placeholder="Transit nodes summary"
+                placeholder="Transit nodes summary for all trucks"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Trailer Number</label>
-                <Input 
-                  value={selectedTrailerNumber} 
-                  onChange={(e) => setSelectedTrailerNumber(e.target.value)} 
-                  placeholder="e.g. TR-890"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Trip Price / Revenue (BD)</label>
-                <Input 
-                  type="number"
-                  step="0.001"
-                  value={tripPrice} 
-                  onChange={(e) => setTripPrice(e.target.value)} 
-                  placeholder="0.000"
-                />
-              </div>
+            <div className="max-h-[50vh] overflow-y-auto space-y-6 pr-2">
+              {launchTruckAssignments.map((assignment, index) => {
+                const updateAssignment = (field: string, value: any) => {
+                  setLaunchTruckAssignments(prev => {
+                    const newArr = [...prev];
+                    newArr[index] = { ...newArr[index], [field]: value };
+                    return newArr;
+                  });
+                };
+
+                return (
+                  <div key={index} className="space-y-4 p-4 border rounded-md relative bg-card shadow-sm">
+                    <div className="absolute top-0 right-0 bg-primary text-primary-foreground px-2 py-1 text-xs font-bold rounded-bl-md rounded-tr-md">
+                      Truck {index + 1}
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Truck Source *</label>
+                      <Select onValueChange={(val: any) => updateAssignment('truckSource', val)} value={assignment.truckSource}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select truck source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="owned">Owned / Internal</SelectItem>
+                          <SelectItem value="rented">Rented / Outsourced</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {assignment.truckSource === 'owned' ? (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Select Vehicle / Truck *</label>
+                        <Select onValueChange={(val) => updateAssignment('vehicleId', val)} value={assignment.vehicleId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select available vehicle" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableVehicles.map(v => (
+                              <SelectItem key={v.id} value={v.id}>{v.name} ({v.plateNumber}) - Cap: {v.capacity || "N/A"}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-4">
+                         <div className="space-y-2">
+                           <label className="text-sm font-medium">Truck Type *</label>
+                           <Select onValueChange={(val) => updateAssignment('rentedTruckType', val)} value={assignment.rentedTruckType}>
+                             <SelectTrigger>
+                               <SelectValue placeholder="Select Truck Type" />
+                             </SelectTrigger>
+                             <SelectContent>
+                               <SelectItem value="Flatbed">Flatbed</SelectItem>
+                               <SelectItem value="Reefer">Reefer</SelectItem>
+                               <SelectItem value="Box Truck">Box Truck</SelectItem>
+                               <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
+                               <SelectItem value="Lowboy">Lowboy</SelectItem>
+                               <SelectItem value="Container Carrier">Container Carrier</SelectItem>
+                               <SelectItem value="Tanker">Tanker</SelectItem>
+                               <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
+                             </SelectContent>
+                           </Select>
+                         </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Plate Number *</label>
+                          <Input 
+                            value={assignment.rentedTruckNumber} 
+                            onChange={(e) => updateAssignment('rentedTruckNumber', e.target.value)} 
+                            placeholder="e.g. 12345"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Capacity (Tons) *</label>
+                          <Input 
+                            type="number"
+                            value={assignment.rentedCapacity} 
+                            onChange={(e) => updateAssignment('rentedCapacity', e.target.value)} 
+                            placeholder="e.g. 10"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Truck Price (BD) *</label>
+                          <Input 
+                            type="number"
+                            step="0.001"
+                            value={assignment.rentedTruckPrice} 
+                            onChange={(e) => updateAssignment('rentedTruckPrice', e.target.value)} 
+                            placeholder="0.000"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Select Authorized Driver *</label>
+                      <Select onValueChange={(val) => {
+                        updateAssignment('driverId', val);
+                        if (val !== "manual") updateAssignment('manualDriverName', "");
+                      }} value={assignment.driverId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select active driver" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {driversList?.map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                          <SelectItem value="manual" className="font-semibold text-blue-600">Other (Enter Manually)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {assignment.driverId === "manual" && (
+                        <Input 
+                          placeholder="Enter manual driver name..." 
+                          value={assignment.manualDriverName} 
+                          onChange={(e) => updateAssignment('manualDriverName', e.target.value)} 
+                          className="mt-2"
+                        />
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Trailer Number</label>
+                        <Input 
+                          value={assignment.trailerNumber} 
+                          onChange={(e) => updateAssignment('trailerNumber', e.target.value)} 
+                          placeholder="e.g. TR-890"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Trip Price / Revenue (BD)</label>
+                        <Input 
+                          type="number"
+                          step="0.001"
+                          value={assignment.tripPrice} 
+                          onChange={(e) => updateAssignment('tripPrice', e.target.value)} 
+                          placeholder="0.000"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
           <DialogFooter className="pt-4">
@@ -956,24 +1079,24 @@ export default function DispatchPage() {
             </Button>
             <Button 
               type="button" 
-              onClick={() => createTripMutation.mutate({
-                vehicleId: truckSource === 'owned' ? selectedVehicleId : "temp-rented",
-                driverId: selectedDriverId,
-                orderIds: selectedOrderIds,
-                route: tripRoute,
-                status: "pending",
-                startTime: new Date(),
-                trailerNumber: selectedTrailerNumber || undefined,
-                sellingRate: tripPrice,
-                isRented: truckSource === 'rented',
-              })}
+              onClick={() => {
+                createBatchTripsMutation.mutate({
+                  trips: launchTruckAssignments,
+                  orderIds: selectedOrderIds,
+                  noOfTrips: parseInt(launchTripsCount) || 1
+                });
+              }}
               disabled={
-                truckSource === 'owned'
-                  ? (!selectedVehicleId || !selectedDriverId || !tripRoute || createTripMutation.isPending)
-                  : (!rentedTruckType || !rentedTruckNumber || !rentedCapacity || !selectedDriverId || !tripRoute || createTripMutation.isPending)
+                !tripRoute || 
+                createBatchTripsMutation.isPending || 
+                launchTruckAssignments.some(t => 
+                  t.truckSource === 'owned' 
+                    ? (!t.vehicleId || !t.driverId || (t.driverId === 'manual' && !t.manualDriverName))
+                    : (!t.rentedTruckType || !t.rentedTruckNumber || !t.rentedCapacity || !t.driverId || (t.driverId === 'manual' && !t.manualDriverName))
+                )
               }
             >
-              {createTripMutation.isPending ? "Launching..." : "Launch Trip"}
+              {createBatchTripsMutation.isPending ? "Launching..." : `Launch ${launchTruckAssignments.length} Trucks`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1674,6 +1797,65 @@ export default function DispatchPage() {
               disabled={updateTripMutation.isPending}
             >
               {updateTripMutation.isPending ? "Logging Updates..." : "Save Transit Logs"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Configure Trips Dialog */}
+      <Dialog open={isConfigureTripsDialogOpen} onOpenChange={setIsConfigureTripsDialogOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Configure Dispatch Plan</DialogTitle>
+            <DialogDescription>
+              Set the required number of trips and trucks for this order to automatically adjust the pending queue size.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Number of Trips *</label>
+              <Input 
+                type="number"
+                min="1"
+                value={configTrips} 
+                onChange={(e) => setConfigTrips(e.target.value)} 
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Number of Trucks *</label>
+              <Input 
+                type="number"
+                min="1"
+                value={configTrucks} 
+                onChange={(e) => setConfigTrucks(e.target.value)} 
+              />
+            </div>
+            <div className="pt-2">
+              <div className="flex justify-between items-center text-sm font-medium bg-muted/50 p-2 rounded-md">
+                <span>Total Pending Shipments:</span>
+                <span className="text-blue-600 font-bold">{(parseInt(configTrips) || 1) * (parseInt(configTrucks) || 1)}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1 text-center">Calculated as: Trips × Trucks</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsConfigureTripsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              type="button" 
+              onClick={() => {
+                if (configuringOrder) {
+                  updateDispatchPlanMutation.mutate({
+                    orderId: configuringOrder.id,
+                    noOfTrips: parseInt(configTrips) || 1,
+                    noOfTrucks: parseInt(configTrucks) || 1
+                  });
+                }
+              }}
+              disabled={updateDispatchPlanMutation.isPending || (parseInt(configTrips) || 0) < 1 || (parseInt(configTrucks) || 0) < 1}
+            >
+              {updateDispatchPlanMutation.isPending ? "Updating..." : "Save Dispatch Plan"}
             </Button>
           </DialogFooter>
         </DialogContent>

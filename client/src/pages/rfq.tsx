@@ -122,6 +122,10 @@ export default function RfqPage() {
   const [isQuickClientDialogOpen, setIsQuickClientDialogOpen] = useState(false);
   const [isQuotationRevisionDialogOpen, setIsQuotationRevisionDialogOpen] = useState(false);
   const [revisingQuotation, setRevisingQuotation] = useState<any>(null);
+  const [isApproveDialogOpen, setIsApproveDialogOpen] = useState(false);
+  const [approvingQuotation, setApprovingQuotation] = useState<any>(null);
+  const [approvePrice, setApprovePrice] = useState("");
+  const [approveExtraCharges, setApproveExtraCharges] = useState<any[]>([]);
   const [quickClientName, setQuickClientName] = useState("");
   const [quickClientCompany, setQuickClientCompany] = useState("");
   const [quickClientPhone, setQuickClientPhone] = useState("");
@@ -269,6 +273,7 @@ export default function RfqPage() {
   const watchedTransportation = form.watch("transportationCharges");
   const watchedOutsourced = form.watch("outsourcedTruckCost");
   const watchedExtraCharges = form.watch("extraCharges");
+  const watchedRevisionTruckType = revisionForm.watch("truckType");
 
   const calcTotal = () => {
     const t = parseFloat(String(watchedTransportation)) || 0;
@@ -414,10 +419,11 @@ export default function RfqPage() {
   });
 
   const approveQuotationMutation = useMutation({
-    mutationFn: (id: string) => apiRequest("POST", `/api/quotations/${id}/approve`),
+    mutationFn: ({ id, sellingRate, additionalCharges }: { id: string, sellingRate?: string, additionalCharges?: any[] }) => apiRequest("POST", `/api/quotations/${id}/approve`, { sellingRate, additionalCharges }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/quotations"] });
       toast({ title: "Quotation approved successfully!" });
+      setIsApproveDialogOpen(false);
     },
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
@@ -898,7 +904,20 @@ export default function RfqPage() {
                                   variant="outline" 
                                   size="sm" 
                                   className="h-8 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 font-medium"
-                                  onClick={() => approveQuotationMutation.mutate(q.id)}
+                                  onClick={() => {
+                                    setApprovingQuotation(q);
+                                    setApprovePrice(String(q.sellingRate || "0.000"));
+                                    setApproveExtraCharges((q.additionalCharges || []).map((c: any) => {
+                                      const isDefault = ["Toll charges", "Border crossing", "Custom clearance"].includes(c.name);
+                                      return { 
+                                        ...c, 
+                                        type: isDefault ? c.name : "Others", 
+                                        customName: isDefault ? "" : c.name, 
+                                        qty: c.qty || 1 
+                                      };
+                                    }));
+                                    setIsApproveDialogOpen(true);
+                                  }}
                                 >
                                   Approve
                                 </Button>
@@ -1021,33 +1040,7 @@ export default function RfqPage() {
                   )}
                 />
 
-                <FormField
-                  control={form.control}
-                  name="noOfTrips"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>No. of Trips *</FormLabel>
-                      <FormControl>
-                        <Input type="number" placeholder="1" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
-                <FormField
-                  control={form.control}
-                  name="noOfTrucks"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>No. of Trucks *</FormLabel>
-                      <FormControl>
-                        <Input type="number" placeholder="1" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
 
                 <FormField
@@ -1149,19 +1142,7 @@ export default function RfqPage() {
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="detentionChargesPerDay"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Detention Charges / Day (BD)</FormLabel>
-                      <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+
                 <FormField
                   control={form.control}
                   name="cargoDetails"
@@ -1339,137 +1320,7 @@ export default function RfqPage() {
                   ))}
                 </div>
 
-                {/* Extra Charges */}
-                <div className="p-4 border rounded-md bg-card shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <FormLabel className="text-base font-semibold">Extra Charges</FormLabel>
-                      <p className="text-xs text-muted-foreground">Add specific operational costs.</p>
-                    </div>
-                    {!isViewOnly && (
-                      <Button type="button" variant="outline" size="sm" onClick={() => appendExtra({ name: "Toll", qty: 1, unitRate: 0, cost: 0 })}>
-                        <Plus className="h-3 w-3 mr-1" /> Add Charge
-                      </Button>
-                    )}
-                  </div>
-                  {extraFields.map((field, index) => (
-                    <div key={field.id} className="grid grid-cols-12 gap-3 items-end mb-3 bg-background/50 p-2 rounded-md border">
-                      <FormField control={form.control} name={`extraCharges.${index}.name`} render={({ field }) => {
-                        const predefined = ["Toll", "Port", "Border Crossing", "Customs Fee"];
-                        const isPredefined = predefined.includes(field.value);
 
-                        return (
-                          <FormItem className="col-span-12 sm:col-span-4">
-                            <FormLabel className="text-xs">Charge Type</FormLabel>
-                            {isPredefined || !field.value ? (
-                              <Select onValueChange={(val) => {
-                                if (val === "Other") {
-                                  field.onChange("Other charge"); // Not in predefined, so switches to input
-                                } else {
-                                  field.onChange(val);
-                                }
-                              }} value={field.value || ""}>
-                                <FormControl><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Type" /></SelectTrigger></FormControl>
-                                <SelectContent>
-                                  {predefined.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                                  <SelectItem value="Other">Other (Custom)</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <div className="flex gap-1">
-                                <FormControl>
-                                  <Input 
-                                    className="h-8 text-xs" 
-                                    {...field} 
-                                    placeholder="Enter charge name..." 
-                                    autoFocus 
-                                    onBlur={(e) => field.onChange(e.target.value.trim())} 
-                                  />
-                                </FormControl>
-                                <Button 
-                                  type="button" 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-8 w-8 text-muted-foreground shrink-0 border" 
-                                  onClick={() => field.onChange("")}
-                                  title="Select from predefined list"
-                                >
-                                  <RefreshCw className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            )}
-                          </FormItem>
-                        );
-                      }} />
-                      <FormField control={form.control} name={`extraCharges.${index}.qty`} render={({ field }) => (
-                        <FormItem className="col-span-4 sm:col-span-2">
-                          <FormLabel className="text-xs">Qty</FormLabel>
-                          <FormControl><Input type="number" step="0.01" className="h-8 text-xs" {...field} onChange={e => {
-                            const val = parseFloat(e.target.value) || 0;
-                            field.onChange(val);
-                            const rate = form.getValues(`extraCharges.${index}.unitRate`) || 0;
-                            form.setValue(`extraCharges.${index}.cost`, val * rate);
-                          }} /></FormControl>
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name={`extraCharges.${index}.unitRate`} render={({ field }) => (
-                        <FormItem className="col-span-4 sm:col-span-3">
-                          <FormLabel className="text-xs">Unit Rate (BD)</FormLabel>
-                          <FormControl><Input type="number" step="0.001" className="h-8 text-xs" {...field} onChange={e => {
-                            const val = parseFloat(e.target.value) || 0;
-                            field.onChange(val);
-                            const qty = form.getValues(`extraCharges.${index}.qty`) || 0;
-                            form.setValue(`extraCharges.${index}.cost`, val * qty);
-                          }} /></FormControl>
-                        </FormItem>
-                      )} />
-                      <FormField control={form.control} name={`extraCharges.${index}.cost`} render={({ field }) => (
-                        <FormItem className="col-span-3 sm:col-span-2">
-                          <FormLabel className="text-xs">Total (BD)</FormLabel>
-                          <FormControl><Input type="number" step="0.001" className="h-8 text-xs bg-slate-50 font-semibold" readOnly {...field} /></FormControl>
-                        </FormItem>
-                      )} />
-                      <div className="col-span-1 sm:col-span-1 flex justify-end pb-0.5">
-                        <Button type="button" variant="ghost" size="sm" className="text-red-500 h-8 w-8 p-0 border bg-white hover:bg-red-50" onClick={() => removeExtra(index)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Financial Worksheet Card */}
-              <div className="border rounded-lg p-4 bg-muted/40 space-y-2 text-xs">
-                <div className="font-semibold text-sm border-b pb-1.5 text-foreground flex justify-between">
-                  <span>Financial Statement</span>
-                  <span>Currency: BD</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Base Transportation</span>
-                  <span>{formatCurrency(watchedTransportation)}</span>
-                </div>
-
-                {watchedExtraCharges && watchedExtraCharges.length > 0 && (
-                  <div className="flex justify-between text-muted-foreground">
-                    <span>Extra Charges ({watchedExtraCharges.length})</span>
-                    <span>{formatCurrency(watchedExtraCharges.reduce((sum, item) => sum + (Number(item.cost) || 0), 0))}</span>
-                  </div>
-                )}
-                <div className="flex justify-between border-t pt-1 font-bold text-foreground">
-                  <span>Customer Billing (Total)</span>
-                  <span>{formatCurrency(calcTotal())}</span>
-                </div>
-                <div className="flex justify-between text-red-500">
-                  <span>Outsourced Logistics Cost</span>
-                  <span>- {formatCurrency(watchedOutsourced)}</span>
-                </div>
-                <div className="flex justify-between border-t pt-1 font-bold text-foreground text-sm">
-                  <span>Estimated Net Profit</span>
-                  <span className={calcMargin() >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}>
-                    {formatCurrency(calcMargin())}
-                  </span>
-                </div>
               </div>
 
               <DialogFooter className="pt-4 print:hidden">
@@ -1477,7 +1328,7 @@ export default function RfqPage() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createRfqMutation.isPending}>
-                  {createRfqMutation.isPending ? "Calculating..." : "Save RFQ Worksheet"}
+                  {createRfqMutation.isPending ? "Saving..." : "Save Enquiry"}
                 </Button>
               </DialogFooter>
             </form>
@@ -1596,6 +1447,163 @@ export default function RfqPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Quotation Approve Dialog */}
+      <Dialog open={isApproveDialogOpen} onOpenChange={setIsApproveDialogOpen}>
+        <DialogContent className="sm:max-w-[650px]">
+          <DialogHeader>
+            <DialogTitle>Approve Quotation</DialogTitle>
+            <DialogDescription>
+              Please confirm the final approved price (Selling Rate) before approving this quotation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Approved Price (BD) *</label>
+              <Input 
+                type="number" 
+                step="0.001" 
+                value={approvePrice} 
+                onChange={(e) => setApprovePrice(e.target.value)} 
+                placeholder="0.000"
+              />
+            </div>
+            
+            <div className="space-y-2 pt-2 border-t">
+              <div className="flex justify-between items-center mb-2">
+                <label className="text-sm font-medium">Extra Charges</label>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setApproveExtraCharges([...approveExtraCharges, { type: "Toll charges", customName: "", cost: 0, qty: 1 }])}
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Add Charge
+                </Button>
+              </div>
+              <div className="max-h-[200px] overflow-y-auto space-y-2 pr-1">
+                {approveExtraCharges.map((charge, index) => (
+                  <div key={index} className="flex gap-2 items-center bg-slate-50 p-2 rounded border">
+                    <Select 
+                      value={charge.type || ""} 
+                      onValueChange={(val) => {
+                        const newCharges = [...approveExtraCharges];
+                        newCharges[index].type = val;
+                        if (val !== "Others") {
+                          newCharges[index].name = val;
+                        }
+                        setApproveExtraCharges(newCharges);
+                      }}
+                    >
+                      <SelectTrigger className="w-[150px] h-8 text-xs shrink-0">
+                        <SelectValue placeholder="Charge Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Toll charges">Toll charges</SelectItem>
+                        <SelectItem value="Border crossing">Border crossing</SelectItem>
+                        <SelectItem value="Custom clearance">Custom clearance</SelectItem>
+                        <SelectItem value="Others">Others...</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    {charge.type === "Others" && (
+                      <Input 
+                        placeholder="Custom Name" 
+                        className="text-xs h-8 flex-1 min-w-[100px]"
+                        value={charge.customName || ""}
+                        onChange={(e) => {
+                          const newCharges = [...approveExtraCharges];
+                          newCharges[index].customName = e.target.value;
+                          setApproveExtraCharges(newCharges);
+                        }}
+                      />
+                    )}
+                    
+                    {(!charge.type || charge.type !== "Others") && <div className="flex-1" />}
+
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <span className="text-[10px] uppercase font-bold text-slate-500">Qty</span>
+                      <Input 
+                        type="number"
+                        min="1"
+                        className="text-xs h-8 w-16"
+                        value={charge.qty || ""}
+                        onChange={(e) => {
+                          const newCharges = [...approveExtraCharges];
+                          newCharges[index].qty = parseInt(e.target.value) || 1;
+                          setApproveExtraCharges(newCharges);
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      <span className="text-[10px] uppercase font-bold text-slate-500">Cost</span>
+                      <Input 
+                        type="number"
+                        step="0.001"
+                        className="text-xs h-8 w-24"
+                        value={charge.cost || ""}
+                        onChange={(e) => {
+                          const newCharges = [...approveExtraCharges];
+                          newCharges[index].cost = parseFloat(e.target.value) || 0;
+                          setApproveExtraCharges(newCharges);
+                        }}
+                      />
+                    </div>
+                    
+                    <Button 
+                      type="button" 
+                      variant="ghost" 
+                      size="icon"
+                      className="h-8 w-8 text-red-500 shrink-0 ml-1"
+                      onClick={() => {
+                        const newCharges = [...approveExtraCharges];
+                        newCharges.splice(index, 1);
+                        setApproveExtraCharges(newCharges);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between items-center text-sm font-bold mt-2 pt-2 border-t bg-slate-100 p-2 rounded">
+                <span>Total Amount:</span>
+                <span className="text-emerald-700">
+                  {(parseFloat(approvePrice || "0") + approveExtraCharges.reduce((sum, c) => sum + (Number(c.cost) || 0), 0)).toFixed(3)} BD
+                </span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsApproveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => {
+                if (parseFloat(approvePrice) <= 0) {
+                  toast({ title: "Please enter a valid price greater than 0", variant: "destructive" });
+                  return;
+                }
+                if (approvingQuotation) {
+                  approveQuotationMutation.mutate({ 
+                    id: approvingQuotation.id, 
+                    sellingRate: approvePrice,
+                    additionalCharges: approveExtraCharges.map(c => ({
+                      name: c.type === "Others" ? (c.customName || "Other Charge") : (c.type || "Toll charges"),
+                      cost: c.cost,
+                      qty: c.qty || 1
+                    }))
+                  });
+                }
+              }}
+              disabled={approveQuotationMutation.isPending}
+            >
+              {approveQuotationMutation.isPending ? "Approving..." : "Confirm & Approve"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Quotation Revision Dialog */}
       <Dialog open={isQuotationRevisionDialogOpen} onOpenChange={setIsQuotationRevisionDialogOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -1613,9 +1621,12 @@ export default function RfqPage() {
                   name="sellingRate"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Transportation Charges (BD) *</FormLabel>
+                      <FormLabel>
+                        Transportation Charges (BD) *
+                        {!watchedRevisionTruckType && <span className="text-[10px] text-red-500 ml-2 font-normal">(Select Truck Type first)</span>}
+                      </FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        <Input type="number" step="0.001" placeholder="0.000" disabled={!watchedRevisionTruckType} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -1629,7 +1640,7 @@ export default function RfqPage() {
                     <FormItem>
                       <FormLabel>Outsourced Cost (BD) (Optional)</FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        <Input type="number" step="0.001" placeholder="0.000" disabled={!watchedRevisionTruckType} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -1749,7 +1760,7 @@ export default function RfqPage() {
                     <FormItem className="col-span-2">
                       <FormLabel>Detention Charges / Day (BD)</FormLabel>
                       <FormControl>
-                        <Input type="number" step="0.001" placeholder="0.000" {...field} />
+                        <Input type="number" step="0.001" placeholder="0.000" disabled={!watchedRevisionTruckType} {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -1821,7 +1832,7 @@ export default function RfqPage() {
                     <FormLabel className="text-base font-semibold">Additional / Extra Charges</FormLabel>
                     <p className="text-xs text-muted-foreground">Add specific operational costs or extra delivery charges.</p>
                   </div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => appendRevisionExtra({ name: "Toll", qty: 1, unitRate: 0, cost: 0 })}>
+                  <Button type="button" variant="outline" size="sm" disabled={!watchedRevisionTruckType} onClick={() => appendRevisionExtra({ name: "Toll", qty: 1, unitRate: 0, cost: 0 })}>
                     <Plus className="h-3 w-3 mr-1" /> Add Charge
                   </Button>
                 </div>
