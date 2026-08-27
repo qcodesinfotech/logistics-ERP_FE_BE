@@ -55,6 +55,7 @@ interface DispatchItem {
   totalDelivered: string | null; remaining: string | null;
   remark: string | null; grnNumber: string | null;
   storageType?: string | null;
+  toNo?: string | null;
   delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; damagedQty?: string | null; damageReason?: string | null; } | null;
 }
 interface OutletGroup {
@@ -285,14 +286,33 @@ function OutletCard({
   const isToday = selectedDate === format(new Date(), "yyyy-MM-dd");
   const isFuture = selectedDate > format(new Date(), "yyyy-MM-dd");
   const [expanded, setExpanded] = useState(false);
-  const delivered = outlet.items.filter(i => i.delivery?.status === "delivered").length;
+  const delivered = outlet.items.filter((i: DispatchItem) => i.delivery?.status === "delivered").length;
   const total = outlet.items.length;
   const allDone = delivered === total && total > 0;
-  const anyPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
-  const isOutletComplete = total > 0 && outlet.items.every(i => (i.delivery?.status || "pending") !== "pending");
+  const anyPartial = outlet.items.some((i: DispatchItem) => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
+  const isOutletComplete = total > 0 && outlet.items.every((i: DispatchItem) => (i.delivery?.status || "pending") !== "pending");
 
-  const totalQty = outlet.items.reduce((sum, item) => sum + parseFloat(item.requestedQty || item.weight || "0"), 0);
+  const totalQty = outlet.items.reduce((sum: number, item: DispatchItem) => sum + parseFloat(item.requestedQty || item.weight || "0"), 0);
   const formattedQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
+
+  // Group outlet items by toNo to calculate unique DNs stats
+  const toNoMap = new Map<string, DispatchItem[]>();
+  outlet.items.forEach((i: DispatchItem) => {
+    const key = i.toNo || `fallback-${i.id}`;
+    if (!toNoMap.has(key)) {
+      toNoMap.set(key, []);
+    }
+    toNoMap.get(key)!.push(i);
+  });
+
+  const totalDNs = toNoMap.size;
+  let deliveredDNs = 0;
+  for (const [_, dnItems] of Array.from(toNoMap.entries())) {
+    const allDone = dnItems.every((i: DispatchItem) => (i.delivery?.status || "pending") !== "pending");
+    if (allDone) {
+      deliveredDNs++;
+    }
+  }
 
   return (
     <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
@@ -333,7 +353,8 @@ function OutletCard({
               <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-[10px] h-4 px-1 font-normal">Override</Badge>
             )}
             <Badge variant="outline" className="text-[10px] h-5 bg-primary/5 text-primary border-primary/20 font-semibold">Qty: {formattedQty}</Badge>
-            <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">{delivered}/{total}</Badge>
+            <Badge variant="outline" className="text-[10px] h-5 bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">DNs: {deliveredDNs}/{totalDNs}</Badge>
+            <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">Items: {delivered}/{total}</Badge>
           </div>
           
           <div className="flex items-center gap-1">
@@ -363,61 +384,114 @@ function OutletCard({
         </div>
       </div>
       {expanded && (
-        <div className="border-t divide-y">
+        <div className="border-t divide-y divide-slate-100/60 dark:divide-slate-800/60 bg-slate-50/20 dark:bg-slate-900/5">
           {outlet.items.map(item => {
             const status = item.delivery?.status || "pending";
+            const showMove = isSupervisor && status === "pending";
+            const showComplete = isSupervisor && status === "pending" && onQuickComplete;
+            const showRevert = isSupervisor && status !== "pending" && onRevertDelivery;
+            const showUpdate = status === "pending";
+            const hasActions = showMove || showComplete || showRevert || showUpdate;
+
             return (
-              <div key={item.id} className="group flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-xs">{item.itemCode}</span>
-                    {item.storageType && <Badge variant="outline" className="text-[9px] h-4 px-1 bg-slate-50">{item.storageType}</Badge>}
-                    {item.grnNumber && <span className="text-xs text-muted-foreground">GRN: {item.grnNumber}</span>}
+              <div 
+                key={item.id} 
+                className="group flex flex-col p-3 hover:bg-slate-50/50 dark:hover:bg-slate-900/40 transition-colors"
+              >
+                {/* Row 1: Code + Storage + Status */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                    <span className="font-semibold text-xs text-slate-800 dark:text-slate-200 tracking-tight">{item.itemCode}</span>
+                    {item.storageType && (
+                      <Badge variant="outline" className="text-[9px] h-4 px-1.5 bg-background text-slate-500 font-normal border-slate-200/80">
+                        {item.storageType}
+                      </Badge>
+                    )}
+                    {item.grnNumber && (
+                      <span className="text-[9px] font-mono text-muted-foreground/80 bg-slate-100 dark:bg-slate-850 px-1 py-0.5 rounded">
+                        GRN:{item.grnNumber}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-shrink-0">
                     <StatusBadge status={status} />
                   </div>
-                  {item.description && <p className="text-xs text-muted-foreground truncate mt-0.5">{item.description}</p>}
-                  <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground">
-                    {item.totalDelivered && <span>Total: {item.totalDelivered}</span>}
-                    {item.delivery?.deliveredQty && <span className="text-emerald-600">Del: {item.delivery.deliveredQty}</span>}
-                    {item.delivery?.remainingQty && <span className="text-amber-600">Rem: {item.delivery.remainingQty}</span>}
-                    {item.requestedQty ? (
-                      <span>Qty: {item.requestedQty} {item.uom || ''}</span>
-                    ) : item.weight ? (
-                      <span>{item.weight} kg</span>
-                    ) : null}
+                </div>
+
+                {/* Row 2: Description (Full Width) */}
+                {item.description && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal mt-1 break-words">
+                    {item.description}
+                  </p>
+                )}
+
+                {/* Row 3: Quantities */}
+                <div className="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-slate-500">
+                  {item.requestedQty ? (
+                    <span className="font-semibold text-primary bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10 whitespace-nowrap">
+                      Qty: {item.requestedQty} {item.uom || ''}
+                    </span>
+                  ) : item.weight ? (
+                    <span className="font-semibold text-primary bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10 whitespace-nowrap">
+                      {item.weight} kg
+                    </span>
+                  ) : null}
+
+                  {item.totalDelivered && (
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 whitespace-nowrap">
+                      Total: {item.totalDelivered}
+                    </span>
+                  )}
+                  {item.delivery?.deliveredQty !== undefined && item.delivery?.deliveredQty !== null && (
+                    <span className="text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100/30 whitespace-nowrap">
+                      Del: {item.delivery.deliveredQty}
+                    </span>
+                  )}
+                  {item.delivery?.remainingQty !== undefined && item.delivery?.remainingQty !== null && (
+                    <span className="text-amber-600 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100/30 whitespace-nowrap">
+                      Rem: {item.delivery.remainingQty}
+                    </span>
+                  )}
+                </div>
+
+                {/* Row 4: Remarks */}
+                {item.delivery?.remark && (
+                  <p className="text-[10px] text-amber-600 bg-amber-50/40 border border-amber-100/30 rounded p-1.5 italic mt-1.5">
+                    <span className="font-semibold not-italic">Note:</span> "{item.delivery.remark}"
+                  </p>
+                )}
+
+                {/* Row 5: Actions Bar */}
+                {hasActions && (
+                  <div className="flex flex-wrap items-center justify-end gap-1.5 pt-2 mt-2 border-t border-slate-100/50 dark:border-slate-800/10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-200">
+                    {showMove && (
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 flex-shrink-0"
+                        onClick={() => onOverrideItem(item)}>
+                        Move
+                      </Button>
+                    )}
+                    {showComplete && (
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-emerald-600 border-emerald-200 hover:bg-emerald-50 flex-shrink-0"
+                        onClick={() => onQuickComplete(item)}>
+                        <Check className="h-3.5 w-3.5 mr-0.5" />Complete
+                      </Button>
+                    )}
+                    {showRevert && (
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50 flex-shrink-0"
+                        onClick={() => onRevertDelivery(item)}>
+                        <RefreshCw className="h-3 w-3 mr-0.5" />Revert
+                      </Button>
+                    )}
+                    {showUpdate && (
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
+                        disabled={isFuture || (isDriver && !isToday)}
+                        title={isFuture ? "Cannot update deliveries for a future date." : (isDriver && !isToday) ? "Drivers can only update deliveries for today's date." : ""}
+                        onClick={() => onDeliveryUpdate(item)}>
+                        <Eye className="h-3 w-3 mr-1" />Update
+                      </Button>
+                    )}
                   </div>
-                  {item.delivery?.remark && (
-                    <p className="text-xs text-muted-foreground italic mt-0.5">"{item.delivery.remark}"</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {isSupervisor && status === "pending" && (
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 flex-shrink-0"
-                      onClick={() => onOverrideItem(item)}>
-                      Move
-                    </Button>
-                  )}
-                  {isSupervisor && status === "pending" && onQuickComplete && (
-                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-emerald-600 border-emerald-200 hover:bg-emerald-50 flex-shrink-0"
-                      onClick={() => onQuickComplete(item)}>
-                      <Check className="h-3.5 w-3.5 mr-0.5" />Complete
-                    </Button>
-                  )}
-                  {isSupervisor && status !== "pending" && onRevertDelivery && (
-                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50 flex-shrink-0"
-                      onClick={() => onRevertDelivery(item)}>
-                      <RefreshCw className="h-3 w-3 mr-0.5" />Revert
-                    </Button>
-                  )}
-                  {status === "pending" && (
-                    <Button variant="outline" size="sm" className="h-7 px-2 text-[10px] flex-shrink-0"
-                      disabled={isFuture || (isDriver && !isToday)}
-                      title={isFuture ? "Cannot update deliveries for a future date." : (isDriver && !isToday) ? "Drivers can only update deliveries for today's date." : ""}
-                      onClick={() => onDeliveryUpdate(item)}>
-                      <Eye className="h-3 w-3 mr-1" />Update
-                    </Button>
-                  )}
-                </div>
+                )}
               </div>
             );
           })}
@@ -426,6 +500,42 @@ function OutletCard({
     </div>
   );
 }
+
+const getDeliveryNotesSet = (outletsList: any[]) => {
+  const toNos = new Set<string>();
+  outletsList.forEach(o => {
+    o.items?.forEach((i: any) => {
+      if (i.toNo) {
+        toNos.add(String(i.toNo));
+      } else {
+        toNos.add(`fallback-${i.id || i.itemCode}`);
+      }
+    });
+  });
+  return toNos;
+};
+
+const getCompletedDeliveryNotesCount = (outletsList: any[]) => {
+  const toNoMap = new Map<string, any[]>();
+  outletsList.forEach(o => {
+    o.items?.forEach((i: any) => {
+      const key = i.toNo ? String(i.toNo) : `fallback-${i.id || i.itemCode}`;
+      if (!toNoMap.has(key)) {
+        toNoMap.set(key, []);
+      }
+      toNoMap.get(key)!.push(i);
+    });
+  });
+
+  let completedCount = 0;
+  for (const [_, dnItems] of Array.from(toNoMap.entries())) {
+    const allDone = dnItems.every(i => (i.delivery?.status || "pending") !== "pending");
+    if (allDone) {
+      completedCount++;
+    }
+  }
+  return completedCount;
+};
 
 // ===== Zone Column =====
 function ZoneColumn({
@@ -580,6 +690,11 @@ function ZoneColumn({
   const formattedInitialTotalQty = initialTotalQty % 1 === 0 ? initialTotalQty.toFixed(0) : initialTotalQty.toFixed(1);
   const formattedInitialDeliveredQty = initialDeliveredQty % 1 === 0 ? initialDeliveredQty.toFixed(0) : initialDeliveredQty.toFixed(1);
 
+  // DN stats
+  const initialDNCount = getDeliveryNotesSet(initialOutlets).size;
+  const currentDNCount = getDeliveryNotesSet(localOutlets).size;
+  const initialCompletedDNs = getCompletedDeliveryNotesCount(initialOutlets);
+
   const isUnassigned = zone.zoneId === "unassigned";
 
   const renderOutletItems = (items: any[]) => {
@@ -636,8 +751,8 @@ function ZoneColumn({
                 <h3 className="font-bold text-sm">{zone.zoneName}</h3>
                 <p className="text-xs text-muted-foreground">
                   {zone.outlets.length === initialOutletsCount 
-                    ? `${initialOutletsCount} outlets` 
-                    : `${zone.outlets.length}/${initialOutletsCount} outlets`}
+                    ? `${initialOutletsCount} outlets · ${initialDNCount} DNs` 
+                    : `${zone.outlets.length}/${initialOutletsCount} outlets · ${currentDNCount}/${initialDNCount} DNs`}
                   {" · "}
                   Qty: {formattedTotalQty === formattedInitialTotalQty 
                     ? formattedTotalQty 
@@ -657,6 +772,18 @@ function ZoneColumn({
                   <span className="font-semibold text-primary">{initialCompletionPercentage}%</span>
                 </div>
                 <Progress value={initialCompletionPercentage} className="h-1 bg-slate-100 dark:bg-slate-800" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                  <span>DNs Completion</span>
+                  <span className="font-semibold text-violet-600">
+                    {initialCompletedDNs}/{initialDNCount} ({initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}%)
+                  </span>
+                </div>
+                <Progress 
+                  value={initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0} 
+                  className="h-1 bg-slate-100 dark:bg-slate-800" 
+                />
               </div>
               <div className="space-y-0.5">
                 <div className="flex justify-between items-center text-[10px] text-muted-foreground">
@@ -1351,7 +1478,7 @@ export default function DailyDispatchPage() {
   }, [zones, boardData]);
 
   const stats = useMemo(() => {
-    if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0, assignedTrucksCount: 0 };
+    if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0, assignedTrucksCount: 0, totalDNs: 0, completedDNs: 0 };
     
     let totalOutletsSet = new Set<string>();
     let pendingOutletsSet = new Set<string>();
@@ -1361,6 +1488,8 @@ export default function DailyDispatchPage() {
     let completedQty = 0;
     let pendingQty = 0;
     let assignedTrucksSet = new Set<string>();
+
+    const dnItemsMap = new Map<string, any[]>();
 
     boardData.zones.forEach(z => {
       z.trucks?.forEach(t => {
@@ -1409,6 +1538,13 @@ export default function DailyDispatchPage() {
             rem = req - del;
           }
           pendingQty += rem;
+
+          // Group by DN (Transfer Order number `toNo` or fallback)
+          const dnKey = item.toNo ? String(item.toNo) : `fallback-${item.id || item.itemCode}`;
+          if (!dnItemsMap.has(dnKey)) {
+            dnItemsMap.set(dnKey, []);
+          }
+          dnItemsMap.get(dnKey)!.push(item);
         });
 
         if (hasPending) {
@@ -1420,6 +1556,15 @@ export default function DailyDispatchPage() {
       });
     });
 
+    const totalDNs = dnItemsMap.size;
+    let completedDNs = 0;
+    for (const [_, itemsList] of Array.from(dnItemsMap.entries())) {
+      const allDone = itemsList.every(i => (i.delivery?.status || "pending") !== "pending");
+      if (allDone) {
+        completedDNs++;
+      }
+    }
+
     return {
       totalOutlets: totalOutletsSet.size,
       pendingOutlets: pendingOutletsSet.size,
@@ -1427,7 +1572,9 @@ export default function DailyDispatchPage() {
       totalQtyAssigned,
       completedQty,
       pendingQty,
-      assignedTrucksCount: assignedTrucksSet.size
+      assignedTrucksCount: assignedTrucksSet.size,
+      totalDNs,
+      completedDNs
     };
   }, [boardData, brandFilteredOutletsMap, boardBrandId]);
 
@@ -2067,7 +2214,7 @@ export default function DailyDispatchPage() {
           {boardData && (
             <>
               {/* Supervisor Stats Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 px-6 py-3 bg-slate-50 border-b">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 px-6 py-3 bg-slate-50 border-b">
                 <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
                   onClick={() => setBoardStatusFilter("all")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
@@ -2103,6 +2250,22 @@ export default function DailyDispatchPage() {
                     <div>
                       <p className="text-xl font-bold tracking-tight text-slate-900">{stats.partiallyDelivered}</p>
                       <p className="text-xs font-medium text-slate-500">Partially Delivered</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-white border shadow-sm border-t-2 border-t-violet-500 hover:shadow-md transition-all">
+                  <CardContent className="p-3 flex flex-col gap-1.5">
+                    <div className="h-8 w-8 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center flex-shrink-0">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-xl font-bold tracking-tight text-slate-900">
+                        {stats.completedDNs} / {stats.totalDNs}
+                      </p>
+                      <p className="text-xs font-medium text-slate-500 leading-tight">
+                        Delivery Notes ({(stats.totalDNs - stats.completedDNs)} pending)
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
@@ -4581,7 +4744,9 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
-                            <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{zone.outlets.length} Outlets</Badge>
+                            <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
+                              {zone.outlets.length} Outlets · {getDeliveryNotesSet(zone.outlets).size} DNs
+                            </Badge>
                           </td>
                         </tr>
 
@@ -4606,7 +4771,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                                   {outlet.outletName}
                                   <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
                                   <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
-                                    {outlet.items.length} Items (Qty: {formattedQty})
+                                    {new Set(outlet.items.map((i: any) => i.toNo || i.id).filter(Boolean)).size} DNs · {outlet.items.length} Items (Qty: {formattedQty})
                                   </Badge>
                                 </td>
                               </tr>
@@ -4969,7 +5134,9 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
-                            <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">{zone.outlets.length} Outlets</Badge>
+                            <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
+                              {zone.outlets.length} Outlets · {getDeliveryNotesSet(zone.outlets).size} DNs
+                            </Badge>
                           </td>
                         </tr>
                         {isRouteExpanded && zone.outlets.map(outlet => {
@@ -4990,7 +5157,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                     <span className="font-medium text-sm whitespace-nowrap">{outlet.outletName}</span>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">({outlet.outletCode})</span>
                                     <Badge variant="outline" className="bg-white text-[10px] h-4 whitespace-nowrap flex-shrink-0">
-                                      {outlet.items.length} Items (Qty: {formattedDelQty} / {formattedReqQty})
+                                      {new Set(outlet.items.map((i: any) => i.toNo || i.id).filter(Boolean)).size} DNs · {outlet.items.length} Items (Qty: {formattedDelQty} / {formattedReqQty})
                                     </Badge>
                                     {outlet.pods.size > 0 && (() => {
                                       const uniqueDates = Array.from(new Set(
