@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
+import { format } from "date-fns";
 import { 
   BarChart3, Plus, Truck, User, ArrowRight, CheckCircle2, 
   AlertTriangle, Play, Check, Eye, FileUp, XCircle, Clock, RefreshCw, Trash2,
-  Calculator, Banknote
+  Calculator, Banknote, Building2, Building
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +47,8 @@ export default function DispatchPage() {
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const [selectedOutletIdForHistory, setSelectedOutletIdForHistory] = useState("");
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
   
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [tripRoute, setTripRoute] = useState("");
@@ -142,6 +145,10 @@ export default function DispatchPage() {
 
   const { data: locationsList } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
+  });
+
+  const { data: invoicesList = [] } = useQuery<any[]>({
+    queryKey: ["/api/invoices"],
   });
 
   const { data: outletHistory, isLoading: isLoadingHistory } = useQuery<any[]>({
@@ -624,7 +631,7 @@ export default function DispatchPage() {
                     </Button>
                   )}
 
-                  {trip.podVerificationStatus === "pending" && (
+                  {trip.status === "completed" && trip.podVerificationStatus === "pending" && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -666,6 +673,26 @@ export default function DispatchPage() {
                       Generate Invoice
                     </Button>
                   )}
+
+                  {trip.invoiceGenerated && (() => {
+                    const invoice = invoicesList.find(inv => inv.tripId === trip.id);
+                    if (invoice) {
+                      return (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs border-green-200 text-green-600 hover:bg-green-50"
+                          onClick={() => {
+                            setSelectedInvoice(invoice);
+                            setIsInvoiceDialogOpen(true);
+                          }}
+                        >
+                          View Invoice
+                        </Button>
+                      );
+                    }
+                    return null;
+                  })()}
                 </TableCell>
               </TableRow>
             );
@@ -904,9 +931,10 @@ export default function DispatchPage() {
                 </div>
               ) : (
                 <Tabs defaultValue="active" className="space-y-4">
-                  <TabsList className="grid w-[320px] grid-cols-2 bg-muted/60">
+                  <TabsList className="grid w-[480px] grid-cols-3 bg-muted/60">
                     <TabsTrigger value="active" className="text-xs">Active Trips</TabsTrigger>
                     <TabsTrigger value="completed" className="text-xs">Completed & Cancelled</TabsTrigger>
+                    <TabsTrigger value="all" className="text-xs">All Trips (Overall)</TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="active" className="p-0">
@@ -915,6 +943,10 @@ export default function DispatchPage() {
 
                   <TabsContent value="completed" className="p-0">
                     {renderTripsTable(tripsList.filter(t => t.status === "completed" || t.status === "cancelled"))}
+                  </TabsContent>
+
+                  <TabsContent value="all" className="p-0">
+                    {renderTripsTable(tripsList)}
                   </TabsContent>
                 </Tabs>
               )}
@@ -1940,6 +1972,178 @@ export default function DispatchPage() {
             >
               {updateDispatchPlanMutation.isPending ? "Updating..." : "Save Dispatch Plan"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invoice Details Dialog */}
+      <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Trucking Invoice</DialogTitle>
+          </DialogHeader>
+          
+          {selectedInvoice && (() => {
+            const client = clientsList?.find(c => c.id === selectedInvoice.customerId);
+            const trip = tripsList?.find(t => t.id === selectedInvoice.tripId);
+            
+            return (
+              <div className="space-y-8 bg-white text-black p-8 border rounded-md">
+                <div className="flex justify-between items-start border-b pb-6">
+                  <div>
+                    <h1 className="text-3xl font-bold uppercase text-gray-800">Invoice</h1>
+                    <p className="text-gray-500 mt-1">Invoice #: {selectedInvoice.invoiceNumber}</p>
+                    <p className="text-gray-500">Date: {selectedInvoice.createdAt ? format(new Date(selectedInvoice.createdAt), 'PPP') : 'N/A'}</p>
+                    <p className="text-gray-500">Due Date: {selectedInvoice.paymentDueDate ? format(new Date(selectedInvoice.paymentDueDate), 'PPP') : 'N/A'}</p>
+                  </div>
+                  <div className="text-right">
+                    <h2 className="font-semibold text-lg text-gray-800">Logistics ERP</h2>
+                    <p className="text-gray-600 text-sm">Bahrain</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-between">
+                  <div className="space-y-1">
+                    <p className="font-semibold text-gray-600 uppercase text-xs">Bill To</p>
+                    <p className="font-bold text-gray-800">{client?.companyName || client?.name}</p>
+                    <p className="text-gray-600 text-sm">{client?.address}</p>
+                    <p className="text-gray-600 text-sm">{client?.phone}</p>
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <p className="font-semibold text-gray-600 uppercase text-xs">Trip Details</p>
+                    {trip ? (
+                      <>
+                        <p className="text-gray-800 text-sm"><span className="font-semibold">Route:</span> {trip.route}</p>
+                        <p className="text-gray-800 text-sm"><span className="font-semibold">Truck Model/Plates:</span> {trip.trailerNumber || "N/A"}</p>
+                        <p className="text-gray-800 text-sm"><span className="font-semibold">Driver:</span> {driversList?.find(d => d.id === trip.driverId)?.name || "N/A"}</p>
+                      </>
+                    ) : (
+                      <p className="text-gray-500 text-sm">Trip ID: {selectedInvoice.tripId}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  <Table className="border">
+                    <TableHeader className="bg-gray-50">
+                      <TableRow>
+                        <TableHead className="w-[50px] font-bold text-gray-800">#</TableHead>
+                        <TableHead className="font-bold text-gray-800">Description</TableHead>
+                        <TableHead className="text-right font-bold text-gray-800">Qty</TableHead>
+                        <TableHead className="text-right font-bold text-gray-800">Unit Price</TableHead>
+                        <TableHead className="text-right font-bold text-gray-800">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="font-medium text-gray-800">1</TableCell>
+                        <TableCell className="text-gray-800">
+                          Freight Transportation Service
+                          {trip && <span className="text-xs text-muted-foreground block">Route: {trip.route}</span>}
+                        </TableCell>
+                        <TableCell className="text-right text-gray-800">1</TableCell>
+                        <TableCell className="text-right text-gray-800">{formatCurrency(parseFloat(selectedInvoice.total))}</TableCell>
+                        <TableCell className="text-right text-gray-800">{formatCurrency(parseFloat(selectedInvoice.total))}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <div className="w-64 space-y-3">
+                    <div className="flex justify-between font-bold text-lg border-t-2 pt-2 border-gray-800 text-gray-800">
+                      <span>Total Invoice Amount:</span>
+                      <span>{formatCurrency(parseFloat(selectedInvoice.total))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Outstanding Balance:</span>
+                      <span>{formatCurrency(parseFloat(selectedInvoice.outstandingAmount))}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {trip && (() => {
+                  const isProfitable = parseFloat(trip.grossProfit || "0") >= 0;
+                  const additionalExpensesTotal = trip.additionalExpenses?.reduce((s: number, e: any) => s + parseFloat(e.cost || 0), 0) || 0;
+                  
+                  return (
+                    <div className="mt-8 border-t pt-6 space-y-4">
+                      <h3 className="font-bold text-sm text-gray-800 uppercase tracking-wider">Trip Profitability & Expenses (Internal Audit)</h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Revenue Card */}
+                        <div className="bg-blue-50/50 p-4 border border-blue-100 rounded-md">
+                          <p className="text-[10px] font-bold text-blue-600 uppercase">Quoted Revenue</p>
+                          <p className="text-lg font-extrabold text-blue-900 mt-1">{formatCurrency(parseFloat(trip.totalRevenue || trip.sellingRate || selectedInvoice.total))}</p>
+                          <span className="text-[9px] text-blue-500">Trip Selling Rate & Surcharges</span>
+                        </div>
+
+                        {/* Expenses Card */}
+                        <div className="bg-red-50/50 p-4 border border-red-100 rounded-md">
+                          <p className="text-[10px] font-bold text-red-600 uppercase">Total Expenses</p>
+                          <p className="text-lg font-extrabold text-red-900 mt-1">{formatCurrency(parseFloat(trip.totalTripCost || "0"))}</p>
+                          <span className="text-[9px] text-red-500">Driver pay, fuel, tolls, and other costs</span>
+                        </div>
+
+                        {/* Net Profit Card */}
+                        <div className={`p-4 border rounded-md ${isProfitable ? 'bg-green-50/50 border-green-100' : 'bg-rose-50/50 border-rose-100'}`}>
+                          <p className={`text-[10px] font-bold uppercase ${isProfitable ? 'text-green-600' : 'text-rose-600'}`}>Net Profit / Margin</p>
+                          <p className={`text-lg font-extrabold mt-1 ${isProfitable ? 'text-green-900' : 'text-rose-900'}`}>
+                            {formatCurrency(parseFloat(trip.grossProfit || "0"))} 
+                            <span className="text-xs font-semibold ml-1.5">({trip.profitMargin || "0.00"}%)</span>
+                          </p>
+                          <span className={`text-[9px] ${isProfitable ? 'text-green-500' : 'text-rose-500'}`}>
+                            {isProfitable ? 'Profitable operation run' : 'Loss-making operation run'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detailed Expense Breakdown */}
+                      <div className="border rounded-md overflow-hidden bg-gray-50/50">
+                        <Table className="text-xs">
+                          <TableHeader className="bg-gray-100">
+                            <TableRow>
+                              <TableHead className="font-semibold text-gray-700">Expense Category</TableHead>
+                              <TableHead className="text-right font-semibold text-gray-700">Amount</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            <TableRow>
+                              <TableCell>Driver Entitlement (Wage)</TableCell>
+                              <TableCell className="text-right font-medium">{formatCurrency(parseFloat(trip.driverEntitlement || "0"))}</TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell>Fuel Log Costs</TableCell>
+                              <TableCell className="text-right font-medium">{formatCurrency(parseFloat(trip.driverFuel || "0"))}</TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell>Toll / Road Charges</TableCell>
+                              <TableCell className="text-right font-medium">{formatCurrency(parseFloat(trip.driverTolls || "0"))}</TableCell>
+                            </TableRow>
+                            <TableRow>
+                              <TableCell>Other Driver Expenses</TableCell>
+                              <TableCell className="text-right font-medium">{formatCurrency(parseFloat(trip.driverOtherExpenses || trip.otherTripExpenses || "0"))}</TableCell>
+                            </TableRow>
+                            {additionalExpensesTotal > 0 && (
+                              <TableRow>
+                                <TableCell>Additional Logged Expenses ({(trip.additionalExpenses || []).length} items)</TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {formatCurrency(additionalExpensesTotal)}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
+          <DialogFooter className="mt-6 flex gap-2 sm:justify-end">
+            <Button variant="outline" onClick={() => setIsInvoiceDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
