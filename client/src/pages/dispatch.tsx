@@ -23,6 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/page-header";
@@ -79,6 +81,7 @@ export default function DispatchPage() {
 
   // In Transit Log States
   const [isTransitDialogOpen, setIsTransitDialogOpen] = useState(false);
+  const [activeLogType, setActiveLogType] = useState<"location" | "delays" | "incidents" | "expenses" | null>(null);
   const [transitTrip, setTransitTrip] = useState<any>(null);
   const [transitLocation, setTransitLocation] = useState("");
   const [transitGps, setTransitGps] = useState("");
@@ -197,7 +200,7 @@ export default function DispatchPage() {
   }, [unassignedOrders, tripsList]);
 
   const activeVehicleIds = tripsList?.filter(t => t.status === "pending" || t.status === "in_transit").map(t => t.vehicleId) || [];
-  const availableVehicles = vehiclesList?.filter(v => v.status === "available" && !activeVehicleIds.includes(v.id)) || [];
+  const availableVehicles = vehiclesList?.filter(v => v.type === "owned" && v.status !== "maintenance" && !activeVehicleIds.includes(v.id)) || [];
 
   // Mutations
   const createBatchTripsMutation = useMutation({
@@ -462,15 +465,222 @@ export default function DispatchPage() {
     }) || [];
   };
 
+  const renderTripsTable = (filteredTrips: (Trip & { orderIds?: string[]; invoiceGenerated?: boolean })[]) => {
+    if (filteredTrips.length === 0) {
+      return (
+        <div className="p-8 text-center text-muted-foreground text-xs font-medium">
+          No trips in this category.
+        </div>
+      );
+    }
+
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Trip Ref</TableHead>
+            <TableHead>Vehicle & Driver</TableHead>
+            <TableHead>Execution Details</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredTrips.map((trip) => {
+            const vehicle = vehiclesList?.find(v => v.id === trip.vehicleId);
+            const driver = driversList?.find(d => d.id === trip.driverId);
+
+            return (
+              <TableRow key={trip.id} className="hover:bg-accent/40 transition-colors">
+                <TableCell className="font-semibold text-foreground">
+                  {trip.tripNumber}
+                </TableCell>
+                <TableCell className="text-xs space-y-0.5">
+                  <div className="font-medium flex items-center gap-1 text-foreground">
+                    <Truck className="h-3 w-3 text-muted-foreground" />
+                    {vehicle?.name} ({vehicle?.plateNumber})
+                  </div>
+                  <div className="flex items-center gap-1 text-muted-foreground">
+                    <User className="h-3 w-3 text-muted-foreground" />
+                    {driver?.name || (trip.driverId !== "unassigned" ? trip.driverId : null) || "Unassigned"}
+                  </div>
+                </TableCell>
+                <TableCell className="text-xs">
+                  <div className="font-medium text-foreground truncate max-w-[180px]" title={trip.route || ""}>
+                    Route: {trip.route || "Direct"}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">
+                    Start: {trip.startTime ? new Date(trip.startTime).toLocaleString() : "Pending"}
+                  </div>
+                  {trip.endTime && (
+                    <div className="text-[10px] text-muted-foreground">
+                      End: {new Date(trip.endTime).toLocaleString()}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <StatusBadge status={trip.status} />
+                </TableCell>
+                <TableCell className="text-right space-x-1">
+                  {trip.status === "in_transit" && (
+                    <div className="inline-flex gap-1">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
+                          >
+                            Log Transit
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-[200px]">
+                          <DropdownMenuItem onClick={() => {
+                            setTransitTrip(trip);
+                            setTransitLocation(trip.currentLocation || "");
+                            setTransitGps(trip.gpsLocation || "");
+                            setActiveLogType("location");
+                          }}>
+                            Current Location & Tracking
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => {
+                            setTransitTrip(trip);
+                            setTransitDelays([{reason: "", durationHours: ""}]);
+                            setActiveLogType("delays");
+                          }}>
+                            Log Transit Delays
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => {
+                            setTransitTrip(trip);
+                            setTransitIncidents([{description: "", cost: ""}]);
+                            setActiveLogType("incidents");
+                          }}>
+                            Log Transit Incidents
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => {
+                            setTransitTrip(trip);
+                            setTransitExpenses([{name: "", cost: ""}]);
+                            setActiveLogType("expenses");
+                          }}>
+                            Log Additional Expenses
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-8 text-xs text-foreground"
+                        onClick={() => updateTripMutation.mutate({ id: trip.id, status: "completed", endTime: new Date() })}
+                      >
+                        Complete Trip
+                      </Button>
+                    </div>
+                  )}
+
+                  {trip.status === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs border-green-200 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20"
+                      onClick={() => {
+                        setDepartTrip(trip);
+                        setDepartPickupDate(new Date().toISOString().substring(0, 10));
+                        setDepartPickupTime(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+                        setDepartLoadedQty("0");
+                        setDepartCargoCondition("Good");
+                        setDepartLoadingNotes("");
+                        setIsDepartDialogOpen(true);
+                      }}
+                    >
+                      Depart
+                    </Button>
+                  )}
+
+                  {trip.status === "in_transit" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                      onClick={async () => {
+                        try {
+                          const res = await apiRequest("GET", `/api/trips/${trip.id}/orders`);
+                          const orderData = await res.json();
+                          setSelectedTrip({ ...trip, orderIds: orderData.map((o: any) => o.id) } as any);
+                          if (orderData.length > 0) {
+                            setSelectedOrderIdForPOD(orderData[0].id);
+                          }
+                          setIsPODDialogOpen(true);
+                        } catch (err: any) {
+                          console.error(err);
+                          toast({
+                            title: "Error opening dialog",
+                            description: getErrorMessage(err) || "An unexpected error occurred",
+                            variant: "destructive"
+                          });
+                        }
+                      }}
+                    >
+                      Record POD
+                    </Button>
+                  )}
+
+                  {trip.podVerificationStatus === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+                      onClick={() => verifyPODMutation.mutate(trip.id)}
+                    >
+                      Verify POD
+                    </Button>
+                  )}
+
+                  {trip.status === "completed" && trip.podVerificationStatus === "verified" && trip.driverSettlementStatus !== "paid" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
+                      onClick={() => {
+                        setSettlementTrip(trip);
+                        setSettlementEntitlement(trip.driverEntitlement || "0");
+                        setSettlementAdvance(trip.driverAdvance || "0");
+                        setSettlementTolls(trip.driverTolls || "0");
+                        setSettlementFuel(trip.driverFuel || "0");
+                        setSettlementOther(trip.driverOtherExpenses || "0");
+                        setSettlementDeductions(trip.driverDeductions || "0");
+                        setSettlementStatus(trip.driverSettlementStatus || "pending");
+                        setIsSettlementDialogOpen(true);
+                      }}
+                    >
+                      Settle Driver
+                    </Button>
+                  )}
+
+                  {trip.status === "completed" && trip.podVerificationStatus === "verified" && !trip.invoiceGenerated && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50"
+                      onClick={() => generateInvoiceMutation.mutate(trip.id)}
+                    >
+                      Generate Invoice
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <PageHeader 
         title="Dispatch Console" 
         description="Monitor physical assets, assign available trucks/drivers, and log Proof-of-Delivery status."
       >
-        <Button variant="outline" onClick={() => setIsHistoryDialogOpen(true)} className="gap-2 mr-2">
-          <Eye className="h-4 w-4" /> Outlet History
-        </Button>
         <Button 
           disabled={selectedOrderIds.length === 0} 
           onClick={() => {
@@ -684,7 +894,7 @@ export default function DispatchPage() {
                 Overview of ongoing logistics runs, truck drivers, and real-time delivery logs.
               </CardDescription>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-4">
               {isTripsLoading ? (
                 <div className="p-8 text-center text-muted-foreground">Loading trips...</div>
               ) : !tripsList || tripsList.length === 0 ? (
@@ -693,177 +903,20 @@ export default function DispatchPage() {
                   <span>No active trips running. Dispatch a pending order.</span>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Trip Ref</TableHead>
-                      <TableHead>Vehicle & Driver</TableHead>
-                      <TableHead>Execution Details</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {tripsList.map((trip) => {
-                      const vehicle = vehiclesList?.find(v => v.id === trip.vehicleId);
-                      const driver = driversList?.find(d => d.id === trip.driverId);
+                <Tabs defaultValue="active" className="space-y-4">
+                  <TabsList className="grid w-[320px] grid-cols-2 bg-muted/60">
+                    <TabsTrigger value="active" className="text-xs">Active Trips</TabsTrigger>
+                    <TabsTrigger value="completed" className="text-xs">Completed & Cancelled</TabsTrigger>
+                  </TabsList>
 
-                      return (
-                        <TableRow key={trip.id} className="hover:bg-accent/40 transition-colors">
-                          <TableCell className="font-semibold text-foreground">
-                            {trip.tripNumber}
-                          </TableCell>
-                          <TableCell className="text-xs space-y-0.5">
-                            <div className="font-medium flex items-center gap-1 text-foreground">
-                              <Truck className="h-3 w-3 text-muted-foreground" />
-                              {vehicle?.name} ({vehicle?.plateNumber})
-                            </div>
-                            <div className="flex items-center gap-1 text-muted-foreground">
-                              <User className="h-3 w-3 text-muted-foreground" />
-                              {driver?.name || (trip.driverId !== "unassigned" ? trip.driverId : null) || "Unassigned"}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            <div className="font-medium text-foreground truncate max-w-[180px]" title={trip.route || ""}>
-                              Route: {trip.route || "Direct"}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">
-                              Start: {trip.startTime ? new Date(trip.startTime).toLocaleString() : "Pending"}
-                            </div>
-                            {trip.endTime && (
-                              <div className="text-[10px] text-muted-foreground">
-                                End: {new Date(trip.endTime).toLocaleString()}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge status={trip.status} />
-                          </TableCell>
-                           <TableCell className="text-right space-x-1">
-                            {trip.status === "in_transit" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
-                                onClick={async () => {
-                                  try {
-                                    const res = await apiRequest("GET", `/api/trips/${trip.id}/orders`);
-                                    const orderData = await res.json();
-                                    setSelectedTrip({ ...trip, orderIds: orderData.map((o: any) => o.id) } as any);
-                                    if (orderData.length > 0) {
-                                      setSelectedOrderIdForPOD(orderData[0].id);
-                                    }
-                                    setIsPODDialogOpen(true);
-                                  } catch (err: any) {
-                                    console.error(err);
-                                    toast({
-                                      title: "Error opening dialog",
-                                      description: getErrorMessage(err) || "An unexpected error occurred",
-                                      variant: "destructive"
-                                    });
-                                  }
-                                }}
-                              >
-                                Record POD
-                              </Button>
-                            )}
+                  <TabsContent value="active" className="p-0">
+                    {renderTripsTable(tripsList.filter(t => t.status === "pending" || t.status === "in_transit"))}
+                  </TabsContent>
 
-                             {trip.status === "pending" && (
-                               <Button
-                                 size="sm"
-                                 variant="outline"
-                                 className="h-8 text-xs border-green-200 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20"
-                                 onClick={() => {
-                                   setDepartTrip(trip);
-                                   setDepartPickupDate(new Date().toISOString().substring(0, 10));
-                                   setDepartPickupTime(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
-                                   setDepartLoadedQty("0");
-                                   setDepartCargoCondition("Good");
-                                   setDepartLoadingNotes("");
-                                   setIsDepartDialogOpen(true);
-                                 }}
-                               >
-                                 Depart
-                               </Button>
-                             )}
-
-                             {trip.status === "in_transit" && (
-                               <div className="inline-flex gap-1">
-                                 <Button
-                                   size="sm"
-                                   variant="outline"
-                                   className="h-8 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
-                                   onClick={() => {
-                                     setTransitTrip(trip);
-                                     setTransitLocation(trip.currentLocation || "");
-                                     setTransitGps(trip.gpsLocation || "");
-                                     setTransitDelays([{reason: "", durationHours: ""}]);
-                                     setTransitIncidents([{description: "", cost: ""}]);
-                                     setTransitExpenses([{name: "", cost: ""}]);
-                                     setIsTransitDialogOpen(true);
-                                   }}
-                                 >
-                                   Update Log
-                                 </Button>
-                                 <Button
-                                   size="sm"
-                                   variant="secondary"
-                                   className="h-8 text-xs text-foreground"
-                                   onClick={() => updateTripMutation.mutate({ id: trip.id, status: "completed", endTime: new Date() })}
-                                 >
-                                   Complete Trip
-                                 </Button>
-                               </div>
-                             )}
-
-                            {trip.podVerificationStatus === "pending" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs border-emerald-200 text-emerald-600 hover:bg-emerald-50"
-                                onClick={() => verifyPODMutation.mutate(trip.id)}
-                              >
-                                Verify POD
-                              </Button>
-                            )}
-
-                            {trip.status === "completed" && trip.podVerificationStatus === "verified" && trip.driverSettlementStatus !== "paid" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs border-amber-200 text-amber-600 hover:bg-amber-50"
-                                onClick={() => {
-                                  setSettlementTrip(trip);
-                                  setSettlementEntitlement(trip.driverEntitlement || "0");
-                                  setSettlementAdvance(trip.driverAdvance || "0");
-                                  setSettlementTolls(trip.driverTolls || "0");
-                                  setSettlementFuel(trip.driverFuel || "0");
-                                  setSettlementOther(trip.driverOtherExpenses || "0");
-                                  setSettlementDeductions(trip.driverDeductions || "0");
-                                  setSettlementStatus(trip.driverSettlementStatus || "pending");
-                                  setIsSettlementDialogOpen(true);
-                                }}
-                              >
-                                Settle Driver
-                              </Button>
-                            )}
-
-                            {trip.status === "completed" && trip.podVerificationStatus === "verified" && !trip.invoiceGenerated && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50"
-                                onClick={() => generateInvoiceMutation.mutate(trip.id)}
-                              >
-                                Generate Invoice
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                  <TabsContent value="completed" className="p-0">
+                    {renderTripsTable(tripsList.filter(t => t.status === "completed" || t.status === "cancelled"))}
+                  </TabsContent>
+                </Tabs>
               )}
             </CardContent>
           </Card>
@@ -1562,187 +1615,203 @@ export default function DispatchPage() {
       </Dialog>
 
       {/* Update Transit Log Dialog */}
-      <Dialog open={isTransitDialogOpen} onOpenChange={setIsTransitDialogOpen}>
+      <Dialog open={!!activeLogType} onOpenChange={(open) => !open && setActiveLogType(null)}>
         <DialogContent className="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Update Transit Logs for {transitTrip?.tripNumber}</DialogTitle>
+            <DialogTitle>
+              {activeLogType === "location" && `Current Location & Tracking for ${transitTrip?.tripNumber}`}
+              {activeLogType === "delays" && `Log Transit Delays for ${transitTrip?.tripNumber}`}
+              {activeLogType === "incidents" && `Log Transit Incidents for ${transitTrip?.tripNumber}`}
+              {activeLogType === "expenses" && `Log Additional Expenses for ${transitTrip?.tripNumber}`}
+            </DialogTitle>
             <DialogDescription>
-              Log current run details, delays, incidents, or expenses incurred during transit.
+              {activeLogType === "location" && "Update the current physical location and GPS coordinates of the transit vehicle."}
+              {activeLogType === "delays" && "Log unexpected delay events, custom border waiting time, or traffic issues."}
+              {activeLogType === "incidents" && "Log flat tires, vehicle mechanical repairs, accidents, or other incidents."}
+              {activeLogType === "expenses" && "Log any out-of-pocket road tolls, weighbridge fees, or driver expenses."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* GPS & Location */}
-            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Current Location & Tracking</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">Current Location (City/Hub)</label>
-                  <datalist id="route-leg-cities">
-                    {Array.from(new Set(
-                      (ordersList?.filter(o => transitTrip?.orderIds?.includes(o.id)) || [])
-                        .flatMap(o => (o.routeLegs as any[] || []).flatMap(leg => [leg.originCity, leg.destinationCity]))
-                    )).filter(Boolean).map(city => <option key={city} value={city} />)}
-                  </datalist>
-                  <Input 
-                    list="route-leg-cities"
-                    value={transitLocation}
-                    onChange={(e) => setTransitLocation(e.target.value)}
-                    placeholder="e.g. Haima City Hub"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs font-medium">GPS Coordinates</label>
-                  <Input 
-                    value={transitGps}
-                    onChange={(e) => setTransitGps(e.target.value)}
-                    placeholder="e.g. 22.012, 56.124"
-                  />
+            {activeLogType === "location" && (
+              <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Current Location & Tracking</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Current Location (City/Hub)</label>
+                    <datalist id="route-leg-cities">
+                      {Array.from(new Set(
+                        (ordersList?.filter(o => transitTrip?.orderIds?.includes(o.id)) || [])
+                          .flatMap(o => (o.routeLegs as any[] || []).flatMap(leg => [leg.originCity, leg.destinationCity]))
+                      )).filter(Boolean).map(city => <option key={city} value={city} />)}
+                    </datalist>
+                    <Input 
+                      list="route-leg-cities"
+                      value={transitLocation}
+                      onChange={(e) => setTransitLocation(e.target.value)}
+                      placeholder="e.g. Haima City Hub"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">GPS Coordinates</label>
+                    <Input 
+                      value={transitGps}
+                      onChange={(e) => setTransitGps(e.target.value)}
+                      placeholder="e.g. 22.012, 56.124"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Delay log */}
-            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Delays (Optional)</h3>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setTransitDelays([...transitDelays, {reason: "", durationHours: ""}])}>
-                  <Plus className="h-3 w-3 mr-1"/> Add Delay
-                </Button>
-              </div>
-              {transitDelays.map((delay, index) => (
-                <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Delay Reason</label>
-                    <Input 
-                      value={delay.reason}
-                      onChange={(e) => {
-                        const newDelays = [...transitDelays];
-                        newDelays[index].reason = e.target.value;
-                        setTransitDelays(newDelays);
-                      }}
-                      placeholder="e.g. Border Custom Delay"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Duration (Hours)</label>
-                    <Input 
-                      type="number"
-                      value={delay.durationHours}
-                      onChange={(e) => {
-                        const newDelays = [...transitDelays];
-                        newDelays[index].durationHours = e.target.value;
-                        setTransitDelays(newDelays);
-                      }}
-                      placeholder="0"
-                    />
-                  </div>
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
-                    const newDelays = [...transitDelays];
-                    newDelays.splice(index, 1);
-                    setTransitDelays(newDelays);
-                  }}>
-                    <Trash2 className="h-4 w-4" />
+            {activeLogType === "delays" && (
+              <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Delays</h3>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitDelays([...transitDelays, {reason: "", durationHours: ""}])}>
+                    <Plus className="h-3 w-3 mr-1"/> Add Delay
                   </Button>
                 </div>
-              ))}
-            </div>
+                {transitDelays.map((delay, index) => (
+                  <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Delay Reason</label>
+                      <Input 
+                        value={delay.reason}
+                        onChange={(e) => {
+                          const newDelays = [...transitDelays];
+                          newDelays[index].reason = e.target.value;
+                          setTransitDelays(newDelays);
+                        }}
+                        placeholder="e.g. Border Custom Delay"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Duration (Hours)</label>
+                      <Input 
+                        type="number"
+                        value={delay.durationHours}
+                        onChange={(e) => {
+                          const newDelays = [...transitDelays];
+                          newDelays[index].durationHours = e.target.value;
+                          setTransitDelays(newDelays);
+                        }}
+                        placeholder="0"
+                      />
+                    </div>
+                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
+                      const newDelays = [...transitDelays];
+                      newDelays.splice(index, 1);
+                      setTransitDelays(newDelays);
+                    }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Incident log */}
-            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Incidents (Optional)</h3>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setTransitIncidents([...transitIncidents, {description: "", cost: ""}])}>
-                  <Plus className="h-3 w-3 mr-1"/> Add Incident
-                </Button>
-              </div>
-              {transitIncidents.map((incident, index) => (
-                <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Incident Description</label>
-                    <Input 
-                      value={incident.description}
-                      onChange={(e) => {
-                        const newIncidents = [...transitIncidents];
-                        newIncidents[index].description = e.target.value;
-                        setTransitIncidents(newIncidents);
-                      }}
-                      placeholder="e.g. Flat tire"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Estimated Cost (BD)</label>
-                    <Input 
-                      type="number"
-                      step="0.001"
-                      value={incident.cost}
-                      onChange={(e) => {
-                        const newIncidents = [...transitIncidents];
-                        newIncidents[index].cost = e.target.value;
-                        setTransitIncidents(newIncidents);
-                      }}
-                      placeholder="0.000"
-                    />
-                  </div>
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
-                    const newIncidents = [...transitIncidents];
-                    newIncidents.splice(index, 1);
-                    setTransitIncidents(newIncidents);
-                  }}>
-                    <Trash2 className="h-4 w-4" />
+            {activeLogType === "incidents" && (
+              <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Incidents</h3>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitIncidents([...transitIncidents, {description: "", cost: ""}])}>
+                    <Plus className="h-3 w-3 mr-1"/> Add Incident
                   </Button>
                 </div>
-              ))}
-            </div>
+                {transitIncidents.map((incident, index) => (
+                  <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Incident Description</label>
+                      <Input 
+                        value={incident.description}
+                        onChange={(e) => {
+                          const newIncidents = [...transitIncidents];
+                          newIncidents[index].description = e.target.value;
+                          setTransitIncidents(newIncidents);
+                        }}
+                        placeholder="e.g. Flat tire"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Estimated Cost (BD)</label>
+                      <Input 
+                        type="number"
+                        step="0.001"
+                        value={incident.cost}
+                        onChange={(e) => {
+                          const newIncidents = [...transitIncidents];
+                          newIncidents[index].cost = e.target.value;
+                          setTransitIncidents(newIncidents);
+                        }}
+                        placeholder="0.000"
+                      />
+                    </div>
+                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
+                      const newIncidents = [...transitIncidents];
+                      newIncidents.splice(index, 1);
+                      setTransitIncidents(newIncidents);
+                    }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Expense log */}
-            <div className="p-4 border rounded-md bg-muted/30 space-y-3">
-              <div className="flex justify-between items-center">
-                <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Additional Expenses (Optional)</h3>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setTransitExpenses([...transitExpenses, {name: "", cost: ""}])}>
-                  <Plus className="h-3 w-3 mr-1"/> Add Expense
-                </Button>
-              </div>
-              {transitExpenses.map((expense, index) => (
-                <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Expense Title</label>
-                    <Input 
-                      value={expense.name}
-                      onChange={(e) => {
-                        const newExpenses = [...transitExpenses];
-                        newExpenses[index].name = e.target.value;
-                        setTransitExpenses(newExpenses);
-                      }}
-                      placeholder="e.g. Road Tolls"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Cost Amount (BD)</label>
-                    <Input 
-                      type="number"
-                      step="0.001"
-                      value={expense.cost}
-                      onChange={(e) => {
-                        const newExpenses = [...transitExpenses];
-                        newExpenses[index].cost = e.target.value;
-                        setTransitExpenses(newExpenses);
-                      }}
-                      placeholder="0.000"
-                    />
-                  </div>
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
-                    const newExpenses = [...transitExpenses];
-                    newExpenses.splice(index, 1);
-                    setTransitExpenses(newExpenses);
-                  }}>
-                    <Trash2 className="h-4 w-4" />
+            {activeLogType === "expenses" && (
+              <div className="p-4 border rounded-md bg-muted/30 space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Additional Expenses</h3>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitExpenses([...transitExpenses, {name: "", cost: ""}])}>
+                    <Plus className="h-3 w-3 mr-1"/> Add Expense
                   </Button>
                 </div>
-              ))}
-            </div>
+                {transitExpenses.map((expense, index) => (
+                  <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Expense Title</label>
+                      <Input 
+                        value={expense.name}
+                        onChange={(e) => {
+                          const newExpenses = [...transitExpenses];
+                          newExpenses[index].name = e.target.value;
+                          setTransitExpenses(newExpenses);
+                        }}
+                        placeholder="e.g. Road Tolls"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium">Cost Amount (BD)</label>
+                      <Input 
+                        type="number"
+                        step="0.001"
+                        value={expense.cost}
+                        onChange={(e) => {
+                          const newExpenses = [...transitExpenses];
+                          newExpenses[index].cost = e.target.value;
+                          setTransitExpenses(newExpenses);
+                        }}
+                        placeholder="0.000"
+                      />
+                    </div>
+                    <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-500 mb-[2px]" onClick={() => {
+                      const newExpenses = [...transitExpenses];
+                      newExpenses.splice(index, 1);
+                      setTransitExpenses(newExpenses);
+                    }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <DialogFooter className="pt-4">
-            <Button type="button" variant="outline" onClick={() => setIsTransitDialogOpen(false)}>
+            <Button type="button" variant="outline" onClick={() => setActiveLogType(null)}>
               Cancel
             </Button>
             <Button 
@@ -1751,52 +1820,66 @@ export default function DispatchPage() {
                 if (transitTrip) {
                   // Merge/append delays
                   const newDelays = [...(transitTrip.delays as any[] || [])];
-                  transitDelays.forEach(d => {
-                    if (d.reason && parseFloat(d.durationHours) > 0) {
-                      newDelays.push({
-                        reason: d.reason,
-                        durationHours: parseFloat(d.durationHours),
-                        date: new Date().toISOString(),
-                      });
-                    }
-                  });
+                  if (activeLogType === "delays") {
+                    transitDelays.forEach(d => {
+                      if (d.reason && parseFloat(d.durationHours) > 0) {
+                        newDelays.push({
+                          reason: d.reason,
+                          durationHours: parseFloat(d.durationHours),
+                          date: new Date().toISOString(),
+                        });
+                      }
+                    });
+                  }
 
                   // Merge/append incidents
                   const newIncidents = [...(transitTrip.incidents as any[] || [])];
-                  transitIncidents.forEach(i => {
-                    if (i.description) {
-                      newIncidents.push({
-                        description: i.description,
-                        cost: parseFloat(i.cost) || 0,
-                        date: new Date().toISOString(),
-                      });
-                    }
-                  });
+                  if (activeLogType === "incidents") {
+                    transitIncidents.forEach(i => {
+                      if (i.description) {
+                        newIncidents.push({
+                          description: i.description,
+                          cost: parseFloat(i.cost) || 0,
+                          date: new Date().toISOString(),
+                        });
+                      }
+                    });
+                  }
 
                   // Merge/append expenses
                   const newExpenses = [...(transitTrip.additionalExpenses as any[] || [])];
-                  transitExpenses.forEach(e => {
-                    if (e.name && parseFloat(e.cost) > 0) {
-                      newExpenses.push({
-                        name: e.name,
-                        cost: parseFloat(e.cost),
-                      });
-                    }
-                  });
+                  if (activeLogType === "expenses") {
+                    transitExpenses.forEach(e => {
+                      if (e.name && parseFloat(e.cost) > 0) {
+                        newExpenses.push({
+                          name: e.name,
+                          cost: parseFloat(e.cost),
+                        });
+                      }
+                    });
+                  }
 
-                  updateTripMutation.mutate({
+                  const updatePayload: any = {
                     id: transitTrip.id,
-                    currentLocation: transitLocation,
-                    gpsLocation: transitGps,
-                    delays: newDelays,
-                    incidents: newIncidents,
-                    additionalExpenses: newExpenses,
-                  });
+                  };
+                  if (activeLogType === "location") {
+                    updatePayload.currentLocation = transitLocation;
+                    updatePayload.gpsLocation = transitGps;
+                  } else if (activeLogType === "delays") {
+                    updatePayload.delays = newDelays;
+                  } else if (activeLogType === "incidents") {
+                    updatePayload.incidents = newIncidents;
+                  } else if (activeLogType === "expenses") {
+                    updatePayload.additionalExpenses = newExpenses;
+                  }
+
+                  updateTripMutation.mutate(updatePayload);
+                  setActiveLogType(null);
                 }
               }}
               disabled={updateTripMutation.isPending}
             >
-              {updateTripMutation.isPending ? "Logging Updates..." : "Save Transit Logs"}
+              {updateTripMutation.isPending ? "Logging Updates..." : "Save Log"}
             </Button>
           </DialogFooter>
         </DialogContent>

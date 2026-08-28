@@ -215,6 +215,18 @@ export default function OrdersPage() {
     },
   });
 
+  const updateOrderStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string, status: string }) => 
+      apiRequest("PUT", `/api/orders/${id}`, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order status updated successfully!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
   // Mutations
   const createOrderMutation = useMutation({
     mutationFn: (data: any) => {
@@ -702,8 +714,22 @@ export default function OrdersPage() {
                                 toast({ title: "Failed to load order details", variant: "destructive" });
                               }
                             }}>
-                              Edit
+                              Revise
                             </Button>
+                            {order.status !== "completed" && order.status !== "cancelled" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-500 hover:text-red-600 font-medium"
+                                onClick={() => {
+                                  if (confirm("Are you sure you want to cancel this order?")) {
+                                    updateOrderStatusMutation.mutate({ id: order.id, status: "cancelled" });
+                                  }
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            )}
                             <Button 
                               variant="ghost" 
                               size="sm" 

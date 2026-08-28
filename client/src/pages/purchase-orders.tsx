@@ -148,13 +148,13 @@ export default function PurchaseOrdersPage() {
 
   // Query linked purchase invoice for payment details
   const { data: linkedPurchase } = useQuery<any>({
-    queryKey: ["/api/purchase-orders", selectedPO?.id, "purchase"],
+    queryKey: [`/api/purchase-orders/${selectedPO?.id}/purchase`],
     enabled: !!selectedPO && selectedPO.status === "converted",
   });
 
   // Outstanding details for the linked purchase invoice
   const { data: purchaseOutstanding } = useQuery<any>({
-    queryKey: ["/api/purchases", linkedPurchase?.id, "outstanding"],
+    queryKey: [`/api/purchases/${linkedPurchase?.id}/outstanding`],
     enabled: !!linkedPurchase?.id,
   });
 
@@ -207,11 +207,19 @@ export default function PurchaseOrdersPage() {
   // Mutations
   const createPOMutation = useMutation({
     mutationFn: async (data: any) => {
-      // Map custom names to productId field in the payload
-      const mappedItems = data.items.map((item: any) => ({
-        ...item,
-        productId: item.isCustom ? item.customName : item.productId,
-      }));
+      // Map custom names to productId field in the payload and calculate row totals
+      const mappedItems = data.items.map((item: any) => {
+        const qty = parseFloat(String(item.quantity)) || 0;
+        const price = parseFloat(String(item.unitPrice)) || 0;
+        const disc = parseFloat(String(item.discount)) || 0;
+        const vat = parseFloat(String(item.vatRate)) || 0;
+        const total = (qty * price - disc) * (1 + vat / 100);
+        return {
+          ...item,
+          productId: item.isCustom ? item.customName : item.productId,
+          total: total.toFixed(3),
+        };
+      });
       const payload = {
         ...data,
         items: mappedItems,
@@ -851,7 +859,7 @@ export default function PurchaseOrdersPage() {
                           const product = products.find(p => p.id === item.productId);
                           return (
                             <TableRow key={idx}>
-                              <TableCell className="font-medium">{product?.name || "Unknown"}</TableCell>
+                              <TableCell className="font-medium">{product?.name || item.productId || "Unknown"}</TableCell>
                               <TableCell className="text-right font-mono">{item.quantity}</TableCell>
                               <TableCell className="text-right font-mono">{parseFloat(item.unitPrice).toFixed(3)}</TableCell>
                               <TableCell className="text-right font-mono">{parseFloat(item.vatRate).toFixed(1)}%</TableCell>

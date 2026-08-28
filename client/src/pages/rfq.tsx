@@ -48,7 +48,7 @@ const rfqFormSchema = z.object({
   outsourcedTruckCost: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
   noOfTrips: z.string().optional().transform((v) => v ? parseInt(v) : 1),
   noOfTrucks: z.string().optional().transform((v) => v ? parseInt(v) : 1),
-  status: z.enum(["pending", "approved", "rejected", "converted"]),
+  status: z.enum(["pending", "approved", "rejected", "converted", "cancelled"]),
   cargoType: z.string().optional(),
   truckType: z.string().optional(),
   freightType: z.string().optional(),
@@ -130,6 +130,7 @@ export default function RfqPage() {
   const [quickClientCompany, setQuickClientCompany] = useState("");
   const [quickClientPhone, setQuickClientPhone] = useState("");
   const [quickClientEmail, setQuickClientEmail] = useState("");
+  const [rfqStatusFilter, setRfqStatusFilter] = useState<string>("all");
 
   const { toast } = useToast();
 
@@ -430,6 +431,18 @@ export default function RfqPage() {
     },
   });
 
+  const updateQuotationStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string, status: string }) => 
+      apiRequest("PATCH", `/api/quotations/${id}/status`, { status }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/quotations"] });
+      toast({ title: "Quotation status updated successfully!" });
+    },
+    onError: (error: unknown) => {
+      toast({ title: getErrorMessage(error), variant: "destructive" });
+    },
+  });
+
   const convertQuotationToBookingMutation = useMutation({
     mutationFn: (id: string) => apiRequest("POST", `/api/quotations/${id}/convert-to-booking`),
     onSuccess: () => {
@@ -530,9 +543,6 @@ export default function RfqPage() {
         title="RFQ System" 
         description="Calculate pre-order transit margins, clearance charges, toll fees, and request client quotes."
       >
-        <Button onClick={() => setIsLocationDialogOpen(true)} variant="outline" className="gap-2">
-          <MapPin className="h-4 w-4" /> Quick Add Location
-        </Button>
         <Button onClick={() => {
           setSelectedRfq(null);
           form.reset({
@@ -617,6 +627,20 @@ export default function RfqPage() {
                     Transit costing worksheets for active sales/bidding pipelines.
                   </CardDescription>
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground font-medium">Status:</span>
+                  <Select value={rfqStatusFilter} onValueChange={setRfqStatusFilter}>
+                    <SelectTrigger className="w-[180px] h-8 text-xs">
+                      <SelectValue placeholder="Filter by Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="pending">Pending Review</SelectItem>
+                      <SelectItem value="converted">Converted to Quotation</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent className="p-0">
                 {isRfqsLoading ? (
@@ -641,7 +665,7 @@ export default function RfqPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rfqsList.filter(r => r.status === "pending").map((rfq) => {
+                      {rfqsList.filter(r => rfqStatusFilter === "all" || r.status === rfqStatusFilter).map((rfq) => {
                         const client = clientsList?.find(c => c.id === rfq.customerId);
                         const trans = parseFloat(String(rfq.transportationCharges)) || 0;
                         const extraTotal = (rfq.extraCharges as any[])?.reduce((sum: number, item: any) => sum + (Number(item.cost) || 0), 0) || 0;
@@ -675,45 +699,27 @@ export default function RfqPage() {
                                 defaultValue={rfq.status} 
                                 onValueChange={(val) => updateStatusMutation.mutate({ id: rfq.id, status: val })}
                               >
-                                <SelectTrigger className={`h-8 w-[130px] text-xs ${rfq.status === 'approved' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : rfq.status === 'rejected' ? 'text-red-600 bg-red-50 border-red-200' : rfq.status === 'converted' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
+                                <SelectTrigger className={`h-8 w-[140px] text-xs ${rfq.status === 'converted' ? 'text-blue-600 bg-blue-50 border-blue-200' : rfq.status === 'cancelled' ? 'text-red-600 bg-red-50 border-red-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="pending">Pending Review</SelectItem>
-                                  <SelectItem value="approved">Approved / Won</SelectItem>
-                                  <SelectItem value="rejected">Rejected / Lost</SelectItem>
-                                  <SelectItem value="converted">Converted to Order</SelectItem>
+                                  <SelectItem value="converted">Converted to Quotation</SelectItem>
+                                  <SelectItem value="cancelled">Cancelled</SelectItem>
                                 </SelectContent>
                               </Select>
                             </TableCell>
                             <TableCell className="text-right space-x-1">
-                              {rfq.status !== "converted" && (
-                                <>
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    className="h-8 text-xs text-primary border-primary/20 hover:bg-primary/5"
-                                    onClick={() => convertToQuotationMutation.mutate(rfq.id)}
-                                    disabled={convertToQuotationMutation.isPending || quickBookMutation.isPending}
-                                  >
-                                    Convert to Quotation
-                                  </Button>
-                                  <Button 
-                                    variant="default" 
-                                    size="sm" 
-                                    className="h-8 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
-                                    onClick={() => {
-                                      setActioningRfqId(rfq.id);
-                                      quickBookMutation.mutate(rfq.id);
-                                    }}
-                                    disabled={convertToQuotationMutation.isPending || quickBookMutation.isPending}
-                                  >
-                                    {quickBookMutation.isPending && actioningRfqId === rfq.id ? (
-                                      <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                                    ) : null}
-                                    Quick Book
-                                  </Button>
-                                </>
+                              {rfq.status === "pending" && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-8 text-xs text-primary border-primary/20 hover:bg-primary/5"
+                                  onClick={() => convertToQuotationMutation.mutate(rfq.id)}
+                                  disabled={convertToQuotationMutation.isPending}
+                                >
+                                  Convert to Quotation
+                                </Button>
                               )}
                               <Button variant="ghost" size="sm" title="View Details" onClick={() => {
                                 setSelectedRfq(rfq);
@@ -854,7 +860,7 @@ export default function RfqPage() {
                           </TableCell>
                           <TableCell>
                             <div className="font-semibold text-primary">{formatCurrency(total)}</div>
-                            <div className="text-xs text-muted-foreground">Rate: {formatCurrency(sellingRate)}</div>
+                            <div className="text-xs text-muted-foreground">Selling Price: {formatCurrency(sellingRate)}</div>
                           </TableCell>
                           <TableCell>{validity}</TableCell>
                           <TableCell>
@@ -898,7 +904,7 @@ export default function RfqPage() {
                               <Eye className="h-4 w-4 text-blue-500" />
                             </Button>
 
-                            {q.status === "pending" && (
+                             {q.status === "pending" && (
                               <>
                                 <Button 
                                   variant="outline" 
@@ -948,23 +954,82 @@ export default function RfqPage() {
                                 >
                                   Revise
                                 </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 text-xs text-red-500 hover:text-red-600 font-medium"
+                                  onClick={() => {
+                                    if (confirm("Are you sure you want to cancel this quotation?")) {
+                                      updateQuotationStatusMutation.mutate({ id: q.id, status: "cancelled" });
+                                    }
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
                               </>
                             )}
 
                             {q.status === "approved" && (
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-8 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium"
-                                onClick={() => convertQuotationToBookingMutation.mutate(q.id)}
-                              >
-                                Convert to Booking
-                              </Button>
+                              <>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-8 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50 font-medium"
+                                  onClick={() => convertQuotationToBookingMutation.mutate(q.id)}
+                                >
+                                  Convert to Booking
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 text-xs text-amber-600 font-medium"
+                                  onClick={() => {
+                                    setRevisingQuotation(q);
+                                    const rfq = rfqsList?.find(r => r.id === q.rfqId);
+                                    revisionForm.reset({
+                                      sellingRate: String(q.sellingRate || "0.000"),
+                                      outsourcedTruckCost: String(q.outsourcedTruckCost || rfq?.outsourcedTruckCost || "0.000"),
+                                      noOfTrips: String(q.noOfTrips || rfq?.noOfTrips || 1),
+                                      noOfTrucks: String(q.noOfTrucks || rfq?.noOfTrucks || 1),
+                                      cargoType: q.cargoType || rfq?.cargoType || "",
+                                      truckType: q.truckType || rfq?.truckType || "",
+                                      freightType: q.freightType || rfq?.freightType || "",
+                                      detentionChargesPerDay: String(q.detentionChargesPerDay || rfq?.detentionChargesPerDay || "0.000"),
+                                      cargoDetails: q.cargoDetails || rfq?.cargoDetails || "",
+                                      temperatureRequirement: q.temperatureRequirement || rfq?.temperatureRequirement || "",
+                                      weight: String(q.weight || rfq?.weight || "0.000"),
+                                      volume: String(q.volume || rfq?.volume || "0.000"),
+                                      additionalCharges: (q.additionalCharges as any[]) || [],
+                                    });
+                                    setIsQuotationRevisionDialogOpen(true);
+                                  }}
+                                >
+                                  Revise
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 text-xs text-red-500 hover:text-red-600 font-medium"
+                                  onClick={() => {
+                                    if (confirm("Are you sure you want to cancel this quotation?")) {
+                                      updateQuotationStatusMutation.mutate({ id: q.id, status: "cancelled" });
+                                    }
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              </>
                             )}
 
                             {q.status === "converted" && (
                               <span className="text-xs text-muted-foreground italic font-medium px-2 py-1 bg-slate-100 rounded-md">
                                 Converted to Booking
+                              </span>
+                            )}
+
+                            {q.status === "cancelled" && (
+                              <span className="text-xs text-red-500 italic font-medium px-2 py-1 bg-red-50 rounded-md">
+                                Cancelled
                               </span>
                             )}
                           </TableCell>
@@ -1034,6 +1099,20 @@ export default function RfqPage() {
                       <FormLabel>Transit Route / Border Crossings *</FormLabel>
                       <FormControl>
                         <Input placeholder="e.g. Muscat - Haima - Salalah Highway Route" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="transportationCharges"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
+                      <FormLabel>Price (BD)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="0.000" type="number" step="0.001" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -1467,12 +1546,12 @@ export default function RfqPage() {
           <DialogHeader>
             <DialogTitle>Approve Quotation</DialogTitle>
             <DialogDescription>
-              Please confirm the final approved price (Selling Rate) before approving this quotation.
+              Please confirm the final selling price before approving this quotation.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Approved Price (BD) *</label>
+              <label className="text-sm font-medium">Selling Price (BD) *</label>
               <Input 
                 type="number" 
                 step="0.001" 
@@ -1595,7 +1674,7 @@ export default function RfqPage() {
             <Button 
               onClick={() => {
                 if (parseFloat(approvePrice) <= 0) {
-                  toast({ title: "Please enter a valid price greater than 0", variant: "destructive" });
+                  toast({ title: "Please enter a valid selling price greater than 0", variant: "destructive" });
                   return;
                 }
                 if (approvingQuotation) {

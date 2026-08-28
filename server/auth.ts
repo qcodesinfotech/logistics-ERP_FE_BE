@@ -256,21 +256,21 @@ export const enforceScopeMiddleware = (req: AuthRequest, res: Response, next: Ne
   if (req.user.role === "super_admin") {
     if (req.body) {
       req.body.companyId = req.body.companyId || req.user.companyId;
-      req.body.shopId = req.body.shopId || req.user.shopId;
       req.body.branchId = req.body.branchId || req.user.branchId;
+      req.body.shopId = req.body.shopId || req.user.shopId || req.body.branchId; // Fallback to branchId
     }
     if (req.query) {
       req.query.companyId = (req.query.companyId as string) || req.user.companyId || undefined;
-      req.query.shopId = (req.query.shopId as string) || req.user.shopId || undefined;
       req.query.branchId = (req.query.branchId as string) || req.user.branchId || undefined;
+      req.query.shopId = (req.query.shopId as string) || req.user.shopId || req.query.branchId || undefined; // Fallback to branchId
     }
     return next();
   }
 
   // For all other users, enforce their assigned company/shop/branch scope
   const userCompanyId = req.user.companyId;
-  const userShopId = req.user.shopId;
   const userBranchId = req.user.branchId;
+  const userShopId = req.user.shopId || userBranchId; // Fallback to branchId if shopId is null
 
   if (!userCompanyId || !userBranchId) {
     return res.status(403).json({ 
@@ -324,15 +324,18 @@ export const getEnforcedScope = (req: AuthRequest): ScopeParams | null => {
   // Super admin can use request body/query scope
   if (req.user.role === "super_admin") {
     const companyId = req.body?.companyId || req.query?.companyId || req.user.companyId;
-    const shopId = req.body?.shopId || req.query?.shopId || req.user.shopId;
     const branchId = req.body?.branchId || req.query?.branchId || req.user.branchId;
+    const shopId = req.body?.shopId || req.query?.shopId || req.user.shopId || branchId; // Fallback to branchId
     if (companyId && shopId && branchId) return { companyId, shopId, branchId };
     return null;
   }
   
   // Regular users always use their assigned scope
-  if (req.user.companyId && req.user.shopId && req.user.branchId) {
-    return { companyId: req.user.companyId, shopId: req.user.shopId, branchId: req.user.branchId };
+  const companyId = req.user.companyId;
+  const branchId = req.user.branchId;
+  const shopId = req.user.shopId || branchId; // Fallback to branchId
+  if (companyId && shopId && branchId) {
+    return { companyId, shopId, branchId };
   }
   return null;
 };

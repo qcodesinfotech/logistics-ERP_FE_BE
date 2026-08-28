@@ -2437,8 +2437,8 @@ export async function registerRoutes(
       const { items, ...orderData } = req.body;
 
       // STRICT HIERARCHY: Validate warehouse belongs to selected shop/branch
-      const shopId = scope.shopId || orderData.shopId;
       const branchId = scope.branchId || orderData.branchId;
+      const shopId = scope.shopId || orderData.shopId || branchId;
       const warehouseId = scope.warehouseId || orderData.warehouseId;
       const warehouseValidation = await validateWarehouseHierarchy(warehouseId, shopId, branchId);
       if (!warehouseValidation.valid) {
@@ -2551,8 +2551,8 @@ export async function registerRoutes(
       })), null, 2));
 
       // STRICT HIERARCHY: Validate warehouse belongs to selected shop/branch
-      const shopId = scope.shopId || purchaseData.shopId;
       const branchId = scope.branchId || purchaseData.branchId;
+      const shopId = scope.shopId || purchaseData.shopId || branchId;
       const warehouseId = scope.warehouseId || purchaseData.warehouseId;
       const warehouseValidation = await validateWarehouseHierarchy(warehouseId, shopId, branchId);
       if (!warehouseValidation.valid) {
@@ -8479,7 +8479,7 @@ export async function registerRoutes(
         currency: "BHD",
       });
 
-      await storage.updateRfq(rfq.id, { status: "approved" });
+      await storage.updateRfq(rfq.id, { status: "converted" });
       res.status(201).json(quotation);
     } catch (error: any) {
       console.error("Convert RFQ to Quotation error:", error);

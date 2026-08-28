@@ -158,7 +158,7 @@ export interface IStorage {
   clearSupplierCredit(id: string, amount: number, paymentMethod: string, notes?: string): Promise<any>;
 
   // Purchase Orders
-  getPurchaseOrders(): Promise<PurchaseOrder[]>;
+  getPurchaseOrders(): Promise<(PurchaseOrder & { items: PurchaseOrderItem[] })[]>;
   getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined>;
   getPurchaseOrderWithItems(id: string): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] } | undefined>;
   createPurchaseOrder(data: InsertPurchaseOrder, items: any[]): Promise<PurchaseOrder>;
@@ -1301,8 +1301,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Purchase Orders
-  async getPurchaseOrders(): Promise<PurchaseOrder[]> {
-    return db.select().from(purchaseOrders).orderBy(desc(purchaseOrders.orderDate));
+  async getPurchaseOrders(): Promise<(PurchaseOrder & { items: PurchaseOrderItem[] })[]> {
+    const orders = await db.select().from(purchaseOrders).orderBy(desc(purchaseOrders.orderDate));
+    const result: (PurchaseOrder & { items: PurchaseOrderItem[] })[] = [];
+    for (const order of orders) {
+      const items = await db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, order.id));
+      result.push({
+        ...order,
+        items,
+      });
+    }
+    return result;
   }
 
   async getPurchaseOrder(id: string): Promise<PurchaseOrder | undefined> {
@@ -1340,6 +1349,12 @@ export class DatabaseStorage implements IStorage {
       const [order] = await tx.insert(purchaseOrders).values(orderData).returning();
 
       for (const item of items) {
+        const qty = item.quantity || 0;
+        const price = parseFloat(item.unitPrice?.toString() || "0") || 0;
+        const disc = parseFloat(item.discount?.toString() || "0") || 0;
+        const vat = parseFloat(item.vatRate?.toString() || "5.00") || 0;
+        const calculatedTotal = (qty * price - disc) * (1 + vat / 100);
+
         await tx.insert(purchaseOrderItems).values({
           purchaseOrderId: order.id,
           productId: item.productId,
@@ -1347,7 +1362,9 @@ export class DatabaseStorage implements IStorage {
           unitPrice: item.unitPrice?.toString() || "0.000",
           vatRate: item.vatRate?.toString() || "5.00",
           discount: item.discount?.toString() || "0.000",
-          total: item.total?.toString() || "0.000",
+          total: item.total?.toString() && item.total?.toString() !== "0" && item.total?.toString() !== "0.000"
+            ? item.total.toString()
+            : calculatedTotal.toFixed(3),
           warehouseId: item.warehouseId || null,
           salesRate: item.salesRate?.toString() || null,
           boxSalesRate: item.boxSalesRate?.toString() || null,
