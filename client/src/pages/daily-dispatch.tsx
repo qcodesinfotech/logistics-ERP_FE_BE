@@ -47,7 +47,7 @@ import {
 } from "lucide-react";
 
 // ===== Types =====
-interface DispatchSheet { id: string; date: string; fileName: string | null; status: string; createdAt: string; }
+interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; }
 interface DispatchItem {
   id: string; sheetId: string; outletCode: string; outletId: string | null;
   outletName?: string; itemCode: string; description: string | null;

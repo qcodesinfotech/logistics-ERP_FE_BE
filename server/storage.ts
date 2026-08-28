@@ -163,6 +163,8 @@ export interface IStorage {
   getPurchaseOrderWithItems(id: string): Promise<{ order: PurchaseOrder; items: PurchaseOrderItem[] } | undefined>;
   createPurchaseOrder(data: InsertPurchaseOrder, items: any[]): Promise<PurchaseOrder>;
   updatePurchaseOrderStatus(id: string, status: string): Promise<PurchaseOrder | undefined>;
+  approvePurchaseOrder(id: string): Promise<PurchaseOrder>;
+  getPurchaseByPOId(poId: string): Promise<Purchase | undefined>;
 
   // Purchases
   getPurchases(): Promise<Purchase[]>;
@@ -1365,6 +1367,133 @@ export class DatabaseStorage implements IStorage {
     return order || undefined;
   }
 
+  async getPurchaseByPOId(poId: string): Promise<Purchase | undefined> {
+    const [purchase] = await db.select().from(purchases).where(eq(purchases.purchaseOrderId, poId));
+    return purchase || undefined;
+  }
+
+  async approvePurchaseOrder(id: string): Promise<PurchaseOrder> {
+    return await db.transaction(async (tx) => {
+      // 1. Fetch the Purchase Order
+      const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+      if (!order) throw new Error("Purchase order not found");
+      if (order.status !== "pending") {
+        throw new Error(`Purchase order is already ${order.status}`);
+      }
+
+      // Update PO status to approved first
+      await tx.update(purchaseOrders).set({ status: "approved" }).where(eq(purchaseOrders.id, id));
+
+      // 2. Generate a new purchase number (PU)
+      const purchaseNumber = await this.getNextNumber("PU");
+
+      // 3. Create approved purchase invoice from PO data
+      const purchaseData = {
+        purchaseNumber,
+        supplierId: order.supplierId,
+        shopId: order.shopId,
+        branchId: order.branchId || null,
+        warehouseId: order.warehouseId || null,
+        paymentStatus: "pending",
+        status: "approved", // Automatically approved purchase
+        subtotal: order.subtotal,
+        vatAmount: order.vatAmount,
+        discount: order.discount,
+        freight: order.freight,
+        total: order.total,
+        purchaseOrderId: order.id,
+        notes: order.notes,
+      };
+
+      const [purchase] = await tx.insert(purchases).values(purchaseData).returning();
+
+      // 4. Fetch Purchase Order Items
+      const orderItems = await tx.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, id));
+
+      // 5. Convert items to purchase items & update inventory
+      for (const item of orderItems) {
+        const [purchaseItem] = await tx.insert(purchaseItems).values({
+          purchaseId: purchase.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          vatRate: item.vatRate,
+          discount: item.discount,
+          total: item.total,
+          salesRate: item.salesRate,
+          boxSalesRate: item.boxSalesRate,
+          warrantyMonths: item.warrantyMonths,
+          storageType: item.storageType,
+          manufacturingDate: item.manufacturingDate,
+          expiryDate: item.expiryDate,
+        }).returning();
+
+        // Add to inventory
+        if (order.warehouseId) {
+          await tx.insert(inventory).values({
+            productId: item.productId,
+            warehouseId: order.warehouseId as string,
+            branchId: order.branchId || null,
+            quantity: item.quantity,
+            costPrice: item.unitPrice?.toString() || "0.000",
+          });
+        }
+      }
+
+      // 6. Update supplier balance (what we owe them)
+      const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, order.supplierId));
+      const totalAmount = parseFloat(purchase.total || "0");
+      if (supplier) {
+        const newBalance = parseFloat(supplier.currentBalance || "0") + totalAmount;
+        await tx.update(suppliers).set({ currentBalance: newBalance.toFixed(3) }).where(eq(suppliers.id, order.supplierId));
+      }
+
+      // 7. Update purchase order status to converted
+      await tx.update(purchaseOrders).set({ status: "converted" }).where(eq(purchaseOrders.id, order.id));
+
+      // 8. Create double-entry journal entries
+      const subtotal = parseFloat(purchase.subtotal || "0");
+      const vatAmount = parseFloat(purchase.vatAmount || "0");
+      const discount = parseFloat(purchase.discount || "0");
+      const freight = parseFloat(purchase.freight || "0");
+
+      const inventoryCost = Math.max(0, subtotal - discount + freight);
+
+      const journalLines: Array<{ accountCode: string; debit?: number; credit?: number; description?: string }> = [];
+
+      // DR Inventory (1200)
+      if (inventoryCost > 0) {
+        journalLines.push({ accountCode: "1200", debit: inventoryCost, description: `Inventory purchase from PO ${order.orderNumber}` });
+      }
+
+      // DR VAT Input (2150)
+      if (vatAmount > 0) {
+        journalLines.push({ accountCode: "2150", debit: vatAmount, description: `VAT on PO ${order.orderNumber}` });
+      }
+
+      // CR Supplier Payable (2000)
+      if (totalAmount > 0) {
+        journalLines.push({ accountCode: "2000", credit: totalAmount, description: `Supplier payable - PO ${order.orderNumber}` });
+      }
+
+      if (journalLines.length > 0) {
+        await this.createJournalEntryInTx(tx, {
+          sourceType: "purchase",
+          sourceId: purchase.id,
+          shopId: purchase.shopId,
+          branchId: purchase.branchId || purchase.shopId,
+          reference: purchase.purchaseNumber,
+          description: `Purchase from supplier via PO ${order.orderNumber}`,
+          lines: journalLines,
+        });
+      }
+
+      // Return updated order
+      const [updatedOrder] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+      return updatedOrder;
+    });
+  }
+
   // Purchases
   async getPurchases(scope?: { companyId?: string | null; shopId?: string | null; branchId?: string | null } | null): Promise<Purchase[]> {
     const conditions = [];
@@ -1437,7 +1566,7 @@ export class DatabaseStorage implements IStorage {
           await tx.insert(bankTransactions).values({
             bankAccountId: purchase.bankAccountId,
             shopId: account.shopId,
-            branchId: account.branchId || account.shopId,
+            branchId: account.branchId || account.shopId || "",
             type: "deposit",
             amount: paidAmount.toFixed(3),
             reference: purchase.purchaseNumber,
@@ -1491,7 +1620,7 @@ export class DatabaseStorage implements IStorage {
           const [inv] = await tx.select().from(inventory).where(
             and(
               eq(inventory.productId, item.productId),
-              eq(inventory.warehouseId, purchase.warehouseId)
+              eq(inventory.warehouseId, purchase.warehouseId || "")
             )
           );
 
@@ -8354,7 +8483,7 @@ export class DatabaseStorage implements IStorage {
         const vehicle = vehicles.find(v => v.id === assignment.truckId);
         const driver = users.find(u => u.id === assignment.driverId);
         assignedTruckPlate = vehicle ? vehicle.plateNumber : null;
-        assignedDriverName = driver ? (driver.displayName || driver.username) : null;
+        assignedDriverName = driver ? (driver.name || driver.username) : null;
       }
       
       return {
@@ -8601,7 +8730,7 @@ export class DatabaseStorage implements IStorage {
     const extraTruckRate = parseFloat(contract.extraTruckCharge || "0");
     const emergencyRate = parseFloat(contract.emergencyDeliveryCharge || "0");
     const redeliveryRate = parseFloat(contract.redeliveryCharge || "0");
-    const outsourcedRate = parseFloat(contract.outsourcedVehicleCharge || "0");
+    const outsourcedRate = parseFloat((contract as any).outsourcedVehicleCharge || "0");
 
     const baseAmount = parseFloat(contract.monthlyRate || "0") * (contract.numVehicles || 1);
     
@@ -8672,7 +8801,7 @@ export class DatabaseStorage implements IStorage {
     }).from(deliveryAttachments)
       .innerJoin(orders, eq(deliveryAttachments.orderId, orders.id))
       .where(and(
-        eq(orders.customerId, contract.customerId),
+        eq(orders.customerId, contract.customerId || ""),
         outletId ? eq(deliveryAttachments.outletId, outletId) : undefined,
         sql`${deliveryAttachments.createdAt} >= ${startDate.toISOString()}`,
         sql`${deliveryAttachments.createdAt} <= ${endDate.toISOString()}`

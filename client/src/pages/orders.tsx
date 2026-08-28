@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { ClipboardList, Plus, FileText, Upload, Trash2, MapPin, RefreshCw, Layers, Eye, Printer, ArrowRight } from "lucide-react";
+import { ClipboardList, Plus, FileText, Upload, Trash2, MapPin, RefreshCw, Layers, Eye, Printer, ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -106,7 +106,7 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; url: string }[]>([]);
-  const [viewOrder, setViewOrder] = useState<Order | null>(null);
+  const [viewOrder, setViewOrder] = useState<any>(null);
   const [isFinalizeExpensesOpen, setIsFinalizeExpensesOpen] = useState(false);
   const [manageRoutesOrder, setManageRoutesOrder] = useState<Order | null>(null);
   const [routeLegsState, setRouteLegsState] = useState<any[]>([]);
@@ -354,7 +354,7 @@ export default function OrdersPage() {
   };
 
   const handleFormSubmit = (data: OrderFormData) => {
-    if (data.status === "completed" && !data.expenses) {
+    if (data.status === "completed" && !(data as any).expenses) {
       setOrderToFinalize({ ...data, id: selectedOrder?.id } as any);
       setFinalizeExpenses([
         { description: "Driver Fee", qty: 1, unitRate: 0 },
@@ -637,7 +637,15 @@ export default function OrdersPage() {
                                 Dispatch
                               </Button>
                             )}
-                            <Button variant="ghost" size="icon" onClick={() => setViewOrder(order)}>
+                            <Button variant="ghost" size="icon" onClick={async () => {
+                              try {
+                                const res = await apiRequest("GET", `/api/orders/${order.id}`);
+                                const data = await res.json();
+                                setViewOrder(data.order ? { ...data.order, charges: data.charges } : data);
+                              } catch (e) {
+                                setViewOrder(order);
+                              }
+                            }}>
                               <Eye className="h-4 w-4 text-blue-500" />
                             </Button>
                             <Button variant="ghost" size="sm" title="Update Status & Routes" onClick={() => {
@@ -1172,21 +1180,25 @@ export default function OrdersPage() {
                           <FormLabel className="text-xs block mb-2">Upload POD</FormLabel>
                           <Input type="file" multiple onChange={(e) => handlePodUpload(e, index)} className="text-xs" />
                         </div>
-                        {form.watch(`routeLegs.${index}.podDocuments`)?.length > 0 && (
-                          <div className="flex-1 space-y-1">
-                            <span className="text-xs font-semibold text-slate-500">Uploaded PODs:</span>
-                            {form.watch(`routeLegs.${index}.podDocuments`).map((doc: any, docIdx: number) => (
-                              <div key={docIdx} className="text-xs flex items-center justify-between bg-slate-100 p-1 rounded">
-                                <span className="truncate max-w-[150px]">{doc.name}</span>
-                                <Button type="button" variant="ghost" size="sm" className="h-4 w-4 p-0 text-red-500" onClick={() => {
-                                  const pods = form.getValues(`routeLegs.${index}.podDocuments`);
-                                  pods.splice(docIdx, 1);
-                                  form.setValue(`routeLegs.${index}.podDocuments`, pods);
-                                }}><Trash2 className="h-3 w-3" /></Button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        {(() => {
+                          const podDocs = form.watch(`routeLegs.${index}.podDocuments`);
+                          return podDocs && podDocs.length > 0 ? (
+                            <div className="flex-1 space-y-1">
+                              <span className="text-xs font-semibold text-slate-500">Uploaded PODs:</span>
+                              {podDocs.map((doc: any, docIdx: number) => (
+                                <div key={docIdx} className="text-xs flex items-center justify-between bg-slate-100 p-1 rounded">
+                                  <span className="truncate max-w-[150px]">{doc.name}</span>
+                                  <Button type="button" variant="ghost" size="sm" className="h-4 w-4 p-0 text-red-500" onClick={() => {
+                                    const pods = form.getValues(`routeLegs.${index}.podDocuments`) || [];
+                                    const updatedPods = [...pods];
+                                    updatedPods.splice(docIdx, 1);
+                                    form.setValue(`routeLegs.${index}.podDocuments`, updatedPods);
+                                  }}><Trash2 className="h-3 w-3" /></Button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
                   ))}
@@ -1542,7 +1554,7 @@ export default function OrdersPage() {
                                 <span className="text-xs font-semibold text-emerald-600">Invoiced</span>
                               ) : (trip.status === 'completed' && trip.podVerificationStatus === 'verified') ? (
                                 <Button
-                                  size="xs"
+                                  size="sm"
                                   variant="outline"
                                   className="h-6 text-[10px] py-0.5 px-2 border-blue-200 text-blue-600 hover:bg-blue-50"
                                   onClick={() => generateInvoiceMutation.mutate(trip.id)}

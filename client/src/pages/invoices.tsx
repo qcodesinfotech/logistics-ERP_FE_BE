@@ -387,7 +387,7 @@ export default function InvoicesPage() {
                   <Label>Select Bank Account</Label>
                   <Button 
                     type="button" 
-                    variant="link" 
+                    variant="ghost" 
                     className="h-auto p-0 text-xs text-primary font-medium hover:underline"
                     onClick={() => setIsQuickBankDialogOpen(true)}
                   >
@@ -415,7 +415,7 @@ export default function InvoicesPage() {
                   <Label>Select Petty Cash Account</Label>
                   <Button 
                     type="button" 
-                    variant="link" 
+                    variant="ghost" 
                     className="h-auto p-0 text-xs text-primary font-medium hover:underline"
                     onClick={() => setIsQuickCashDialogOpen(true)}
                   >

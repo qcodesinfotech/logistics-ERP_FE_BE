@@ -150,7 +150,7 @@ export default function DeliveryInvoicesPage() {
         invoice={selectedInvoice} 
         open={isModalOpen} 
         onOpenChange={setIsModalOpen}
-        onSave={(data) => {
+        onSave={(data: any) => {
           if (selectedInvoice) {
              updateInvoiceMutation.mutate({ id: selectedInvoice.id, data });
           }
@@ -195,7 +195,7 @@ function InvoiceModal({ invoice, open, onOpenChange, onSave }: any) {
     const sub = newItems.reduce((acc, item) => acc + (parseFloat(item.totalPrice) || 0), 0);
     const vat = parseFloat(formData.vatAmount) || 0;
     const disc = parseFloat(formData.discount) || 0;
-    setFormData(prev => ({
+    setFormData((prev: any) => ({
       ...prev,
       subtotal: sub.toFixed(3),
       totalAmount: (sub + vat - disc).toFixed(3)
@@ -307,7 +307,7 @@ function InvoiceModal({ invoice, open, onOpenChange, onSave }: any) {
             <div className="flex justify-between items-center">
               <Label>VAT Amount</Label>
               <Input type="number" className="w-24 text-right" value={formData.vatAmount} onChange={e => {
-                setFormData(p => ({...p, vatAmount: e.target.value}));
+                setFormData((p: any) => ({...p, vatAmount: e.target.value}));
                 setTimeout(() => calculateTotals(items), 50);
               }} />
             </div>

@@ -96,6 +96,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Trip Dispatch", url: "/logistics/dispatch", icon: Truck },
       { title: "RFQ System", url: "/logistics/rfq", icon: Calculator },
       { title: "Order Book", url: "/logistics/orders", icon: ClipboardList },
+      { title: "Purchase Orders", url: "/logistics/purchase-orders", icon: FileCheck, menuKey: "purchases" },
     ],
   },
   {

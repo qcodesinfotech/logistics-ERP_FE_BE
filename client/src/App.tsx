@@ -50,6 +50,7 @@ import ContractInvoicesPage from "@/pages/contract-invoices";
 import BrandInvoicesPage from "@/pages/brand-invoices";
 import RfqPage from "@/pages/rfq";
 import OrdersPage from "@/pages/orders";
+import PurchaseOrdersPage from "@/pages/purchase-orders";
 import InvoicesPage from "@/pages/invoices";
 import DispatchPage from "@/pages/dispatch";
 import DailyDispatchPage from "@/pages/daily-dispatch";
@@ -102,6 +103,7 @@ function PrivateRouter() {
       <Route path="/logistics/fleet" component={FleetPage} />
       <Route path="/logistics/rfq" component={RfqPage} />
       <Route path="/logistics/orders" component={OrdersPage} />
+      <Route path="/logistics/purchase-orders" component={PurchaseOrdersPage} />
       <Route path="/logistics/invoices" component={InvoicesPage} />
       <Route path="/logistics/dispatch" component={DispatchPage} />
       <Route path="/logistics/daily-dispatch" component={DailyDispatchPage} />

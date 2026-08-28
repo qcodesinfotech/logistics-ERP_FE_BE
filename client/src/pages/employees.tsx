@@ -431,10 +431,10 @@ export default function Employees() {
     const payload = { 
       ...data, 
       photoUrl: employeePhotoUrl || undefined,
-      joiningDate: data.joiningDate || null,
-      branchId: data.branchId || null,
-      shopId: data.shopId || null,
-      email: data.email || null,
+      joiningDate: data.joiningDate || undefined,
+      branchId: data.branchId || undefined,
+      shopId: data.shopId || undefined,
+      email: data.email || undefined,
     };
     if (editingEmployee) {
       updateMutation.mutate({ ...payload, id: editingEmployee.id });

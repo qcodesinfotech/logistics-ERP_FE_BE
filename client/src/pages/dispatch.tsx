@@ -79,7 +79,7 @@ export default function DispatchPage() {
 
   // In Transit Log States
   const [isTransitDialogOpen, setIsTransitDialogOpen] = useState(false);
-  const [transitTrip, setTransitTrip] = useState<Trip | null>(null);
+  const [transitTrip, setTransitTrip] = useState<any>(null);
   const [transitLocation, setTransitLocation] = useState("");
   const [transitGps, setTransitGps] = useState("");
   const [transitDelays, setTransitDelays] = useState<{reason: string; durationHours: string}[]>([{reason: "", durationHours: ""}]);
@@ -113,7 +113,7 @@ export default function DispatchPage() {
   const { toast } = useToast();
 
   // Queries
-  const { data: tripsList, isLoading: isTripsLoading } = useQuery<Trip[]>({
+  const { data: tripsList, isLoading: isTripsLoading } = useQuery<(Trip & { orderIds?: string[]; invoiceGenerated?: boolean })[]>({
     queryKey: ["/api/trips"],
   });
 

@@ -452,7 +452,7 @@ export async function registerRoutes(
 ): Promise<Server> {
 
   // STRICT HIERARCHY VALIDATION HELPER
-  // Validates that a warehouse belongs to the specified shop and branch
+  // Validates that a warehouse (or truck/vehicle) belongs to the specified shop and branch
   async function validateWarehouseHierarchy(
     warehouseId: string | null | undefined,
     shopId: string | null | undefined,
@@ -462,7 +462,12 @@ export async function registerRoutes(
 
     const warehouse = await storage.getWarehouse(warehouseId);
     if (!warehouse) {
-      return { valid: false, error: "Warehouse not found" };
+      // Check if it is a vehicle (truck)
+      const vehicle = await storage.getVehicle(warehouseId);
+      if (vehicle) {
+        return { valid: true }; // Trucks are valid globally accessible destinations
+      }
+      return { valid: false, error: "Warehouse or Truck not found" };
     }
 
     // Validate warehouse belongs to the selected shop
@@ -2456,9 +2461,14 @@ export async function registerRoutes(
         warehouseId,
       }, items);
       res.status(201).json(order);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Purchase order error:", error);
-      res.status(400).json({ error: "Failed to create purchase order" });
+      try {
+        fs.writeFileSync("scratch/error.log", `${error.message}\n${error.stack}`);
+      } catch (fsErr) {
+        console.error("Failed to write to scratch/error.log", fsErr);
+      }
+      res.status(400).json({ error: error.message || "Failed to create purchase order" });
     }
   });
 
@@ -2470,6 +2480,31 @@ export async function registerRoutes(
       res.json(order);
     } catch (error) {
       res.status(400).json({ error: "Failed to update purchase order status" });
+    }
+  });
+
+  app.post("/api/purchase-orders/:id/approve", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const userRole = req.user?.role;
+      if (userRole !== "super_admin" && userRole !== "admin" && userRole !== "manager") {
+        return res.status(403).json({ error: "Only admins, super admins, or managers can approve purchase orders" });
+      }
+      const order = await storage.approvePurchaseOrder(req.params.id);
+      res.json(order);
+    } catch (error: any) {
+      console.error("Purchase order approve error:", error);
+      res.status(400).json({ error: error.message || "Failed to approve purchase order" });
+    }
+  });
+
+  app.get("/api/purchase-orders/:id/purchase", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const purchase = await storage.getPurchaseByPOId(req.params.id);
+      if (!purchase) return res.status(404).json({ error: "No purchase invoice found for this purchase order" });
+      res.json(purchase);
+    } catch (error: any) {
+      console.error("Get purchase by PO ID error:", error);
+      res.status(400).json({ error: "Failed to get purchase invoice" });
     }
   });
 
@@ -8412,9 +8447,9 @@ export async function registerRoutes(
       if (!rfq) return res.status(404).json({ error: "RFQ not found" });
 
       const scope = getScopeFromRequest(req);
-      const shopId = scope.shopId || rfq.shopId || "";
-      const branchId = scope.branchId || rfq.branchId || null;
-      const companyId = scope.companyId || rfq.companyId || null;
+      const shopId = scope.shopId || (rfq as any).shopId || "";
+      const branchId = scope.branchId || (rfq as any).branchId || null;
+      const companyId = scope.companyId || (rfq as any).companyId || null;
 
       const quotations = await storage.getQuotations();
       const quotationCount = quotations.length;

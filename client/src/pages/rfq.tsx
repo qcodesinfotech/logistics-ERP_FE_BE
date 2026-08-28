@@ -1001,7 +1001,7 @@ export default function RfqPage() {
                         <FormLabel className="text-sm font-medium">Client / Customer *</FormLabel>
                         <Button 
                           type="button" 
-                          variant="link" 
+                          variant="ghost" 
                           className="h-auto p-0 text-xs text-primary font-medium hover:underline"
                           onClick={() => setIsQuickClientDialogOpen(true)}
                         >
@@ -1363,35 +1363,46 @@ export default function RfqPage() {
                 <div className="mb-8">
                   <h3 className="font-bold text-slate-800 border-b pb-1 mb-2 uppercase text-xs tracking-wider">Transit Route & Legs</h3>
                   <p className="mb-1"><span className="font-semibold">Main Route Summary:</span> {form.getValues().transitRoute}</p>
-                  <p className="mb-1"><span className="font-semibold">Requested Dates:</span> Pickup: {form.getValues().requestedPickupDate ? new Date(form.getValues().requestedPickupDate).toLocaleDateString() : 'N/A'} | Delivery: {form.getValues().requestedDeliveryDate ? new Date(form.getValues().requestedDeliveryDate).toLocaleDateString() : 'N/A'}</p>
+                  <p className="mb-1">
+                    <span className="font-semibold">Requested Dates:</span> Pickup: {(() => {
+                      const pickupDate = form.getValues().requestedPickupDate;
+                      return pickupDate ? new Date(pickupDate).toLocaleDateString() : 'N/A';
+                    })()} | Delivery: {(() => {
+                      const deliveryDate = form.getValues().requestedDeliveryDate;
+                      return deliveryDate ? new Date(deliveryDate).toLocaleDateString() : 'N/A';
+                    })()}
+                  </p>
                   {form.getValues().additionalRequirements && (
                     <p className="mb-3"><span className="font-semibold">Special Terms:</span> {form.getValues().additionalRequirements}</p>
                   )}
                   
-                  {form.getValues().routeLegs && form.getValues().routeLegs.length > 0 && (
-                    <table className="w-full border-collapse text-xs mt-2">
-                      <thead>
-                        <tr className="bg-slate-100 border-y-2 border-slate-200 text-left text-slate-700">
-                          <th className="p-2 font-bold">Origin</th>
-                          <th className="p-2 font-bold">Destination</th>
-                          <th className="p-2 font-bold">Loading Date</th>
-                          <th className="p-2 font-bold">Offloading Date</th>
-                          <th className="p-2 font-bold text-center">Transit Days</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {form.getValues().routeLegs.map((leg: any, idx: number) => (
-                          <tr key={idx} className="border-b">
-                            <td className="p-2">{leg.originCity}, {leg.originCountry}</td>
-                            <td className="p-2">{leg.destinationCity}, {leg.destinationCountry}</td>
-                            <td className="p-2">{leg.loadingDate ? new Date(leg.loadingDate).toLocaleDateString() : 'N/A'}</td>
-                            <td className="p-2">{leg.offloadingDate ? new Date(leg.offloadingDate).toLocaleDateString() : 'N/A'}</td>
-                            <td className="p-2 text-center">{leg.transitDays || 0}</td>
+                  {(() => {
+                    const legs = form.getValues().routeLegs;
+                    return legs && legs.length > 0 ? (
+                      <table className="w-full border-collapse text-xs mt-2">
+                        <thead>
+                          <tr className="bg-slate-100 border-y-2 border-slate-200 text-left text-slate-700">
+                            <th className="p-2 font-bold">Origin</th>
+                            <th className="p-2 font-bold">Destination</th>
+                            <th className="p-2 font-bold">Loading Date</th>
+                            <th className="p-2 font-bold">Offloading Date</th>
+                            <th className="p-2 font-bold text-center">Transit Days</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                        </thead>
+                        <tbody>
+                          {legs.map((leg: any, idx: number) => (
+                            <tr key={idx} className="border-b">
+                              <td className="p-2">{leg.originCity}, {leg.originCountry}</td>
+                              <td className="p-2">{leg.destinationCity}, {leg.destinationCountry}</td>
+                              <td className="p-2">{leg.loadingDate ? new Date(leg.loadingDate).toLocaleDateString() : 'N/A'}</td>
+                              <td className="p-2">{leg.offloadingDate ? new Date(leg.offloadingDate).toLocaleDateString() : 'N/A'}</td>
+                              <td className="p-2 text-center">{leg.transitDays || 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : null;
+                  })()}
                 </div>
 
                 <div className="mb-4">
@@ -1410,14 +1421,17 @@ export default function RfqPage() {
                         <td className="p-3 text-right text-slate-500">-</td>
                         <td className="p-3 text-right font-medium">{formatCurrency(parseFloat(String(form.getValues().transportationCharges)) || 0)}</td>
                       </tr>
-                      {form.getValues().extraCharges && form.getValues().extraCharges.map((charge: any, idx: number) => (
-                        <tr key={idx} className="border-b text-slate-600 bg-slate-50/50">
-                          <td className="p-3 pl-6">+ {charge.name}</td>
-                          <td className="p-3 text-right text-sm">{charge.qty || 1}</td>
-                          <td className="p-3 text-right text-sm">{formatCurrency(parseFloat(String(charge.unitRate)) || 0)}</td>
-                          <td className="p-3 text-right font-medium text-slate-900">{formatCurrency(parseFloat(String(charge.cost)) || 0)}</td>
-                        </tr>
-                      ))}
+                      {(() => {
+                        const extraCharges = form.getValues().extraCharges;
+                        return extraCharges?.map((charge: any, idx: number) => (
+                          <tr key={idx} className="border-b text-slate-600 bg-slate-50/50">
+                            <td className="p-3 pl-6">+ {charge.name}</td>
+                            <td className="p-3 text-right text-sm">{charge.qty || 1}</td>
+                            <td className="p-3 text-right text-sm">{formatCurrency(parseFloat(String(charge.unitRate)) || 0)}</td>
+                            <td className="p-3 text-right font-medium text-slate-900">{formatCurrency(parseFloat(String(charge.cost)) || 0)}</td>
+                          </tr>
+                        )) || null;
+                      })()}
                       <tr className="bg-slate-100 font-bold text-lg border-y-2 border-slate-200">
                         <td className="p-4 uppercase text-slate-800">Total Estimated Amount</td>
                         <td className="p-4 text-right text-emerald-700">{formatCurrency(calcTotal())}</td>
