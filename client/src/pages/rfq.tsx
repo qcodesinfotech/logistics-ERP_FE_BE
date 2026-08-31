@@ -882,9 +882,9 @@ export default function RfqPage() {
                                   noOfTrips: String(q.noOfTrips || rfq?.noOfTrips || 1),
                                   noOfTrucks: String(q.noOfTrucks || rfq?.noOfTrucks || 1),
                                   status: q.status as any,
-                                  cargoType: rfq?.cargoType || "general",
-                                  truckType: rfq?.truckType || "",
-                                  freightType: rfq?.freightType || "",
+                                  cargoType: q.cargoType || rfq?.cargoType || "general",
+                                  truckType: q.truckType || rfq?.truckType || "",
+                                  freightType: q.freightType || rfq?.freightType || "",
                                   routeLegs: (rfq?.origins as any[]) || [],
                                   detentionChargesPerDay: String(rfq?.detentionChargesPerDay || "0"),
                                   extraCharges: (q.additionalCharges as any[]) || [],
@@ -1122,29 +1122,7 @@ export default function RfqPage() {
 
 
 
-                <FormField
-                  control={form.control}
-                  name="status"
-                  render={({ field }) => (
-                    <FormItem className="col-span-2">
-                      <FormLabel>Quotation Status</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select status" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="pending">Pending Review</SelectItem>
-                          <SelectItem value="approved">Approved / Bidding Won</SelectItem>
-                          <SelectItem value="rejected">Rejected / Lost</SelectItem>
-                          <SelectItem value="converted">Converted to Order</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+
 
                 <FormField
                   control={form.control}

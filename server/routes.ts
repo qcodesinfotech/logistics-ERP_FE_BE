@@ -8473,6 +8473,9 @@ export async function registerRoutes(
         version: 1,
         noOfTrips: rfq.noOfTrips || 1,
         noOfTrucks: rfq.noOfTrucks || 1,
+        cargoType: rfq.cargoType || "general",
+        truckType: rfq.truckType || "",
+        freightType: rfq.freightType || "",
         total: (parseFloat(rfq.transportationCharges || "0") + 
                 ((rfq.extraCharges as any[]) || []).reduce((sum, c) => sum + parseFloat(c.cost || "0"), 0)).toFixed(3),
         validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
@@ -8845,6 +8848,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Only approved quotations can be converted to bookings" });
       }
 
+      const rfq = quotation.rfqId ? await storage.getRfq(quotation.rfqId) : null;
       const origin = quotation.originLocationId ? await storage.getLocation(quotation.originLocationId) : null;
       const destination = quotation.destinationLocationId ? await storage.getLocation(quotation.destinationLocationId) : null;
       const bookingNumber = `ORD-${Date.now()}`;
@@ -8860,6 +8864,15 @@ export async function registerRoutes(
         loadType: "FTL",
         pickupLocationId: quotation.originLocationId,
         deliveryLocationId: quotation.destinationLocationId,
+        routeLegs: ((rfq?.origins as any[]) || []).map((o: any) => ({
+          originCountry: o.originCountry || "",
+          originCity: o.originCity || "",
+          destinationCountry: o.destinationCountry || "",
+          destinationCity: o.destinationCity || "",
+          loadingDate: o.loadingDate || "",
+          offloadingDate: o.offloadingDate || "",
+          transitDays: o.transitDays || 0
+        })),
         status: "pending",
         cargoType: "general",
         truckType: quotation.temperatureRequirement ? "Reefer" : "Flatbed",

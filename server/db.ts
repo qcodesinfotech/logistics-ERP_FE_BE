@@ -208,6 +208,9 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "parent_id" varchar;
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "no_of_trips" integer DEFAULT 1;
       ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "no_of_trucks" integer DEFAULT 1;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "cargo_type" text;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "truck_type" text;
+      ALTER TABLE "quotations" ADD COLUMN IF NOT EXISTS "freight_type" text;
 
       -- orders
       ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "quotation_id" varchar;

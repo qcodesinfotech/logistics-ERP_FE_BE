@@ -4786,6 +4786,11 @@ export class DatabaseStorage implements IStorage {
         paymentTerms: data.paymentTerms,
         version: data.version || 1,
         parentId: data.parentId,
+        cargoType: data.cargoType || null,
+        truckType: data.truckType || null,
+        freightType: data.freightType || null,
+        noOfTrips: data.noOfTrips || 1,
+        noOfTrucks: data.noOfTrucks || 1,
       }).returning();
 
       for (const item of items) {

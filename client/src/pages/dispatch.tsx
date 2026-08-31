@@ -472,6 +472,16 @@ export default function DispatchPage() {
     }) || [];
   };
 
+  const getSortedTrips = (list: (Trip & { orderIds?: string[]; invoiceGenerated?: boolean })[]) => {
+    if (!list) return [];
+    return [...list].sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (dateB !== dateA) return dateB - dateA;
+      return (b.tripNumber || "").localeCompare(a.tripNumber || "", undefined, { numeric: true, sensitivity: 'base' });
+    });
+  };
+
   const renderTripsTable = (filteredTrips: (Trip & { orderIds?: string[]; invoiceGenerated?: boolean })[]) => {
     if (filteredTrips.length === 0) {
       return (
@@ -938,15 +948,15 @@ export default function DispatchPage() {
                   </TabsList>
 
                   <TabsContent value="active" className="p-0">
-                    {renderTripsTable(tripsList.filter(t => t.status === "pending" || t.status === "in_transit"))}
+                    {renderTripsTable(getSortedTrips(tripsList.filter(t => t.status === "pending" || t.status === "in_transit")))}
                   </TabsContent>
 
                   <TabsContent value="completed" className="p-0">
-                    {renderTripsTable(tripsList.filter(t => t.status === "completed" || t.status === "cancelled"))}
+                    {renderTripsTable(getSortedTrips(tripsList.filter(t => t.status === "completed" || t.status === "cancelled")))}
                   </TabsContent>
 
                   <TabsContent value="all" className="p-0">
-                    {renderTripsTable(tripsList)}
+                    {renderTripsTable(getSortedTrips(tripsList))}
                   </TabsContent>
                 </Tabs>
               )}

@@ -1096,6 +1096,9 @@ export const quotations = pgTable("quotations", {
   parentId: varchar("parent_id"),
   noOfTrips: integer("no_of_trips").default(1),
   noOfTrucks: integer("no_of_trucks").default(1),
+  cargoType: text("cargo_type"),
+  truckType: text("truck_type"),
+  freightType: text("freight_type"),
 });
 
 export const quotationItems = pgTable("quotation_items", {

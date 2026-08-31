@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
-import type { Order, Location, Client, Rfq, Zone } from "@shared/schema";
+import type { Order, Location, Client, Rfq, Zone, Vehicle } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 
 const chargeSchema = z.object({
@@ -142,6 +142,14 @@ export default function OrdersPage() {
 
   const { data: tripsList = [] } = useQuery<any[]>({
     queryKey: ["/api/trips"],
+  });
+
+  const { data: vehiclesList = [] } = useQuery<Vehicle[]>({
+    queryKey: ["/api/vehicles"],
+  });
+
+  const { data: employeesList = [] } = useQuery<any[]>({
+    queryKey: ["/api/employees/minimal"],
   });
 
   // Form
@@ -1434,27 +1442,48 @@ export default function OrdersPage() {
               </div>
 
               {/* Truck Details */}
-              <div className="border rounded-lg p-4 bg-slate-50">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Vehicle & Driver</h3>
-                <div className="grid grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-slate-500 text-xs">Ownership</p>
-                    <p className="font-medium">{viewOrder.truckOwnership || "N/A"}</p>
+              {(() => {
+                const linkedTrip = tripsList?.find((t: any) => t.orderId === viewOrder.id || (Array.isArray(t.orderIds) && t.orderIds.includes(viewOrder.id)));
+                const vehicle = vehiclesList?.find((v: any) => v.id === linkedTrip?.vehicleId);
+                const driver = employeesList?.find((d: any) => d.id === linkedTrip?.driverId);
+                
+                const ownership = linkedTrip 
+                  ? (linkedTrip.isRented || vehicle?.type === "outsourced" ? "Rented / Outsourced" : "Owned Fleet") 
+                  : (viewOrder.truckOwnership || "N/A");
+                const truckDetails = linkedTrip 
+                  ? (vehicle?.name || "N/A") 
+                  : (viewOrder.truckType || "N/A");
+                const plates = linkedTrip 
+                  ? (vehicle?.plateNumber || linkedTrip.trailerNumber || "N/A") 
+                  : (viewOrder.truckPlateNumber || "N/A");
+                const driverInfo = linkedTrip 
+                  ? (driver?.name || (linkedTrip.driverId !== "unassigned" ? linkedTrip.driverId : null) || "N/A") 
+                  : (viewOrder.driverName || "N/A");
+
+                return (
+                  <div className="border rounded-lg p-4 bg-slate-50">
+                    <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Vehicle & Driver</h3>
+                    <div className="grid grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-slate-500 text-xs">Ownership</p>
+                        <p className="font-medium">{ownership}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Truck Details</p>
+                        <p className="font-medium">{truckDetails}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Plate / Chassis</p>
+                        <p className="font-medium">{plates}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 text-xs">Driver Info</p>
+                        <p className="font-medium">{driverInfo}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-slate-500 text-xs">Truck Details</p>
-                    <p className="font-medium">{viewOrder.truckType || "N/A"} {viewOrder.truckModel ? `(${viewOrder.truckModel})` : ""}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500 text-xs">Plate / Chassis</p>
-                    <p className="font-medium">{viewOrder.truckPlateNumber || "N/A"} / {viewOrder.chassisNumber || "N/A"}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500 text-xs">Driver Info</p>
-                    <p className="font-medium">{viewOrder.driverName || "N/A"} {viewOrder.driverContact ? `(${viewOrder.driverContact})` : ""}</p>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Route Legs */}
               {viewOrder.routeLegs && Array.isArray(viewOrder.routeLegs) && viewOrder.routeLegs.length > 0 && (
