@@ -1854,7 +1854,7 @@ export default function Reports() {
       Zone: item.zoneName || "-",
       Outlet: `${item.outletName} (${item.outletCode})`,
       Product: `${item.description} (${item.itemCode})`,
-      "Requested Qty": item.requestedQty ?? "-",
+      "Requested Qty": item.requestedQty || item.weight || "-",
       "Delivered Qty": item.deliveredQty ?? "-",
       Remaining: item.remainingQty ?? "-",
       Damaged: item.damagedQty ?? "-",
@@ -1862,6 +1862,28 @@ export default function Reports() {
       Temperature: item.temperature || "-",
       Remarks: item.remark || "-"
     }));
+
+    if (driverDeliveriesReport.length > 0) {
+      const totalReq = driverDeliveriesReport.reduce((sum, item) => sum + parseFloat(item.requestedQty || item.weight || "0"), 0);
+      const totalDel = driverDeliveriesReport.reduce((sum, item) => sum + parseFloat(item.deliveredQty || "0"), 0);
+      const totalRem = driverDeliveriesReport.reduce((sum, item) => sum + parseFloat(item.remainingQty || "0"), 0);
+      const totalDmg = driverDeliveriesReport.reduce((sum, item) => sum + parseFloat(item.damagedQty || "0"), 0);
+
+      csvData.push({
+        Timestamp: "TOTALS",
+        Driver: "",
+        Zone: "",
+        Outlet: "",
+        Product: "",
+        "Requested Qty": totalReq.toFixed(3),
+        "Delivered Qty": totalDel.toFixed(3),
+        Remaining: totalRem.toFixed(3),
+        Damaged: totalDmg.toFixed(3),
+        Status: "",
+        Temperature: "",
+        Remarks: ""
+      });
+    }
 
     return (
       <div className="space-y-4">
@@ -1886,7 +1908,7 @@ export default function Reports() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           <Card>
             <CardContent className="pt-4">
               <div className="text-2xl font-bold text-green-600">
@@ -1898,7 +1920,7 @@ export default function Reports() {
           <Card>
             <CardContent className="pt-4">
               <div className="text-2xl font-bold text-blue-600">
-                {driverDeliveriesReport.filter(d => d.status === 'partial').length}
+                {driverDeliveriesReport.filter(d => d.status === 'partial' || d.status === 'partially_delivered').length}
               </div>
               <div className="text-sm text-muted-foreground">Partial Deliveries</div>
             </CardContent>
@@ -1919,6 +1941,22 @@ export default function Reports() {
               <div className="text-sm text-muted-foreground">Damaged Items</div>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-slate-700">
+                {driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.requestedQty || curr.weight || "0"), 0).toFixed(3)}
+              </div>
+              <div className="text-sm text-muted-foreground">Total Qty Requested</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-emerald-700">
+                {driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.deliveredQty || "0"), 0).toFixed(3)}
+              </div>
+              <div className="text-sm text-muted-foreground">Total Qty Delivered</div>
+            </CardContent>
+          </Card>
         </div>
 
         <Card>
@@ -1933,50 +1971,79 @@ export default function Reports() {
                   <TableHead>Product / Item</TableHead>
                   <TableHead className="text-right">Req. Qty</TableHead>
                   <TableHead className="text-right">Del. Qty</TableHead>
+                  <TableHead className="text-right">Remaining</TableHead>
+                  <TableHead className="text-right">Damaged</TableHead>
                   <TableHead>Temp</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>POD</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {driverDeliveriesReport.map((row: any) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">
-                      {row.deliveredAt ? format(new Date(row.deliveredAt), "yyyy-MM-dd hh:mm a") : "-"}
-                      {row.deliveryTime ? ` (${row.deliveryTime})` : ""}
+                {driverDeliveriesReport.map((row: any) => {
+                  const remainingVal = parseFloat(row.remainingQty || "0");
+                  const hasRemaining = remainingVal > 0;
+                  return (
+                    <TableRow 
+                      key={row.id}
+                      className={hasRemaining ? "bg-amber-50/80 hover:bg-amber-100/80 dark:bg-amber-950/20 dark:hover:bg-amber-950/30 transition-colors font-semibold" : ""}
+                    >
+                      <TableCell className="font-mono text-xs">
+                        {row.deliveredAt ? format(new Date(row.deliveredAt), "yyyy-MM-dd hh:mm a") : "-"}
+                        {row.deliveryTime ? ` (${row.deliveryTime})` : ""}
+                      </TableCell>
+                      <TableCell>{row.driverName}</TableCell>
+                      <TableCell className="text-xs">{row.zoneName || "-"}</TableCell>
+                      <TableCell>
+                        <div className="text-sm font-semibold">{row.outletName}</div>
+                        <div className="text-xs text-muted-foreground">Code: {row.outletCode}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{row.description}</div>
+                        <div className="text-xs text-muted-foreground font-mono">{row.itemCode}</div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{row.requestedQty || row.weight || "-"}</TableCell>
+                      <TableCell className="text-right font-mono text-green-700 font-bold">{row.deliveredQty ?? "-"}</TableCell>
+                      <TableCell className="text-right font-mono text-amber-700 font-bold">{row.remainingQty ?? "-"}</TableCell>
+                      <TableCell className="text-right font-mono text-orange-600">{row.damagedQty ?? "-"}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.temperature || "-"}</TableCell>
+                      <TableCell>
+                        <Badge variant={row.status === "delivered" ? "default" : (row.status === "partial" || row.status === "partially_delivered") ? "outline" : "destructive"}>
+                          {String(row.status === "partially_delivered" ? "partial" : row.status).toUpperCase()}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {row.podUrl ? (
+                          <a href={row.podUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline text-xs">
+                            View POD
+                          </a>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">No POD</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {driverDeliveriesReport.length > 0 && (
+                  <TableRow className="bg-slate-100 font-bold hover:bg-slate-100 dark:bg-slate-800">
+                    <TableCell colSpan={5} className="text-right">Totals:</TableCell>
+                    <TableCell className="text-right font-mono">
+                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.requestedQty || row.weight || "0"), 0).toFixed(3)}
                     </TableCell>
-                    <TableCell>{row.driverName}</TableCell>
-                    <TableCell className="text-xs">{row.zoneName || "-"}</TableCell>
-                    <TableCell>
-                      <div className="text-sm font-semibold">{row.outletName}</div>
-                      <div className="text-xs text-muted-foreground">Code: {row.outletCode}</div>
+                    <TableCell className="text-right font-mono text-green-700">
+                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.deliveredQty || "0"), 0).toFixed(3)}
                     </TableCell>
-                    <TableCell>
-                      <div className="text-sm">{row.description}</div>
-                      <div className="text-xs text-muted-foreground font-mono">{row.itemCode}</div>
+                    <TableCell className="text-right font-mono text-amber-700">
+                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.remainingQty || "0"), 0).toFixed(3)}
                     </TableCell>
-                    <TableCell className="text-right font-mono">{row.requestedQty ?? "-"}</TableCell>
-                    <TableCell className="text-right font-mono text-green-700 font-bold">{row.deliveredQty ?? "-"}</TableCell>
-                    <TableCell className="font-mono text-xs">{row.temperature || "-"}</TableCell>
-                    <TableCell>
-                      <Badge variant={row.status === "delivered" ? "default" : row.status === "partial" ? "outline" : "destructive"}>
-                        {String(row.status).toUpperCase()}
-                      </Badge>
+                    <TableCell className="text-right font-mono text-orange-600">
+                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.damagedQty || "0"), 0).toFixed(3)}
                     </TableCell>
-                    <TableCell>
-                      {row.podUrl ? (
-                        <a href={row.podUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline text-xs">
-                          View POD
-                        </a>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">No POD</span>
-                      )}
-                    </TableCell>
+                    <TableCell colSpan={3}></TableCell>
                   </TableRow>
-                ))}
+                )}
                 {driverDeliveriesReport.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                       No delivery logs found.
                     </TableCell>
                   </TableRow>

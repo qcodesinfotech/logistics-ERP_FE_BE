@@ -2189,6 +2189,8 @@ export const insertRfqSchema = createInsertSchema(rfqs).extend({
     const d = new Date(val as string);
     return isNaN(d.getTime()) ? undefined : d;
   }, z.date().optional()),
+  noOfTrips: z.preprocess((val) => (val === undefined || val === null || val === "" ? 1 : Number(val)), z.number().int().optional()),
+  noOfTrucks: z.preprocess((val) => (val === undefined || val === null || val === "" ? 1 : Number(val)), z.number().int().optional()),
 }).omit({ id: true, createdAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true });
 export const insertTripSchema = createInsertSchema(trips).extend({

@@ -46,8 +46,8 @@ const rfqFormSchema = z.object({
   transitRoute: z.string().min(1, "Transit route summary is required"),
   transportationCharges: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
   outsourcedTruckCost: z.string().optional().transform((v) => v ? parseFloat(v) : 0),
-  noOfTrips: z.string().optional().transform((v) => v ? parseInt(v) : 1),
-  noOfTrucks: z.string().optional().transform((v) => v ? parseInt(v) : 1),
+  noOfTrips: z.union([z.string(), z.number()]).optional().transform((v) => (v !== undefined && v !== "" && !isNaN(Number(v))) ? parseInt(String(v)) : 1),
+  noOfTrucks: z.union([z.string(), z.number()]).optional().transform((v) => (v !== undefined && v !== "" && !isNaN(Number(v))) ? parseInt(String(v)) : 1),
   status: z.enum(["pending", "approved", "rejected", "converted", "cancelled"]),
   cargoType: z.string().optional(),
   truckType: z.string().optional(),
@@ -299,7 +299,9 @@ export default function RfqPage() {
         rfqNumber: data.rfqNumber || `RFQ-${Date.now()}`,
         totalCharges: total.toFixed(3),
         transportationCharges: parseFloat(data.transportationCharges).toFixed(3),
-        outsourcedTruckCost: parseFloat(data.outsourcedTruckCost).toFixed(3),
+        outsourcedTruckCost: parseFloat(data.outsourcedTruckCost || 0).toFixed(3),
+        noOfTrips: parseInt(String(data.noOfTrips)) || 1,
+        noOfTrucks: parseInt(String(data.noOfTrucks)) || 1,
         detentionChargesPerDay: parseFloat(data.detentionChargesPerDay || 0).toFixed(3),
         weight: data.weight ? parseFloat(data.weight).toFixed(3) : "0.000",
         volume: data.volume ? parseFloat(data.volume).toFixed(3) : "0.000",
@@ -1180,9 +1182,35 @@ export default function RfqPage() {
                 />
                 <FormField
                   control={form.control}
-                  name="freightType"
+                  name="noOfTrucks"
                   render={({ field }) => (
                     <FormItem>
+                      <FormLabel>No. of Trucks *</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="1" placeholder="1" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="noOfTrips"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>No. of Trips *</FormLabel>
+                      <FormControl>
+                        <Input type="number" min="1" placeholder="1" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="freightType"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2">
                       <FormLabel>Freight Type</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value || ""}>
                         <FormControl>

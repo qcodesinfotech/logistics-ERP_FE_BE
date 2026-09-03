@@ -116,6 +116,7 @@ function parseCSV(text: string): Record<string, string>[] {
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
   pending: { label: "Pending", color: "bg-slate-100 text-slate-700 border-slate-200", icon: Clock },
   partial: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
+  partially_delivered: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
   delivered: { label: "Delivered", color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
   damaged: { label: "Damaged", color: "bg-red-100 text-red-700 border-red-200", icon: X },
 };
@@ -289,7 +290,7 @@ function OutletCard({
   const delivered = outlet.items.filter((i: DispatchItem) => i.delivery?.status === "delivered").length;
   const total = outlet.items.length;
   const allDone = delivered === total && total > 0;
-  const anyPartial = outlet.items.some((i: DispatchItem) => i.delivery?.status === "partial" || i.delivery?.status === "damaged");
+  const anyPartial = outlet.items.some((i: DispatchItem) => i.delivery?.status === "partial" || i.delivery?.status === "partially_delivered" || i.delivery?.status === "damaged");
   const isOutletComplete = total > 0 && outlet.items.every((i: DispatchItem) => (i.delivery?.status || "pending") !== "pending");
 
   const totalQty = outlet.items.reduce((sum: number, item: DispatchItem) => sum + parseFloat(item.requestedQty || item.weight || "0"), 0);
@@ -699,25 +700,25 @@ function ZoneColumn({
 
   const renderOutletItems = (items: any[]) => {
     return (
-      <div className="pl-6 space-y-1.5 border-l border-slate-200 ml-3.5 mt-1">
+      <div className="pl-6 space-y-1.5 border-l border-slate-200 dark:border-border ml-3.5 mt-1">
         {items.map((item, idx) => {
           const req = item.requestedQty || item.weight || "0";
           const status = item.delivery?.status || "pending";
           const statusColor = status === "delivered" 
-            ? "text-emerald-600 bg-emerald-50 border-emerald-100" 
-            : status === "partial" || status === "damaged"
-            ? "text-amber-600 bg-amber-50 border-amber-100"
-            : "text-slate-500 bg-slate-50 border-slate-100";
+            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-100 dark:border-emerald-800/40" 
+            : status === "partial" || status === "partially_delivered" || status === "damaged"
+            ? "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 border-amber-100 dark:border-amber-800/40"
+            : "text-slate-500 dark:text-muted-foreground bg-slate-50 dark:bg-muted/40 border-slate-100 dark:border-border";
 
           return (
-            <div key={idx} className="flex items-start gap-2 text-xs py-1 hover:bg-slate-50 rounded px-1 transition-colors">
-              <FileText className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+            <div key={idx} className="flex items-start gap-2 text-xs py-1 hover:bg-slate-50 dark:hover:bg-accent/40 rounded px-1 transition-colors">
+              <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-muted-foreground mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-700 truncate" title={item.description || item.itemCode}>
+                <p className="font-medium text-slate-700 dark:text-foreground truncate" title={item.description || item.itemCode}>
                   {item.description || item.itemCode}
                 </p>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-slate-400">Qty: {req}</span>
+                  <span className="text-[10px] text-slate-400 dark:text-muted-foreground">Qty: {req}</span>
                   <span className={`text-[9px] px-1 rounded border font-semibold uppercase ${statusColor}`}>
                     {status}
                   </span>
@@ -872,15 +873,15 @@ function ZoneColumn({
 
       {/* Right Column */}
       {isExpanded && (
-        <div className="w-[280px] flex flex-col h-full bg-slate-100/90 rounded-r-2xl border-l animate-in fade-in slide-in-from-left-5 duration-250">
-          <div className="p-3 border-b flex items-center justify-between bg-slate-100 rounded-tr-2xl">
+        <div className="w-[280px] flex flex-col h-full bg-slate-100/90 dark:bg-card/95 rounded-r-2xl border-l border-border animate-in fade-in slide-in-from-left-5 duration-250">
+          <div className="p-3 border-b border-border flex items-center justify-between bg-slate-100 dark:bg-card rounded-tr-2xl">
             <div>
-              <h4 className="font-bold text-xs text-slate-800 truncate max-w-[190px]" title={zone.zoneName}>
+              <h4 className="font-bold text-xs text-foreground truncate max-w-[190px]" title={zone.zoneName}>
                 Route: {zone.zoneName}
               </h4>
               <p className="text-[9px] text-muted-foreground">Route Details Structure</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-500 hover:bg-slate-200" onClick={onCloseDetails}>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-accent" onClick={onCloseDetails}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -888,12 +889,12 @@ function ZoneColumn({
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {selectedOutletForDetails && selectedOutletForDetails.zoneId === zone.zoneId ? (
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-800 bg-white p-2 rounded shadow-sm border">
+                <div className="flex items-center justify-between gap-2 text-xs font-bold text-foreground bg-card p-2 rounded shadow-sm border border-border">
                   <div className="flex items-center gap-2 min-w-0">
-                    <Store className="h-4 w-4 text-blue-600 fill-blue-50 shrink-0" />
+                    <Store className="h-4 w-4 text-blue-600 dark:text-blue-400 fill-blue-50 dark:fill-blue-950/40 shrink-0" />
                     <span className="truncate">{selectedOutletForDetails.outletName}</span>
                   </div>
-                  <Button variant="ghost" className="h-5 text-[9px] px-1 hover:bg-slate-200" onClick={onSelectRoute}>
+                  <Button variant="ghost" className="h-5 text-[9px] px-1 hover:bg-accent" onClick={onSelectRoute}>
                     Show All
                   </Button>
                 </div>
@@ -901,7 +902,7 @@ function ZoneColumn({
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-800 bg-white p-2 rounded shadow-sm border">
+                <div className="flex items-center gap-2 text-xs font-bold text-foreground bg-card p-2 rounded shadow-sm border border-border">
                   <MapPin className="h-4 w-4 text-primary fill-primary/10 shrink-0" />
                   <span className="truncate">{zone.zoneName} Route</span>
                 </div>
@@ -921,16 +922,16 @@ function ZoneColumn({
                         className={`space-y-1 transition-all duration-200 ${isSupervisor ? "cursor-grab active:cursor-grabbing" : ""} ${draggedIdx === idx ? "opacity-40 scale-95" : "opacity-100"}`}
                       >
                         <div 
-                          className="group flex items-center justify-between gap-2 text-xs font-semibold text-slate-700 cursor-pointer hover:bg-white p-1.5 rounded shadow-sm border border-transparent hover:border-slate-200 bg-white/40 transition-colors"
+                          className="group flex items-center justify-between gap-2 text-xs font-semibold text-foreground cursor-pointer hover:bg-accent p-1.5 rounded shadow-sm border border-transparent hover:border-border bg-card/60 transition-colors"
                           onClick={() => toggleOutlet(id)}
                         >
                           <div className="flex items-center gap-2 min-w-0 flex-1">
                             {isExpanded ? (
-                              <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             ) : (
-                              <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             )}
-                            <Store className="h-3.5 w-3.5 text-blue-600 fill-blue-50 shrink-0" />
+                            <Store className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 fill-blue-50 dark:fill-blue-950/40 shrink-0" />
                             <span className="truncate" title={ot.outletName}>{ot.outletName}</span>
                           </div>
                           
@@ -940,7 +941,7 @@ function ZoneColumn({
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  className="h-5 w-5 p-0 hover:bg-slate-200"
+                                  className="h-5 w-5 p-0 hover:bg-accent text-muted-foreground hover:text-foreground"
                                   disabled={idx === 0 || updateSequenceMutation.isPending}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -953,7 +954,7 @@ function ZoneColumn({
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  className="h-5 w-5 p-0 hover:bg-slate-200"
+                                  className="h-5 w-5 p-0 hover:bg-accent text-muted-foreground hover:text-foreground"
                                   disabled={idx === localOutlets.length - 1 || updateSequenceMutation.isPending}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -965,7 +966,7 @@ function ZoneColumn({
                                 </Button>
                               </div>
                             )}
-                            <span className="text-[9px] font-normal text-slate-500 bg-slate-100 px-1 py-0.5 rounded-full shrink-0">
+                            <span className="text-[9px] font-medium text-slate-500 dark:text-muted-foreground bg-slate-100 dark:bg-muted px-1.5 py-0.5 rounded-full shrink-0">
                               {ot.items?.length || 0}
                             </span>
                           </div>
@@ -1012,7 +1013,7 @@ function SearchableSelect({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={`h-8 text-xs justify-between font-normal bg-white border border-input shadow-sm hover:bg-accent hover:text-accent-foreground ${width}`}
+          className={`h-8 text-xs justify-between font-normal bg-card text-card-foreground border border-input shadow-sm hover:bg-accent hover:text-accent-foreground ${width}`}
         >
           <span className="truncate">
             {selectedOption ? selectedOption.label : placeholder}
@@ -1528,7 +1529,7 @@ export default function DailyDispatchPage() {
 
           if (status === "pending") {
             hasPending = true;
-          } else if (status === "partial" || status === "damaged") {
+          } else if (status === "partial" || status === "partially_delivered" || status === "damaged") {
             hasPartial = true;
           }
 
@@ -2110,21 +2111,8 @@ export default function DailyDispatchPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-57px)] print:h-auto print:block">
-      {/* Header */}
-      <div className="px-6 py-5 border-b bg-gradient-to-r from-primary/5 via-background to-background print:hidden">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Truck className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">Daily Dispatch</h1>
-            <p className="text-sm text-muted-foreground">Upload delivery sheets, track orders by zone and driver</p>
-          </div>
-        </div>
-      </div>
-
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 print:block">
-        <div className="px-6 pt-4 border-b bg-background print:hidden overflow-x-auto">
+        <div className="px-6 pt-2 pb-1 border-b bg-background print:hidden overflow-x-auto">
           <TabsList className="gap-0.5 flex-nowrap h-auto justify-start w-max min-w-full">
             <TabsTrigger value="board" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><MapPin className="h-3.5 w-3.5" />Dispatch Board</TabsTrigger>
             <TabsTrigger value="trucks" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Truck className="h-3.5 w-3.5" />Truck Planning</TabsTrigger>
@@ -2214,120 +2202,120 @@ export default function DailyDispatchPage() {
           {boardData && (
             <>
               {/* Supervisor Stats Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 px-6 py-3 bg-slate-50 border-b">
-                <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 px-6 py-3 bg-slate-50 dark:bg-card/40 border-b">
+                <Card className={`bg-card text-card-foreground border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
                   onClick={() => setBoardStatusFilter("all")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
                       <Store className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">{stats.totalOutlets}</p>
-                      <p className="text-xs font-medium text-slate-500">Total Outlets</p>
+                      <p className="text-xl font-bold tracking-tight text-foreground">{stats.totalOutlets}</p>
+                      <p className="text-xs font-medium text-muted-foreground">Total Outlets</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`bg-white border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-amber-500/30 border-amber-500' : ''}`}
+                <Card className={`bg-card text-card-foreground border shadow-sm cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-amber-500/30 border-amber-500' : ''}`}
                   onClick={() => setBoardStatusFilter("pending")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center flex-shrink-0">
                       <Hourglass className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">{stats.pendingOutlets}</p>
-                      <p className="text-xs font-medium text-slate-500">Pending Outlets</p>
+                      <p className="text-xl font-bold tracking-tight text-foreground">{stats.pendingOutlets}</p>
+                      <p className="text-xs font-medium text-muted-foreground">Pending Outlets</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`bg-white border shadow-sm border-t-2 border-t-blue-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'partial' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
+                <Card className={`bg-card text-card-foreground border shadow-sm border-t-2 border-t-blue-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'partial' ? 'ring-2 ring-blue-500/30 border-blue-500' : ''}`}
                   onClick={() => setBoardStatusFilter("partial")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-500 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-500 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
                       <Clock className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">{stats.partiallyDelivered}</p>
-                      <p className="text-xs font-medium text-slate-500">Partially Delivered</p>
+                      <p className="text-xl font-bold tracking-tight text-foreground">{stats.partiallyDelivered}</p>
+                      <p className="text-xs font-medium text-muted-foreground">Partially Delivered</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white border shadow-sm border-t-2 border-t-violet-500 hover:shadow-md transition-all">
+                <Card className="bg-card text-card-foreground border shadow-sm border-t-2 border-t-violet-500 hover:shadow-md transition-all">
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 flex items-center justify-center flex-shrink-0">
                       <FileText className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">
+                      <p className="text-xl font-bold tracking-tight text-foreground">
                         {stats.completedDNs} / {stats.totalDNs}
                       </p>
-                      <p className="text-xs font-medium text-slate-500 leading-tight">
+                      <p className="text-xs font-medium text-muted-foreground leading-tight">
                         Delivery Notes ({(stats.totalDNs - stats.completedDNs)} pending)
                       </p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`bg-white border shadow-sm border-t-2 border-t-indigo-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-indigo-500/30 border-indigo-500' : ''}`}
+                <Card className={`bg-card text-card-foreground border shadow-sm border-t-2 border-t-indigo-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'all' ? 'ring-2 ring-indigo-500/30 border-indigo-500' : ''}`}
                   onClick={() => setBoardStatusFilter("all")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
                       <Package className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">
+                      <p className="text-xl font-bold tracking-tight text-foreground">
                         {stats.totalQtyAssigned % 1 === 0 ? stats.totalQtyAssigned.toFixed(0) : stats.totalQtyAssigned.toFixed(1)}
                       </p>
-                      <p className="text-xs font-medium text-slate-500">Total Qty Assigned</p>
+                      <p className="text-xs font-medium text-muted-foreground">Total Qty Assigned</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`bg-white border shadow-sm border-t-2 border-t-emerald-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'delivered' ? 'ring-2 ring-emerald-500/30 border-emerald-500' : ''}`}
+                <Card className={`bg-card text-card-foreground border shadow-sm border-t-2 border-t-emerald-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'delivered' ? 'ring-2 ring-emerald-500/30 border-emerald-500' : ''}`}
                   onClick={() => setBoardStatusFilter("delivered")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-500 dark:text-emerald-400 flex items-center justify-center flex-shrink-0">
                       <CheckCircle2 className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">
+                      <p className="text-xl font-bold tracking-tight text-foreground">
                         {stats.completedQty % 1 === 0 ? stats.completedQty.toFixed(0) : stats.completedQty.toFixed(1)}
-                        <span className="text-xs font-normal text-slate-500 ml-1.5">
+                        <span className="text-xs font-normal text-muted-foreground ml-1.5">
                           ({stats.totalQtyAssigned > 0 ? Math.round((stats.completedQty / stats.totalQtyAssigned) * 100) : 0}%)
                         </span>
                       </p>
-                      <p className="text-xs font-medium text-slate-500">Completed Qty</p>
+                      <p className="text-xs font-medium text-muted-foreground">Completed Qty</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`bg-white border shadow-sm border-t-2 border-t-red-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-red-500/30 border-red-500' : ''}`}
+                <Card className={`bg-card text-card-foreground border shadow-sm border-t-2 border-t-red-500 cursor-pointer hover:shadow-md transition-all ${boardStatusFilter === 'pending' ? 'ring-2 ring-red-500/30 border-red-500' : ''}`}
                   onClick={() => setBoardStatusFilter("pending")}>
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-red-50 dark:bg-red-950/60 text-red-500 dark:text-red-400 flex items-center justify-center flex-shrink-0">
                       <AlertCircle className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900 text-red-600">
+                      <p className="text-xl font-bold tracking-tight text-red-600 dark:text-red-400">
                         {stats.pendingQty % 1 === 0 ? stats.pendingQty.toFixed(0) : stats.pendingQty.toFixed(1)}
                       </p>
-                      <p className="text-xs font-medium text-slate-500">Pending Qty</p>
+                      <p className="text-xs font-medium text-muted-foreground">Pending Qty</p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white border shadow-sm border-t-2 border-t-purple-500 hover:shadow-md transition-all">
+                <Card className="bg-card text-card-foreground border shadow-sm border-t-2 border-t-purple-500 hover:shadow-md transition-all">
                   <CardContent className="p-3 flex flex-col gap-1.5">
-                    <div className="h-8 w-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center flex-shrink-0">
+                    <div className="h-8 w-8 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center flex-shrink-0">
                       <Truck className="h-4 w-4" />
                     </div>
                     <div>
-                      <p className="text-xl font-bold tracking-tight text-slate-900">
+                      <p className="text-xl font-bold tracking-tight text-foreground">
                         {stats.assignedTrucksCount} / {vehiclesList.length || 30}
                       </p>
-                      <p className="text-xs font-medium text-slate-500 leading-tight">
+                      <p className="text-xs font-medium text-muted-foreground leading-tight">
                         Assigned today ({(vehiclesList.length || 30) - stats.assignedTrucksCount} pending)
                       </p>
                     </div>
@@ -2442,7 +2430,8 @@ export default function DailyDispatchPage() {
                         }
 
                         const filteredItems = outlet.items.filter(item => {
-                          const status = item.delivery?.status || "pending";
+                          let status = item.delivery?.status || "pending";
+                          if (status === "partially_delivered") status = "partial";
                           if (boardStatusFilter !== "all" && status !== boardStatusFilter) return false;
                           return true;
                         });
@@ -2525,7 +2514,7 @@ export default function DailyDispatchPage() {
                     placeholder="Search route, outlet, item..." 
                     value={pivotSearchQuery}
                     onChange={e => setPivotSearchQuery(e.target.value)}
-                    className="pl-7 w-60 h-8 text-xs bg-white border-slate-200"
+                    className="pl-7 w-60 h-8 text-xs bg-background border-input"
                   />
                 </div>
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
@@ -2581,7 +2570,7 @@ export default function DailyDispatchPage() {
                     placeholder="Search items, description, outlets..." 
                     value={summarySearchQuery}
                     onChange={e => setSummarySearchQuery(e.target.value)}
-                    className="pl-7 w-60 h-8 text-xs bg-white border-slate-200"
+                    className="pl-7 w-60 h-8 text-xs bg-background border-input"
                   />
                 </div>
                 <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">

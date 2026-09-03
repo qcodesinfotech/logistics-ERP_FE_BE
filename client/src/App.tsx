@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User as UserIcon, LogOut, Key, ChevronDown } from "lucide-react";
+import { User as UserIcon, LogOut, Key, ChevronDown, Truck } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
@@ -123,6 +123,7 @@ function AuthenticatedLayoutContent() {
   const { user, logout, canChangeScope } = useAuth();
   const { isScopeReady, isLoading: scopeLoading } = useGlobalScope();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = React.useState(false);
+  const [location] = useLocation();
   
   const style = {
     "--sidebar-width": "16rem",
@@ -151,11 +152,26 @@ function AuthenticatedLayoutContent() {
         <AppSidebar />
         <div className="flex flex-col flex-1 overflow-hidden print:overflow-visible">
           <header className="flex items-center justify-between gap-4 p-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 print:hidden">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
               {canChangeScope && <HeaderScopeSelector />}
+              {location.startsWith("/logistics/daily-dispatch") && (
+                <div className="flex items-center gap-2 pl-3 border-l border-border min-w-0">
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Truck className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-bold leading-tight tracking-tight text-foreground whitespace-nowrap">
+                      Daily Dispatch
+                    </span>
+                    <span className="text-[11px] text-muted-foreground leading-tight truncate hidden sm:inline">
+                      Upload delivery sheets, track orders by zone and driver
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <div className="text-sm font-medium">
                   {user?.name || user?.username}
