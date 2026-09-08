@@ -1737,6 +1737,7 @@ export const contracts = pgTable("contracts", {
   name: text("name").notNull(),
   type: text("type").notNull(), // "daily" or "lease"
   monthlyRate: decimal("monthly_rate", { precision: 12, scale: 3 }).default("0.000"),
+  dailyRate: decimal("daily_rate", { precision: 12, scale: 3 }).default("0.000"),
   numVehicles: integer("num_vehicles").default(0),
   otCharges: decimal("ot_charges", { precision: 12, scale: 3 }).default("0.000"),
   holidayCharges: decimal("holiday_charges", { precision: 12, scale: 3 }).default("0.000"),
@@ -2343,6 +2344,7 @@ export const dispatchDeliveries = pgTable("dispatch_deliveries", {
   deliveryStartTime: timestamp("delivery_start_time"),
   deliveryEndTime: timestamp("delivery_end_time"),
   status: text("status").notNull().default("pending"),
+  deliveryType: text("delivery_type").default("regular"), // "regular" or "quick"
   deliveredAt: timestamp("delivered_at"),
   deliveryTime: text("delivery_time"),
   createdAt: timestamp("created_at").defaultNow(),

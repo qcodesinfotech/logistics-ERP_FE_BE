@@ -7275,6 +7275,34 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/contracts/:id/records", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { startDate, endDate, deliveryType } = req.query as { startDate?: string; endDate?: string; deliveryType?: string };
+      const records = await storage.getContractRecords(req.params.id, startDate, endDate, deliveryType);
+      res.json(records);
+    } catch (error: any) {
+      console.error("Get contract records error:", error);
+      res.status(500).json({ error: "Failed to fetch contract records: " + (error?.message || String(error)) });
+    }
+  });
+
+  app.patch("/api/dispatch-deliveries/:id/delivery-type", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { deliveryType } = req.body;
+      if (!['regular', 'quick'].includes(deliveryType)) {
+        return res.status(400).json({ error: "deliveryType must be 'regular' or 'quick'" });
+      }
+      const [updated] = await db.update(schema.dispatchDeliveries)
+        .set({ deliveryType })
+        .where(eq(schema.dispatchDeliveries.id, req.params.id))
+        .returning();
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Update delivery type error:", error);
+      res.status(500).json({ error: "Failed to update delivery type" });
+    }
+  });
+
   app.delete("/api/clients/:id", authMiddleware, permissionMiddleware("customers"), async (req: AuthRequest, res) => {
     try {
       await storage.deleteClient(req.params.id);

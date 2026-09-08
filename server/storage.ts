@@ -541,6 +541,7 @@ export interface IStorage {
   // Logistics Contracts
   getContracts(customerId?: string): Promise<Contract[]>;
   getContract(id: string): Promise<Contract | undefined>;
+  getContractRecords(contractId: string, startDate?: string, endDate?: string, deliveryType?: string): Promise<any>;
   createContract(data: InsertContract): Promise<Contract>;
   updateContract(id: string, data: Partial<InsertContract>): Promise<Contract | undefined>;
   deleteContract(id: string): Promise<void>;
@@ -6941,6 +6942,210 @@ export class DatabaseStorage implements IStorage {
 
   async deleteContract(id: string): Promise<void> {
     await db.delete(contracts).where(eq(contracts.id, id));
+  }
+
+  async getContractRecords(contractId: string, startDate?: string, endDate?: string, deliveryType?: string): Promise<any> {
+    const contract = await this.getContract(contractId);
+    if (!contract) throw new Error("Contract not found");
+
+    // Determine date range: default to contract's term, or past 30 days
+    let periodStart = startDate;
+    let periodEnd = endDate;
+
+    if (!periodStart) {
+      if (contract.startDate) {
+        periodStart = contract.startDate;
+      } else {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        periodStart = d.toISOString().split("T")[0];
+      }
+    }
+
+    if (!periodEnd) {
+      if (contract.endDate) {
+        periodEnd = contract.endDate;
+      } else {
+        periodEnd = new Date().toISOString().split("T")[0];
+      }
+    }
+
+    const startD = new Date(periodStart);
+    const endD = new Date(periodEnd + "T23:59:59.999Z");
+
+    // Determine targeted outlets and client
+    const targetOutletIds: string[] = [];
+    if (contract.outletId) {
+      targetOutletIds.push(contract.outletId);
+    }
+    if (Array.isArray(contract.linkedOutlets) && contract.linkedOutlets.length > 0) {
+      for (const oid of contract.linkedOutlets) {
+        if (!targetOutletIds.includes(oid)) targetOutletIds.push(oid);
+      }
+    }
+    if (contract.brandId && targetOutletIds.length === 0) {
+      const brandOutlets = await db.select().from(outlets).where(eq(outlets.brandId, contract.brandId));
+      for (const bo of brandOutlets) {
+        if (!targetOutletIds.includes(bo.id)) targetOutletIds.push(bo.id);
+      }
+    }
+    if (contract.customerId && targetOutletIds.length === 0) {
+      const clientOutlets = await db.select().from(outlets).where(eq(outlets.clientId, contract.customerId));
+      for (const co of clientOutlets) {
+        if (!targetOutletIds.includes(co.id)) targetOutletIds.push(co.id);
+      }
+    }
+
+    // 1. Fetch dispatch deliveries
+    let dispatchDeliveryConditions: SQL[] = [];
+    if (targetOutletIds.length > 0) {
+      dispatchDeliveryConditions.push(
+        or(
+          inArray(dispatchItems.outletId, targetOutletIds),
+          inArray(dispatchDeliveries.outletId, targetOutletIds)
+        )!
+      );
+    } else if (contract.customerId) {
+      dispatchDeliveryConditions.push(eq(dispatchSheets.clientId, contract.customerId));
+    }
+
+    // Date condition for dispatch deliveries
+    const dateCondition = or(
+      and(gte(dispatchDeliveries.deliveredAt, startD), lte(dispatchDeliveries.deliveredAt, endD)),
+      and(gte(dispatchSheets.date, periodStart), lte(dispatchSheets.date, periodEnd))
+    )!;
+
+    let deliveriesList: any[] = [];
+    if (dispatchDeliveryConditions.length > 0) {
+      const rawDeliveries = await db.select({
+        id: dispatchDeliveries.id,
+        dispatchItemId: dispatchDeliveries.dispatchItemId,
+        driverId: dispatchDeliveries.driverId,
+        outletId: dispatchDeliveries.outletId,
+        deliveredQty: dispatchDeliveries.deliveredQty,
+        remainingQty: dispatchDeliveries.remainingQty,
+        damagedQty: dispatchDeliveries.damagedQty,
+        damageReason: dispatchDeliveries.damageReason,
+        remark: dispatchDeliveries.remark,
+        podUrl: dispatchDeliveries.podUrl,
+        temperature: dispatchDeliveries.temperature,
+        status: dispatchDeliveries.status,
+        deliveredAt: dispatchDeliveries.deliveredAt,
+        deliveryTime: dispatchDeliveries.deliveryTime,
+        deliveryType: dispatchDeliveries.deliveryType,
+        itemCode: dispatchItems.itemCode,
+        itemDescription: dispatchItems.description,
+        storageType: dispatchItems.storageType,
+        uom: dispatchItems.uom,
+        requestedQty: dispatchItems.requestedQty,
+        itemRemark: dispatchItems.remark,
+        outletCode: dispatchItems.outletCode,
+        sheetDate: dispatchSheets.date,
+        sheetId: dispatchSheets.id,
+        outletName: outlets.name,
+      })
+      .from(dispatchDeliveries)
+      .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+      .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
+      .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
+      .where(and(...dispatchDeliveryConditions, dateCondition))
+      .orderBy(desc(dispatchDeliveries.deliveredAt), desc(dispatchSheets.date));
+
+      deliveriesList = rawDeliveries.map(d => {
+        const isQuick = (d.deliveryType === 'quick') ||
+          (d.remark && /quick|emergency/i.test(d.remark)) ||
+          (d.itemRemark && /quick|emergency/i.test(d.itemRemark)) ||
+          (d.itemDescription && /emergency|quick/i.test(d.itemDescription));
+        return {
+          ...d,
+          type: isQuick ? 'quick' : 'regular',
+          deliveryDate: d.deliveredAt || d.sheetDate,
+        };
+      });
+    }
+
+    // Also include standard orders if customer based
+    if (contract.customerId) {
+      const customerOrders = await db.select()
+        .from(orders)
+        .where(and(
+          eq(orders.customerId, contract.customerId),
+          gte(orders.createdAt, startD),
+          lte(orders.createdAt, endD)
+        ))
+        .orderBy(desc(orders.createdAt));
+
+      for (const ord of customerOrders) {
+        const isQuick = (ord.cargoType && /quick|emergency/i.test(ord.cargoType)) ||
+          (ord.specialInstructions && /quick|emergency/i.test(ord.specialInstructions)) ||
+          (ord.loadType && /quick|emergency/i.test(ord.loadType));
+        deliveriesList.push({
+          id: ord.id,
+          orderNumber: ord.orderNumber,
+          outletName: ord.customerReference || "Customer Direct",
+          itemCode: ord.orderNumber,
+          itemDescription: ord.cargoDetails,
+          requestedQty: ord.numberOfShipments || 1,
+          deliveredQty: ord.status === 'completed' ? (ord.numberOfShipments || 1) : 0,
+          status: ord.status,
+          type: isQuick ? 'quick' : 'regular',
+          deliveryDate: ord.orderDate || ord.createdAt,
+          podUrl: (ord.documents as any)?.[0]?.url || null,
+          isOrder: true,
+        });
+      }
+    }
+
+    // Apply deliveryType filter if requested
+    let filteredDeliveries = deliveriesList;
+    if (deliveryType === 'quick') {
+      filteredDeliveries = deliveriesList.filter(d => d.type === 'quick');
+    } else if (deliveryType === 'regular') {
+      filteredDeliveries = deliveriesList.filter(d => d.type === 'regular');
+    }
+
+    // 2. Fetch contract invoices and payments
+    const contractInvoiceRows = await db.select()
+      .from(contractInvoices)
+      .where(eq(contractInvoices.contractId, contractId))
+      .orderBy(desc(contractInvoices.periodStart));
+
+    const invoiceIds = contractInvoiceRows.map(i => i.id);
+    let paymentsList: any[] = [];
+    if (invoiceIds.length > 0) {
+      paymentsList = await db.select()
+        .from(invoicePayments)
+        .where(inArray(invoicePayments.contractInvoiceId, invoiceIds))
+        .orderBy(desc(invoicePayments.paymentDate));
+    }
+
+    // 3. Compute KPI summary
+    const regularCount = deliveriesList.filter(d => d.type === 'regular').length;
+    const quickCount = deliveriesList.filter(d => d.type === 'quick').length;
+    const totalDeliveries = deliveriesList.length;
+
+    const totalBilled = contractInvoiceRows.reduce((acc, inv) => acc + parseFloat(inv.totalAmount || "0"), 0);
+    const totalPaid = contractInvoiceRows.reduce((acc, inv) => acc + parseFloat(inv.paidAmount || "0"), 0);
+    const totalOutstanding = Math.max(0, totalBilled - totalPaid);
+
+    return {
+      contract,
+      period: {
+        startDate: periodStart,
+        endDate: periodEnd,
+      },
+      summary: {
+        totalDeliveries,
+        regularDeliveries: regularCount,
+        quickDeliveries: quickCount,
+        totalBilled,
+        totalPaid,
+        totalOutstanding,
+      },
+      deliveries: filteredDeliveries,
+      invoices: contractInvoiceRows,
+      payments: paymentsList,
+    };
   }
 
   // Logistics Vehicles

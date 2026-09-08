@@ -147,6 +147,9 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'pending';
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivered_at" timestamp;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_time" text;
+      ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "delivery_type" text DEFAULT 'regular';
+
+      ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "daily_rate" numeric(12, 3) DEFAULT '0.000';
 
       ALTER TABLE "dispatch_outlet_zone_overrides" ADD COLUMN IF NOT EXISTS "override_truck_id" varchar;
 
