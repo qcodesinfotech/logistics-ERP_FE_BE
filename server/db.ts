@@ -36,6 +36,8 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "crew_member_id" varchar;
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "crew_check_in_time" timestamp;
       ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "crew_check_out_time" timestamp;
+      ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "reporting_time" text;
+      ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "depart_time" text;
 
       CREATE TABLE IF NOT EXISTS "vehicle_maintenance" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),

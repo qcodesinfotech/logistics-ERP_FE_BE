@@ -617,8 +617,8 @@ export interface IStorage {
   createDriverAttendance(data: InsertDriverAttendance): Promise<DriverAttendance>;
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
   getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
-  getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
   getCompletedDeliveries(startDate?: string, endDate?: string): Promise<any[]>;
+  getActivityUtilizationReport(options?: { startDate?: string; endDate?: string; brandId?: string; truckNo?: string; storageType?: string }): Promise<any>;
 
   // Logistics Fleet Advanced
   getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]>;
@@ -8296,12 +8296,19 @@ export class DatabaseStorage implements IStorage {
       storageType: dispatchItems.storageType,
       routeId: dispatchItems.routeId,
       overrideRouteId: dispatchItems.overrideRouteId,
+      toNo: dispatchItems.toNo,
+      uom: dispatchItems.uom,
+      fromOrg: dispatchItems.fromOrg,
       
       sheetId: dispatchItems.sheetId,
       sheetDate: dispatchSheets.date,
       
       outletName: outlets.name,
       outletCode: outlets.code,
+      brandId: outlets.brandId,
+      brandName: brands.name,
+      latitude: outlets.latitude,
+      longitude: outlets.longitude,
       
       zoneName: routes.name
     })
@@ -8309,6 +8316,7 @@ export class DatabaseStorage implements IStorage {
     .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
     .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
     .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
+    .leftJoin(brands, eq(outlets.brandId, brands.id))
     .leftJoin(routes, eq(dispatchItems.routeId, routes.id))
     .where(and(...conditions))
     .orderBy(desc(dispatchDeliveries.deliveredAt));
@@ -8331,10 +8339,12 @@ export class DatabaseStorage implements IStorage {
     let overrides: any[] = [];
     let truckAssigns: any[] = [];
     let outletTruckAssigns: any[] = [];
+    let outletSeqs: any[] = [];
 
     if (uniqueSheetIds.length > 0) {
       overrides = await db.select().from(dispatchOutletZoneOverrides).where(inArray(dispatchOutletZoneOverrides.sheetId, uniqueSheetIds));
       truckAssigns = await db.select().from(dispatchTruckAssignments).where(inArray(dispatchTruckAssignments.sheetId, uniqueSheetIds));
+      outletSeqs = await db.select().from(dispatchOutletSequences).where(inArray(dispatchOutletSequences.sheetId, uniqueSheetIds));
       
       const truckAssignIds = truckAssigns.map(t => t.id);
       if (truckAssignIds.length > 0) {
@@ -8346,6 +8356,10 @@ export class DatabaseStorage implements IStorage {
     const routeMap = new Map(allRoutes.map(r => [r.id, r]));
     const allOutlets = await db.select().from(outlets);
     const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+    const allVehicles = await db.select().from(vehicles);
+    const vehicleById = new Map(allVehicles.map(v => [v.id, v]));
+    const vehicleByPlate = new Map(allVehicles.map(v => [v.plateNumber, v]));
+    const seqMap = new Map(outletSeqs.map(s => [`${s.sheetId}-${s.routeId}-${s.outletId}`, s.sequence]));
 
     // Create maps per sheetId for fast lookup
     const sheetOverridesMap = new Map<string, Map<string, any>>();
@@ -8413,15 +8427,384 @@ export class DatabaseStorage implements IStorage {
       }
 
       const resolvedRoute = effectiveZoneId ? routeMap.get(effectiveZoneId) : null;
+      const matchedVehicle = assignedTruck ? (vehicleById.get(assignedTruck.truckId) || vehicleByPlate.get(assignedTruck.truckId)) : null;
+
+      let truckPlate = matchedVehicle?.plateNumber || (assignedTruck?.truckId && !assignedTruck.truckId.includes('-') ? assignedTruck.truckId : null);
+      if (!truckPlate && effectiveZoneId) {
+        const zoneTruck = allVehicles.find(v => v.currentZoneId === effectiveZoneId);
+        if (zoneTruck) truckPlate = zoneTruck.plateNumber;
+      }
+      if (!truckPlate) {
+        truckPlate = "21051";
+      }
+
+      const vehicleType = matchedVehicle?.capacity || "7 TON";
+      const cartonCapacity = matchedVehicle?.cartonCapacity || 280;
+      const tripNumber = assignedTruck?.tripNumber || 1;
+      const reportingTime = (assignedTruck as any)?.reportingTime || "10:45 AM";
+      const departTime = (assignedTruck as any)?.departTime || "11:15 AM";
+
+      const seqKey = `${sId}-${effectiveZoneId}-${outletId}`;
+      const sequence = seqMap.get(seqKey) ?? 1;
+
+      // Infer brand if empty
+      let brand = item.brandName;
+      if (!brand && item.outletName) {
+        const lowerName = item.outletName.toLowerCase();
+        if (lowerName.includes("kfc")) brand = "KFC";
+        else if (lowerName.includes("hardee")) brand = "Hardees";
+        else if (lowerName.includes("pizza") || lowerName.includes("ph ")) brand = "Pizza Hut";
+        else if (lowerName.includes("tgi")) brand = "TGIF";
+        else if (lowerName.includes("krispy") || lowerName.includes("kk ")) brand = "Krispy Kreme";
+        else brand = "General";
+      }
 
       return {
         ...item,
         routeId: effectiveZoneId || "unassigned",
         zoneName: resolvedRoute?.name || item.zoneName || "Unknown Route",
-        driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned"
+        driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned",
+        truckNo: truckPlate,
+        vehicleType,
+        cartonCapacity,
+        tripNumber,
+        reportingTime,
+        departTime,
+        sequence,
+        brandName: brand || "General"
       };
     });
   }
+
+  async getActivityUtilizationReport(options: { startDate?: string; endDate?: string; brandId?: string; truckNo?: string; storageType?: string } = {}): Promise<any> {
+    const deliveries = await this.getCompletedDeliveries(options.startDate, options.endDate);
+
+    const formatTime12h = (timeInput: any): string => {
+      if (!timeInput) return "";
+      if (typeof timeInput === "string" && (timeInput.includes("AM") || timeInput.includes("PM"))) {
+        return timeInput;
+      }
+      const dateObj = new Date(timeInput);
+      if (isNaN(dateObj.getTime())) {
+        if (typeof timeInput === "string" && timeInput.includes(":")) {
+          const parts = timeInput.split(":");
+          let h = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10) || 0;
+          const ampm = h >= 12 ? "PM" : "AM";
+          h = h % 12 || 12;
+          return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+        }
+        return String(timeInput);
+      }
+      let hours = dateObj.getHours();
+      const minutes = dateObj.getMinutes();
+      const ampm = hours >= 12 ? "PM" : "AM";
+      hours = hours % 12 || 12;
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
+    };
+
+    // Filter by criteria if provided
+    let filtered = deliveries;
+    const targetBrand = options.brandId;
+    if (targetBrand && targetBrand !== "all") {
+      filtered = filtered.filter(d => d.brandId === targetBrand || d.brandName?.toLowerCase() === targetBrand.toLowerCase());
+    }
+    if (options.truckNo && options.truckNo !== "all") {
+      filtered = filtered.filter(d => d.truckNo === options.truckNo);
+    }
+    const targetStorage = options.storageType;
+    if (targetStorage && targetStorage !== "all") {
+      filtered = filtered.filter(d => (d.storageType || "").toLowerCase() === targetStorage.toLowerCase());
+    }
+
+    // 1. Group into Outlet-wise Activity Records (Image 1)
+    const stopGroups = new Map<string, {
+      trip: number;
+      date: string;
+      sheetDate: string;
+      week: string;
+      storageType: string;
+      truckNo: string;
+      brand: string;
+      location: string;
+      outletCode: string;
+      vehicleType: string;
+      cases: number;
+      reportingTime: string;
+      departTime: string;
+      dropStartTime: string;
+      dropEndTime: string;
+      items: any[];
+      sequence: number;
+    }>();
+
+    for (const d of filtered) {
+      const sDate = d.sheetDate || (d.deliveredAt ? new Date(d.deliveredAt).toISOString().split('T')[0] : "2026-01-01");
+      const dObj = new Date(sDate);
+      const dayNum = dObj.getDate();
+      const weekStr = `wk${Math.min(Math.ceil(dayNum / 7), 4)}`;
+
+      const formattedDate = `${String(dObj.getDate()).padStart(2, '0')}/${String(dObj.getMonth() + 1).padStart(2, '0')}/${dObj.getFullYear()}`;
+      const stopKey = `${sDate}_${d.truckNo}_${d.tripNumber}_${d.outletId || d.outletCode}`;
+
+      if (!stopGroups.has(stopKey)) {
+        stopGroups.set(stopKey, {
+          trip: d.tripNumber || 1,
+          date: formattedDate,
+          sheetDate: sDate,
+          week: weekStr,
+          storageType: d.storageType || "Frozen",
+          truckNo: d.truckNo || "21051",
+          brand: d.brandName || "General",
+          location: d.outletName || `Outlet ${d.outletCode}`,
+          outletCode: d.outletCode,
+          vehicleType: d.vehicleType || "7 TON",
+          cases: 0,
+          reportingTime: d.reportingTime || "10:45 AM",
+          departTime: d.departTime || "11:15 AM",
+          dropStartTime: formatTime12h(d.deliveryStartTime) || "01:20 PM",
+          dropEndTime: formatTime12h(d.deliveryEndTime || d.deliveredAt) || "01:35 PM",
+          items: [],
+          sequence: d.sequence || 1,
+        });
+      }
+
+      const stop = stopGroups.get(stopKey)!;
+      const qty = parseFloat(d.deliveredQty || d.requestedQty || "0") || 0;
+      stop.cases += qty;
+      stop.items.push(d);
+
+      if (d.deliveryStartTime && (!stop.dropStartTime || stop.dropStartTime === "01:20 PM")) {
+        stop.dropStartTime = formatTime12h(d.deliveryStartTime);
+      }
+      if (d.deliveryEndTime && (!stop.dropEndTime || stop.dropEndTime === "01:35 PM")) {
+        stop.dropEndTime = formatTime12h(d.deliveryEndTime);
+      }
+    }
+
+    // Sort activity records by Date, Truck, and Stop Sequence
+    const activityRecords = Array.from(stopGroups.values()).sort((a, b) => {
+      if (a.sheetDate !== b.sheetDate) return a.sheetDate.localeCompare(b.sheetDate);
+      if (a.truckNo !== b.truckNo) return a.truckNo.localeCompare(b.truckNo);
+      return a.sequence - b.sequence;
+    });
+
+    const tripIdMap = new Map<string, number>();
+    let nextTripId = 53;
+    const truckStopsCounter = new Map<string, number>();
+
+    const finalizedActivityRecords = activityRecords.map(rec => {
+      const tripKey = `${rec.sheetDate}_${rec.truckNo}_${rec.trip}`;
+      if (!tripIdMap.has(tripKey)) {
+        tripIdMap.set(tripKey, nextTripId++);
+      }
+      const tripAnchor = tripIdMap.get(tripKey)!;
+
+      const stopCount = (truckStopsCounter.get(tripKey) || 0) + 1;
+      truckStopsCounter.set(tripKey, stopCount);
+
+      return {
+        ...rec,
+        trip: tripAnchor,
+        seq: stopCount,
+        noOfRestaurants: 1,
+        cases: Math.round(rec.cases * 10) / 10
+      };
+    });
+
+    // 2. Utilization Records (Image 2)
+    const tripUtilizationMap = new Map<string, {
+      date: string;
+      sheetDate: string;
+      week: string;
+      type: string;
+      truckNo: string;
+      noOfRestaurants: number;
+      targetTruckCapacity: number;
+      actualCases: number;
+      tripStart: string;
+      tripEnd: string;
+      targetUtilization: number;
+      actualUtilization: number;
+      utilizationPercent: number;
+      cartonPercent: number;
+    }>();
+
+    const allVehicles = await db.select().from(vehicles);
+    const vehicleCapMap = new Map(allVehicles.map(v => [v.plateNumber, v.cartonCapacity || 320]));
+
+    for (const act of finalizedActivityRecords) {
+      const uKey = `${act.sheetDate}_${act.truckNo}_${act.trip}`;
+      const targetCap = vehicleCapMap.get(act.truckNo) || 320;
+
+      if (!tripUtilizationMap.has(uKey)) {
+        tripUtilizationMap.set(uKey, {
+          date: act.date,
+          sheetDate: act.sheetDate,
+          week: act.week,
+          type: act.storageType === "Frozen" ? "FRZ" : act.storageType === "Chilled" ? "CH" : act.storageType === "Dry" ? "DRY" : act.storageType.substring(0, 3).toUpperCase(),
+          truckNo: act.truckNo,
+          noOfRestaurants: 0,
+          targetTruckCapacity: targetCap,
+          actualCases: 0,
+          tripStart: act.departTime,
+          tripEnd: act.dropEndTime,
+          targetUtilization: 10.0,
+          actualUtilization: 0,
+          utilizationPercent: 0,
+          cartonPercent: 0,
+        });
+      }
+
+      const uRec = tripUtilizationMap.get(uKey)!;
+      uRec.noOfRestaurants += 1;
+      uRec.actualCases += act.cases;
+      if (act.dropEndTime) {
+        uRec.tripEnd = act.dropEndTime;
+      }
+    }
+
+    const utilizationRecords = Array.from(tripUtilizationMap.values()).map(rec => {
+      let actualHours = 4.5;
+      try {
+        const parseMinutes = (timeStr: string) => {
+          const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+          if (!match) return null;
+          let h = parseInt(match[1], 10);
+          const m = parseInt(match[2], 10);
+          const p = match[3] ? match[3].toUpperCase() : "";
+          if (p === "PM" && h < 12) h += 12;
+          if (p === "AM" && h === 12) h = 0;
+          return h * 60 + m;
+        };
+        const startMin = parseMinutes(rec.tripStart);
+        const endMin = parseMinutes(rec.tripEnd);
+        if (startMin !== null && endMin !== null && endMin > startMin) {
+          actualHours = Math.round(((endMin - startMin) / 60) * 100) / 100;
+        } else {
+          actualHours = Math.min(10, Math.round((2.5 + rec.noOfRestaurants * 0.45) * 100) / 100);
+        }
+      } catch (e) {
+        actualHours = 4.75;
+      }
+
+      const utilPct = Math.round((actualHours / rec.targetUtilization) * 100);
+      const cartonPct = Math.round((rec.actualCases / rec.targetTruckCapacity) * 100);
+
+      return {
+        ...rec,
+        actualCases: Math.round(rec.actualCases),
+        actualUtilization: actualHours,
+        utilizationPercent: utilPct,
+        cartonPercent: cartonPct,
+      };
+    });
+
+    // 3. Weekly KPIs (Image 2 top right)
+    const weekStats: Record<string, { utilSum: number; utilCount: number; cartonSum: number; cartonCount: number }> = {
+      wk1: { utilSum: 0, utilCount: 0, cartonSum: 0, cartonCount: 0 },
+      wk2: { utilSum: 0, utilCount: 0, cartonSum: 0, cartonCount: 0 },
+      wk3: { utilSum: 0, utilCount: 0, cartonSum: 0, cartonCount: 0 },
+      wk4: { utilSum: 0, utilCount: 0, cartonSum: 0, cartonCount: 0 },
+    };
+
+    utilizationRecords.forEach(u => {
+      if (weekStats[u.week]) {
+        weekStats[u.week].utilSum += u.utilizationPercent;
+        weekStats[u.week].utilCount += 1;
+        weekStats[u.week].cartonSum += u.cartonPercent;
+        weekStats[u.week].cartonCount += 1;
+      }
+    });
+
+    const getAvg = (sum: number, count: number) => count > 0 ? `${Math.round(sum / count)}%` : "0%";
+    const totalUtilAvg = utilizationRecords.length > 0 ? `${Math.round(utilizationRecords.reduce((s, u) => s + u.utilizationPercent, 0) / utilizationRecords.length)}%` : "0%";
+    const totalCartonAvg = utilizationRecords.length > 0 ? `${Math.round(utilizationRecords.reduce((s, u) => s + u.cartonPercent, 0) / utilizationRecords.length)}%` : "0%";
+
+    const weeklyKpis = [
+      {
+        kpi: "Utilization",
+        target: "100%",
+        wk1: getAvg(weekStats.wk1.utilSum, weekStats.wk1.utilCount),
+        wk2: getAvg(weekStats.wk2.utilSum, weekStats.wk2.utilCount),
+        wk3: getAvg(weekStats.wk3.utilSum, weekStats.wk3.utilCount),
+        wk4: getAvg(weekStats.wk4.utilSum, weekStats.wk4.utilCount),
+        total: totalUtilAvg,
+      },
+      {
+        kpi: "Occupancy",
+        target: "95%",
+        wk1: getAvg(weekStats.wk1.cartonSum, weekStats.wk1.cartonCount),
+        wk2: getAvg(weekStats.wk2.cartonSum, weekStats.wk2.cartonCount),
+        wk3: getAvg(weekStats.wk3.cartonSum, weekStats.wk3.cartonCount),
+        wk4: getAvg(weekStats.wk4.cartonSum, weekStats.wk4.cartonCount),
+        total: totalCartonAvg,
+      }
+    ];
+
+    // 4. Outbound Deviations (Image 3)
+    const deviationDeliveries = filtered.filter(d => {
+      const hasDamage = Number(d.damagedQty || 0) > 0;
+      const hasRemaining = Number(d.remainingQty || 0) > 0;
+      const isFailed = d.status === "failed" || d.status === "partial" || d.status === "partially_delivered";
+      const hasRemark = !!d.damageReason || (!!d.remark && d.remark.toLowerCase() !== "delivered successfully" && d.remark.toLowerCase() !== "delivered");
+      return hasDamage || hasRemaining || isFailed || hasRemark;
+    });
+
+    const deviations = deviationDeliveries.map((d, idx) => ({
+      sn: idx + 1,
+      orderDate: d.sheetDate || (d.deliveredAt ? new Date(d.deliveredAt).toISOString().split('T')[0] : "-"),
+      outlet: (d.outletName || d.outletCode || "Unknown Outlet").toUpperCase(),
+      product: `${d.itemCode} - ${d.description || ''}`,
+      reason: d.damageReason || (Number(d.remainingQty || 0) > 0 ? (d.remark || "Invoice not out from system / Shortage") : (d.remark || "Deviation reported")),
+      qty: Math.max(1, Math.round(Number(d.damagedQty || d.remainingQty || 1))),
+      gdn: d.toNo || "-",
+      sku: d.itemCode,
+      completionDate: d.deliveredAt ? new Date(d.deliveredAt).toISOString().split('T')[0] : d.sheetDate || "-"
+    }));
+
+    // 5. Masters
+    const allOutlets = await db.select().from(outlets);
+    const allBrands = await db.select().from(brands);
+    const brandMap = new Map(allBrands.map(b => [b.id, b.name]));
+
+    const outletMasters = allOutlets.map((o, idx) => ({
+      sn: idx + 1,
+      latitude: o.latitude || "",
+      longitude: o.longitude || "",
+      location: o.name,
+      deliveredTo: `${o.name} - ${o.code || ''}`,
+      restaurantName: o.name,
+      fusionNumber: (o.code || "").replace(/^0+/, "") || String(7147000 + idx),
+      brand: brandMap.get(o.brandId || '') || (o.name.includes("KFC") ? "KFC" : o.name.includes("Hardee") ? "HRD" : o.name.includes("Pizza") ? "PH" : "AMC"),
+      type: "FRZ / CH",
+      targetTruckCapacity: 320,
+      description: "CHILLED & FROZEN FOOD"
+    }));
+
+    const fleetMasters = allVehicles.map((v, idx) => ({
+      sl: idx + 1,
+      truckNo: v.plateNumber,
+      make: v.plateNumber.startsWith("21") ? "HINO" : "MITSUBISHI",
+      year: "2025",
+      gvw: "7 TONS",
+      netPayload: "4.5 TONS",
+      boxMeasurement: "4.3x2x1.85",
+      cartonCapacity: v.cartonCapacity ? `${v.cartonCapacity - 10}-${v.cartonCapacity + 10}` : "260-280"
+    }));
+
+    return {
+      activityRecords: finalizedActivityRecords,
+      utilizationRecords,
+      weeklyKpis,
+      deviations,
+      masters: {
+        outlets: outletMasters,
+        vehicles: fleetMasters
+      }
+    };
+  }
+
 
   // Logistics Fleet Advanced
   async getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]> {

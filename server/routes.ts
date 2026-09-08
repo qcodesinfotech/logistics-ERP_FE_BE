@@ -9927,6 +9927,23 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/dispatch/activity-utilization-report", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { startDate, endDate, brandId, truckNo, storageType } = req.query as any;
+      const report = await storage.getActivityUtilizationReport({
+        startDate,
+        endDate,
+        brandId,
+        truckNo,
+        storageType
+      });
+      res.json(report);
+    } catch (error) {
+      console.error("Error generating activity & utilization report:", error);
+      res.status(500).json({ error: "Failed to generate activity & utilization report" });
+    }
+  });
+
   // ==================== TRUCK TRANSFERS ROUTES ====================
   app.get("/api/truck-transfers", authMiddleware, async (req: AuthRequest, res) => {
     try {

@@ -43,8 +43,10 @@ import {
   Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
-  Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search,
+  Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
 } from "lucide-react";
+import CustomerReportView from "@/components/customer-report-view";
+import { exportCompletedDeliveriesExcel } from "@/lib/customer-excel-export";
 
 // ===== Types =====
 interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; }
@@ -79,8 +81,8 @@ function parseCSV(text: string): Record<string, string>[] {
   if (lines.length < 2) return [];
   const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
   const hasItemSpecificDesc = rawHeaders.some(h => {
-    return (h.includes("item") || h.includes("product")) && 
-           (h.includes("desc") || h.includes("name"));
+    return (h.includes("item") || h.includes("product")) &&
+      (h.includes("desc") || h.includes("name"));
   });
   // Normalize common header variants
   const normalize = (h: string) => {
@@ -357,12 +359,12 @@ function OutletCard({
             <Badge variant="outline" className="text-[10px] h-5 bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">DNs: {deliveredDNs}/{totalDNs}</Badge>
             <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">Items: {delivered}/{total}</Badge>
           </div>
-          
+
           <div className="flex items-center gap-1">
             {isSupervisor && !isOutletComplete && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 className="h-6 px-2 text-[10px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 gap-0.5"
                 onClick={e => { e.stopPropagation(); onOverride(outlet); }}
               >
@@ -371,9 +373,9 @@ function OutletCard({
               </Button>
             )}
             {isSupervisor && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 className="h-6 px-2 text-[10px] text-orange-600 hover:text-orange-700 hover:bg-orange-50 gap-0.5"
                 onClick={e => { e.stopPropagation(); onManageItems(outlet); }}
               >
@@ -395,8 +397,8 @@ function OutletCard({
             const hasActions = showMove || showComplete || showRevert || showUpdate;
 
             return (
-              <div 
-                key={item.id} 
+              <div
+                key={item.id}
                 className="group flex flex-col p-3 hover:bg-slate-50/50 dark:hover:bg-slate-900/40 transition-colors"
               >
                 {/* Row 1: Code + Storage + Status */}
@@ -668,7 +670,7 @@ function ZoneColumn({
   // Unfiltered (initial) stats calculation
   const initialOutlets = initialZoneData?.outlets || zone.outlets;
   const initialOutletsCount = initialOutlets.length;
-  
+
   const initialTotalQty = initialOutlets.reduce((sumOutlet, o) => {
     return sumOutlet + o.items.reduce((sumItem, i) => sumItem + parseNumber(i.requestedQty || i.weight), 0);
   }, 0);
@@ -684,7 +686,7 @@ function ZoneColumn({
 
   const initialCompletionPercentage = initialTotalQty > 0 ? Math.round((initialDeliveredQty / initialTotalQty) * 100) : 0;
 
-  const initialCompletedOutletsCount = initialOutlets.filter(o => 
+  const initialCompletedOutletsCount = initialOutlets.filter(o =>
     o.items.length > 0 && o.items.every(i => (i.delivery?.status || "pending") !== "pending")
   ).length;
 
@@ -704,11 +706,11 @@ function ZoneColumn({
         {items.map((item, idx) => {
           const req = item.requestedQty || item.weight || "0";
           const status = item.delivery?.status || "pending";
-          const statusColor = status === "delivered" 
-            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-100 dark:border-emerald-800/40" 
+          const statusColor = status === "delivered"
+            ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-100 dark:border-emerald-800/40"
             : status === "partial" || status === "partially_delivered" || status === "damaged"
-            ? "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 border-amber-100 dark:border-amber-800/40"
-            : "text-slate-500 dark:text-muted-foreground bg-slate-50 dark:bg-muted/40 border-slate-100 dark:border-border";
+              ? "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 border-amber-100 dark:border-amber-800/40"
+              : "text-slate-500 dark:text-muted-foreground bg-slate-50 dark:bg-muted/40 border-slate-100 dark:border-border";
 
           return (
             <div key={idx} className="flex items-start gap-2 text-xs py-1 hover:bg-slate-50 dark:hover:bg-accent/40 rounded px-1 transition-colors">
@@ -739,7 +741,7 @@ function ZoneColumn({
       {/* Left Column */}
       <div className={`flex flex-col h-full ${isExpanded ? "w-80 border-r" : "w-full"}`}>
         {/* Zone Header */}
-        <div 
+        <div
           onClick={onSelectRoute}
           className={`p-4 rounded-t-2xl cursor-pointer hover:opacity-90 select-none ${isUnassigned ? "" : "bg-gradient-to-r from-primary/10 to-primary/5"}`}
         >
@@ -751,12 +753,12 @@ function ZoneColumn({
               <div>
                 <h3 className="font-bold text-sm">{zone.zoneName}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {zone.outlets.length === initialOutletsCount 
-                    ? `${initialOutletsCount} outlets · ${initialDNCount} DNs` 
+                  {zone.outlets.length === initialOutletsCount
+                    ? `${initialOutletsCount} outlets · ${initialDNCount} DNs`
                     : `${zone.outlets.length}/${initialOutletsCount} outlets · ${currentDNCount}/${initialDNCount} DNs`}
                   {" · "}
-                  Qty: {formattedTotalQty === formattedInitialTotalQty 
-                    ? formattedTotalQty 
+                  Qty: {formattedTotalQty === formattedInitialTotalQty
+                    ? formattedTotalQty
                     : `${formattedTotalQty}/${formattedInitialTotalQty}`}
                 </p>
               </div>
@@ -781,9 +783,9 @@ function ZoneColumn({
                     {initialCompletedDNs}/{initialDNCount} ({initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}%)
                   </span>
                 </div>
-                <Progress 
-                  value={initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0} 
-                  className="h-1 bg-slate-100 dark:bg-slate-800" 
+                <Progress
+                  value={initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}
+                  className="h-1 bg-slate-100 dark:bg-slate-800"
                 />
               </div>
               <div className="space-y-0.5">
@@ -793,9 +795,9 @@ function ZoneColumn({
                     {initialCompletedOutletsCount}/{initialOutletsCount} ({initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}%)
                   </span>
                 </div>
-                <Progress 
-                  value={initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0} 
-                  className="h-1 bg-slate-100 dark:bg-slate-800" 
+                <Progress
+                  value={initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}
+                  className="h-1 bg-slate-100 dark:bg-slate-800"
                 />
               </div>
             </div>
@@ -906,7 +908,7 @@ function ZoneColumn({
                   <MapPin className="h-4 w-4 text-primary fill-primary/10 shrink-0" />
                   <span className="truncate">{zone.zoneName} Route</span>
                 </div>
-                
+
                 <div className="pl-1 space-y-2">
                   {localOutlets.map((ot: any, idx: number) => {
                     const id = ot.outletId || ot.outletCode || idx.toString();
@@ -921,7 +923,7 @@ function ZoneColumn({
                         onDragEnd={handleDragEnd}
                         className={`space-y-1 transition-all duration-200 ${isSupervisor ? "cursor-grab active:cursor-grabbing" : ""} ${draggedIdx === idx ? "opacity-40 scale-95" : "opacity-100"}`}
                       >
-                        <div 
+                        <div
                           className="group flex items-center justify-between gap-2 text-xs font-semibold text-foreground cursor-pointer hover:bg-accent p-1.5 rounded shadow-sm border border-transparent hover:border-border bg-card/60 transition-colors"
                           onClick={() => toggleOutlet(id)}
                         >
@@ -934,7 +936,7 @@ function ZoneColumn({
                             <Store className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400 fill-blue-50 dark:fill-blue-950/40 shrink-0" />
                             <span className="truncate" title={ot.outletName}>{ot.outletName}</span>
                           </div>
-                          
+
                           <div className="flex items-center gap-1.5 shrink-0">
                             {isSupervisor && (
                               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1081,7 +1083,7 @@ function TruckHistoryTab({ vehicles }: { vehicles: any[] }) {
     const totalMaintCost = vehicleMaintenance.reduce((sum, log) => sum + parseFloat(log.cost || "0"), 0);
     const totalFuelCost = vehicleFuel.reduce((sum, log) => sum + parseFloat(log.fuelExpense || "0"), 0);
     const totalLitres = vehicleFuel.reduce((sum, log) => sum + parseFloat(log.liters || "0"), 0);
-    
+
     const odometers = vehicleFuel
       .map(log => parseFloat(log.odometer || "0"))
       .filter(o => o > 0);
@@ -1119,7 +1121,7 @@ function TruckHistoryTab({ vehicles }: { vehicles: any[] }) {
               <p className="text-xs text-muted-foreground">Select a vehicle to view its fuel and maintenance history logs</p>
             </div>
           </div>
-          
+
           <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}>
             <SelectTrigger className="w-64 h-9 text-xs">
               <SelectValue placeholder="Select Vehicle" />
@@ -1480,11 +1482,11 @@ export default function DailyDispatchPage() {
 
   const stats = useMemo(() => {
     if (!boardData) return { totalOutlets: 0, pendingOutlets: 0, partiallyDelivered: 0, totalQtyAssigned: 0, completedQty: 0, pendingQty: 0, assignedTrucksCount: 0, totalDNs: 0, completedDNs: 0 };
-    
+
     let totalOutletsSet = new Set<string>();
     let pendingOutletsSet = new Set<string>();
     let partialOutletsSet = new Set<string>();
-    
+
     let totalQtyAssigned = 0;
     let completedQty = 0;
     let pendingQty = 0;
@@ -1508,7 +1510,7 @@ export default function DailyDispatchPage() {
 
       z.outlets.forEach(o => {
         const outletKey = o.outletId || o.outletCode;
-        
+
         const fullOutlet = (o.outletId ? brandFilteredOutletsMap.get(o.outletId) : null) || (o.outletCode ? brandFilteredOutletsMap.get(o.outletCode.trim().toLowerCase().replace(/^0+/, "")) : null);
         if (boardBrandId !== "all" && fullOutlet?.brandId !== boardBrandId) {
           return;
@@ -1895,8 +1897,8 @@ export default function DailyDispatchPage() {
             const rawHeaders = Object.keys(rawJson[0]);
             const hasItemSpecificDesc = rawHeaders.some(h => {
               const lower = h.toLowerCase().replace(/\s+/g, "_");
-              return (lower.includes("item") || lower.includes("product")) && 
-                     (lower.includes("desc") || lower.includes("name"));
+              return (lower.includes("item") || lower.includes("product")) &&
+                (lower.includes("desc") || lower.includes("name"));
             });
             const normalize = (h: string) => {
               const lower = h.toLowerCase().replace(/\s+/g, "_");
@@ -1926,7 +1928,7 @@ export default function DailyDispatchPage() {
               const newRow: Record<string, string> = {};
               Object.entries(row).forEach(([key, val]) => {
                 let finalVal = val;
-                
+
                 // If it's a numeric value and the column is likely a date (Excel serial number)
                 if (typeof val === "number" && headerMap.get(key).includes("date")) {
                   try {
@@ -1941,7 +1943,7 @@ export default function DailyDispatchPage() {
                     // fallback to string if parsing fails
                   }
                 }
-                
+
                 newRow[headerMap.get(key)] = String(finalVal);
               });
               return newRow;
@@ -1961,7 +1963,7 @@ export default function DailyDispatchPage() {
       const filteredParsed = parsed.filter(row => {
         const outletCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
         const itemCode = row.item_number || row.item_code || row.itemCode || "";
-        
+
         const hasOutlet = !!outletCode.trim();
         const hasItem = !!itemCode.trim();
 
@@ -1974,7 +1976,7 @@ export default function DailyDispatchPage() {
           missingItemOrQtyCount++;
           return false;
         }
-        
+
         const lowerOutletCode = outletCode.toLowerCase();
         if (lowerOutletCode.includes("total") || lowerOutletCode.includes("summary") || lowerOutletCode.includes("count")) return false;
 
@@ -2055,7 +2057,7 @@ export default function DailyDispatchPage() {
       toast({ title: "Validation Error", description: "Please select a client before uploading.", variant: "destructive" });
       return;
     }
-    
+
     const existingSheet = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
     if (existingSheet) {
       setMergeConfirmOpen(true);
@@ -2118,12 +2120,16 @@ export default function DailyDispatchPage() {
             <TabsTrigger value="trucks" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Truck className="h-3.5 w-3.5" />Truck Planning</TabsTrigger>
             <TabsTrigger value="pending" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Package className="h-3.5 w-3.5" />Pending</TabsTrigger>
             <TabsTrigger value="completed" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><CheckCircle2 className="h-3.5 w-3.5" />Completed</TabsTrigger>
+            <TabsTrigger value="customer-report" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold border border-emerald-200/60 dark:border-emerald-800/60 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">
+              <FileSpreadsheet className="h-3.5 w-3.5" />
+              Customer Report
+            </TabsTrigger>
             <TabsTrigger value="upload" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Upload className="h-3.5 w-3.5" />Upload Sheet</TabsTrigger>
             <TabsTrigger value="drivers" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><User className="h-3.5 w-3.5" />Driver Zones</TabsTrigger>
             <TabsTrigger value="transfers" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><ArrowRight className="h-3.5 w-3.5" />Transfers</TabsTrigger>
             <TabsTrigger value="summary" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />Summary</TabsTrigger>
             <TabsTrigger value="item-summary" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />Item Summary</TabsTrigger>
-            <TabsTrigger value="truck-history" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><History className="h-3.5 w-3.5" />Truck History</TabsTrigger>
+            {/* <TabsTrigger value="truck-history" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><History className="h-3.5 w-3.5" />Truck History</TabsTrigger> */}
           </TabsList>
         </div>
 
@@ -2182,9 +2188,9 @@ export default function DailyDispatchPage() {
               </Button>
             )}
             {boardSheetId && (
-              <Button 
-                size="sm" 
-                variant="outline" 
+              <Button
+                size="sm"
+                variant="outline"
                 className="border-orange-200 text-orange-700 hover:bg-orange-50 flex-shrink-0 h-8 text-xs"
                 onClick={() => setGlobalAddModal({ isOpen: true, selectedOutletCode: "" })}
               >
@@ -2363,19 +2369,19 @@ export default function DailyDispatchPage() {
                   placeholder="All Status"
                   width="w-[160px]"
                 />
-              
-              {(boardRouteFilter !== "all" || boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all") && (
-                <Button variant="ghost" size="sm" className="h-8 text-xs px-2 text-muted-foreground" onClick={() => {
-                  setBoardRouteFilter("all");
-                  setBoardOutletFilter("all");
-                  setBoardDriverFilter("all");
-                  setBoardTruckFilter("all");
-                  setBoardStatusFilter("all");
-                }}>
-                  Clear Filters
-                </Button>
-              )}
-            </div>
+
+                {(boardRouteFilter !== "all" || boardOutletFilter !== "all" || boardDriverFilter !== "all" || boardTruckFilter !== "all" || boardStatusFilter !== "all") && (
+                  <Button variant="ghost" size="sm" className="h-8 text-xs px-2 text-muted-foreground" onClick={() => {
+                    setBoardRouteFilter("all");
+                    setBoardOutletFilter("all");
+                    setBoardDriverFilter("all");
+                    setBoardTruckFilter("all");
+                    setBoardStatusFilter("all");
+                  }}>
+                    Clear Filters
+                  </Button>
+                )}
+              </div>
             </>
           )}
 
@@ -2410,7 +2416,7 @@ export default function DailyDispatchPage() {
                         if (boardOutletFilter !== "all" && outlet.outletId !== boardOutletFilter && outlet.outletCode !== boardOutletFilter) return null;
 
                         const assignedTruck = zone.trucks?.find(t => t.id === outlet.truckAssignmentId);
-                        
+
                         if (boardDriverFilter !== "all") {
                           const isDriverInZone = zone.trucks?.some(t => t.driver?.id === boardDriverFilter) || zone.drivers?.some(d => d.id === boardDriverFilter);
                           if (assignedTruck) {
@@ -2447,7 +2453,7 @@ export default function DailyDispatchPage() {
 
                       return { ...zone, outlets: filteredOutlets };
                     }).filter(Boolean) as ZoneGroup[];
-                    
+
                     if (filteredZones.every(z => z.outlets.length === 0)) {
                       return <div className="flex items-center justify-center w-full h-64 text-muted-foreground">No items match your filters.</div>;
                     }
@@ -2510,8 +2516,8 @@ export default function DailyDispatchPage() {
               <div className="ml-auto flex items-center gap-2 print:hidden">
                 <div className="relative">
                   <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input 
-                    placeholder="Search route, outlet, item..." 
+                  <Input
+                    placeholder="Search route, outlet, item..."
                     value={pivotSearchQuery}
                     onChange={e => setPivotSearchQuery(e.target.value)}
                     className="pl-7 w-60 h-8 text-xs bg-background border-input"
@@ -2566,8 +2572,8 @@ export default function DailyDispatchPage() {
               <div className="ml-auto flex items-center gap-2 print:hidden">
                 <div className="relative">
                   <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input 
-                    placeholder="Search items, description, outlets..." 
+                  <Input
+                    placeholder="Search items, description, outlets..."
                     value={summarySearchQuery}
                     onChange={e => setSummarySearchQuery(e.target.value)}
                     className="pl-7 w-60 h-8 text-xs bg-background border-input"
@@ -2655,8 +2661,8 @@ export default function DailyDispatchPage() {
                     if (item.itemCode.toLowerCase().includes(query)) return true;
                     if (item.description && item.description.toLowerCase().includes(query)) return true;
                     if (item.storageType && item.storageType.toLowerCase().includes(query)) return true;
-                    return item.outlets.some((o: any) => 
-                      o.outletName.toLowerCase().includes(query) || 
+                    return item.outlets.some((o: any) =>
+                      o.outletName.toLowerCase().includes(query) ||
                       o.outletCode.toLowerCase().includes(query)
                     );
                   });
@@ -2683,7 +2689,7 @@ export default function DailyDispatchPage() {
                           const isExpanded = !!expandedSummaryItems[item.itemCode];
                           return (
                             <React.Fragment key={idx}>
-                              <tr 
+                              <tr
                                 className="hover:bg-slate-50/50 cursor-pointer break-inside-avoid"
                                 onClick={() => setExpandedSummaryItems(prev => ({ ...prev, [item.itemCode]: !isExpanded }))}
                               >
@@ -2748,8 +2754,8 @@ export default function DailyDispatchPage() {
         {/* ===== COMPLETED TAB ===== */}
         <TabsContent value="completed" className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
           <ErrorBoundary>
-            <CompletedDeliveriesTab 
-              selectedDate={selectedDate} 
+            <CompletedDeliveriesTab
+              selectedDate={selectedDate}
               onManageItems={(outletCode: string, outletName: string, items: any[]) => {
                 setManageItemsModal({
                   isOpen: true,
@@ -2759,6 +2765,13 @@ export default function DailyDispatchPage() {
                 });
               }}
             />
+          </ErrorBoundary>
+        </TabsContent>
+
+        {/* ===== CUSTOMER REPORT TAB ===== */}
+        <TabsContent value="customer-report" className="flex-1 overflow-auto p-4 md:p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
+          <ErrorBoundary>
+            <CustomerReportView />
           </ErrorBoundary>
         </TabsContent>
 
@@ -3096,8 +3109,8 @@ export default function DailyDispatchPage() {
       )}
 
       {/* Manage Items Dialog */}
-      <Dialog 
-        open={manageItemsModal.isOpen} 
+      <Dialog
+        open={manageItemsModal.isOpen}
         onOpenChange={(open) => setManageItemsModal(prev => ({ ...prev, isOpen: open }))}
       >
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
@@ -3350,8 +3363,8 @@ export default function DailyDispatchPage() {
       </Dialog>
 
       {/* Global Add Item / Outlet Dialog */}
-      <Dialog 
-        open={globalAddModal.isOpen} 
+      <Dialog
+        open={globalAddModal.isOpen}
         onOpenChange={(open) => setGlobalAddModal(prev => ({ ...prev, isOpen: open }))}
       >
         <DialogContent className="max-w-md">
@@ -3605,8 +3618,8 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
                   {isRouteExpanded && zone.outlets.map(outlet => {
                     const outletTotal = outlet.items.reduce((s, i) => s + Number((i as any).requestedQty || i.weight || 0), 0);
                     const outletId = `${zone.zoneId}-${outlet.outletCode}`;
-                    const isOutletExpanded = query 
-                      ? expandedOutlets[outletId] !== false 
+                    const isOutletExpanded = query
+                      ? expandedOutlets[outletId] !== false
                       : !!expandedOutlets[outletId]; // Default true if search query is active
 
                     return (
@@ -3788,15 +3801,15 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   const filteredZoneGroups = zoneGroups.map((g: any) => {
     const filteredOutlets = g.outletRows.filter((outlet: any) => {
       const hasFullAssignment = !!outlet.assignment;
-      
+
       const storageTypes = Array.from(new Set(outlet.items.map((i: any) => i.storageType).filter(Boolean))) as string[];
-      const assignedStorageTypes = storageTypes.filter(st => 
+      const assignedStorageTypes = storageTypes.filter(st =>
         outletAssignments.some((oa: any) => oa.outletCode === outlet.outletCode && oa.storageType === st && truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId))
       );
-      
+
       const isFullyAssigned = hasFullAssignment || (storageTypes.length > 0 && assignedStorageTypes.length === storageTypes.length);
       const isPartiallyAssigned = assignedStorageTypes.length > 0;
-      
+
       if (planningTab === "assigned") {
         return hasFullAssignment || isPartiallyAssigned;
       } else {
@@ -3833,8 +3846,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     const capCarton = parseInt(veh?.cartonCapacity || "0");
     const used = parseFloat(truck?.usedCapacity || "0");
     const taItemCount = getTruckAssignedItemsCount(truck?.id);
-    
-    const itemsToAdd = storageType ? outlet.items.filter((i:any) => i.storageType === storageType) : outlet.items;
+
+    const itemsToAdd = storageType ? outlet.items.filter((i: any) => i.storageType === storageType) : outlet.items;
 
     if (capCarton > 0 && taItemCount + itemsToAdd.length > capCarton) {
       setPendingAssignment({
@@ -3868,7 +3881,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
         return;
       }
     }
-    
+
     assignOutletMutation.mutate({
       outletCode: outlet.outletCode,
       truckAssignmentId: truckAssignId,
@@ -4023,7 +4036,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
               {filteredZoneGroups.map(({ zone, zoneTrucks, outletRows }: any) => (
                 <Card key={zone.id} className="border-2">
                   {/* Zone Header */}
-                  <CardHeader 
+                  <CardHeader
                     className="bg-gradient-to-r from-primary/8 to-transparent pb-3 cursor-pointer hover:bg-muted/10 transition-colors"
                     onClick={() => setExpandedRoutes(prev => ({ ...prev, [zone.id]: !prev[zone.id] }))}
                   >
@@ -4046,7 +4059,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                           const cap = parseFloat(veh?.capacity || "0");
                           const capCarton = parseInt(veh?.cartonCapacity || "0");
                           const used = parseFloat(ta.usedCapacity || "0");
-                          
+
                           const taAssignments = outletAssignments.filter((oa: any) => oa.truckAssignmentId === ta.id);
                           const taOutletCount = new Set(taAssignments.map((oa: any) => oa.outletCode)).size;
                           const taItemCount = getTruckAssignedItemsCount(ta.id);
@@ -4098,8 +4111,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                               <p className="text-[10px] text-muted-foreground flex items-center gap-0.5 mt-0.5" title={getDriverName(ta.driverId)}>
                                 <User className="h-2.5 w-2.5 shrink-0" />
                                 <span className="truncate">
-                                  {getDriverName(ta.driverId).length > 20 
-                                    ? getDriverName(ta.driverId).substring(0, 20) + "..." 
+                                  {getDriverName(ta.driverId).length > 20
+                                    ? getDriverName(ta.driverId).substring(0, 20) + "..."
                                     : getDriverName(ta.driverId)}
                                 </span>
                               </p>
@@ -4121,284 +4134,284 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   {/* Outlets Table */}
                   {expandedRoutes[zone.id] && (
                     <CardContent className="p-0">
-                    {outletRows.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-6">No outlets in this zone's dispatch sheet.</p>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-muted/30">
-                            <TableHead className="pl-4">Outlet</TableHead>
-                            <TableHead className="text-right">Total Qty (Items)</TableHead>
-                            <TableHead className="text-right pr-4">Assigned Truck</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {outletRows.map((outlet: any, idx: number) => {
-                            const storageTypes = Array.from(new Set(outlet.items.map((i: any) => i.storageType).filter(Boolean))) as string[];
-                            
-                            const isFullyCompleted = outlet.items.length > 0 && outlet.items.every((i: any) => ["delivered", "damaged"].includes(i.delivery?.status));
+                      {outletRows.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-6">No outlets in this zone's dispatch sheet.</p>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/30">
+                              <TableHead className="pl-4">Outlet</TableHead>
+                              <TableHead className="text-right">Total Qty (Items)</TableHead>
+                              <TableHead className="text-right pr-4">Assigned Truck</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {outletRows.map((outlet: any, idx: number) => {
+                              const storageTypes = Array.from(new Set(outlet.items.map((i: any) => i.storageType).filter(Boolean))) as string[];
 
-                            // Check for a "whole outlet" assignment
-                            const currentAssignment = outletAssignments.find(
-                              (oa: any) => oa.outletCode === outlet.outletCode && !oa.storageType &&
-                                truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId)
-                            );
-                            const assignedTruck = currentAssignment
-                              ? truckAssignments.find((ta: any) => ta.id === currentAssignment.truckAssignmentId)
-                              : null;
-                            const assignedVeh = assignedTruck ? getVehicleInfo(assignedTruck.truckId) : null;
-                            const outletWeightT = outlet.totalWeight; // treat as T
+                              const isFullyCompleted = outlet.items.length > 0 && outlet.items.every((i: any) => ["delivered", "damaged"].includes(i.delivery?.status));
 
-                            return (
-                              <React.Fragment key={outlet.outletCode + idx}>
-                                <TableRow className={idx % 2 === 0 ? "bg-background" : "bg-muted/20"}>
-                                  <TableCell className="pl-4">
-                                    <div>
-                                      <p className="font-semibold text-sm">{outlet.outletName || outlet.outletCode}</p>
-                                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                        <p className="text-xs text-muted-foreground">{outlet.outletCode} · {outlet.items.length} item(s)</p>
-                                        {storageTypes.map((st: any) => (
-                                          <Badge key={st} variant="outline" className="text-[9px] h-4 px-1 bg-slate-50">{st}</Badge>
-                                        ))}
-                                      </div>
-                                      
-                                      {/* Items list - view only */}
-                                      <div className="mt-2 pl-3 border-l-2 border-slate-200 dark:border-slate-800 space-y-1">
-                                        {outlet.items.map((item: any, iIdx: number) => {
-                                          const qty = parseFloat(item.weight || item.requestedQty || "0");
-                                          return (
-                                            <div key={item.id || iIdx} className="text-[11px] text-muted-foreground/80 flex items-center justify-between max-w-xl">
-                                              <span className="truncate pr-4">
-                                                {item.itemCode} - {item.description || "No description"}
-                                                {item.storageType && (
-                                                  <span className="text-[9px] ml-1.5 px-1 py-0.2 bg-slate-100 dark:bg-slate-800 rounded font-normal text-muted-foreground">
-                                                    {item.storageType}
-                                                  </span>
-                                                )}
-                                              </span>
-                                              <span className="font-mono font-semibold shrink-0">{qty.toFixed(0)} Boxes</span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="text-right align-top pt-4">
-                                    <span className={`font-mono text-sm font-semibold ${outletWeightT > 100 ? "text-amber-600" : "text-foreground"}`}>
-                                      {outletWeightT.toFixed(0)} Boxes
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="text-right pr-4 align-top pt-4">
-                                    {isFullyCompleted ? (
-                                      <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                                        Completed
-                                      </Badge>
-                                    ) : assignedTruck ? (
-                                      <div className="flex items-center justify-end gap-2">
-                                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
-                                          <Truck className="h-3 w-3" />
-                                          {assignedVeh?.plateNumber || "Truck"}
-                                        </Badge>
-                                        <Button
-                                          variant="ghost" size="sm"
-                                          className="h-6 w-6 p-0 text-red-400 hover:text-red-600"
-                                          onClick={() => unassignOutletMutation.mutate({
-                                            outletCode: outlet.outletCode,
-                                            sheetId: boardSheetId!
+                              // Check for a "whole outlet" assignment
+                              const currentAssignment = outletAssignments.find(
+                                (oa: any) => oa.outletCode === outlet.outletCode && !oa.storageType &&
+                                  truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId)
+                              );
+                              const assignedTruck = currentAssignment
+                                ? truckAssignments.find((ta: any) => ta.id === currentAssignment.truckAssignmentId)
+                                : null;
+                              const assignedVeh = assignedTruck ? getVehicleInfo(assignedTruck.truckId) : null;
+                              const outletWeightT = outlet.totalWeight; // treat as T
+
+                              return (
+                                <React.Fragment key={outlet.outletCode + idx}>
+                                  <TableRow className={idx % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+                                    <TableCell className="pl-4">
+                                      <div>
+                                        <p className="font-semibold text-sm">{outlet.outletName || outlet.outletCode}</p>
+                                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                          <p className="text-xs text-muted-foreground">{outlet.outletCode} · {outlet.items.length} item(s)</p>
+                                          {storageTypes.map((st: any) => (
+                                            <Badge key={st} variant="outline" className="text-[9px] h-4 px-1 bg-slate-50">{st}</Badge>
+                                          ))}
+                                        </div>
+
+                                        {/* Items list - view only */}
+                                        <div className="mt-2 pl-3 border-l-2 border-slate-200 dark:border-slate-800 space-y-1">
+                                          {outlet.items.map((item: any, iIdx: number) => {
+                                            const qty = parseFloat(item.weight || item.requestedQty || "0");
+                                            return (
+                                              <div key={item.id || iIdx} className="text-[11px] text-muted-foreground/80 flex items-center justify-between max-w-xl">
+                                                <span className="truncate pr-4">
+                                                  {item.itemCode} - {item.description || "No description"}
+                                                  {item.storageType && (
+                                                    <span className="text-[9px] ml-1.5 px-1 py-0.2 bg-slate-100 dark:bg-slate-800 rounded font-normal text-muted-foreground">
+                                                      {item.storageType}
+                                                    </span>
+                                                  )}
+                                                </span>
+                                                <span className="font-mono font-semibold shrink-0">{qty.toFixed(0)} Boxes</span>
+                                              </div>
+                                            );
                                           })}
-                                        >
-                                          <X className="h-3 w-3" />
-                                        </Button>
+                                        </div>
                                       </div>
-                                    ) : (
-                                      <div className="flex items-center justify-end gap-1">
-                                        {zoneTrucks.map((ta: any) => {
-                                          const veh = getVehicleInfo(ta.truckId);
-                                          return (
-                                            <Button 
-                                              key={ta.id} 
-                                              variant="outline" 
-                                              size="sm" 
-                                              className="h-7 px-2 text-[10px] border-dashed hover:border-primary hover:text-primary animate-none"
-                                              onClick={() => handleAssign(outlet, outletWeightT, ta.id)}
-                                            >
-                                              <Truck className="h-3 w-3 mr-1" />
-                                              {veh?.plateNumber || "Truck"} (T{ta.tripNumber})
-                                            </Button>
-                                          );
-                                        })}
-                                        <Select onValueChange={(truckAssignId) => handleAssign(outlet, outletWeightT, truckAssignId)}>
-                                          <SelectTrigger className="h-7 w-8 px-0 flex justify-center items-center border-dashed bg-transparent text-muted-foreground hover:text-primary">
-                                            <MoreHorizontal className="h-3 w-3" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {truckAssignments.map((ta: any) => {
-                                              const veh = getVehicleInfo(ta.truckId);
-                                              const zoneName = getZoneName(ta.zoneId);
-                                              const cap = parseFloat(veh?.capacity || "0");
-                                              const capCarton = parseInt(veh?.cartonCapacity || "0");
-                                              const used = parseFloat(ta.usedCapacity || "0");
-                                              const taItemCount = getTruckAssignedItemsCount(ta.id);
-                                              
-                                              const limit = cap < 100 ? cap * 1000 : cap;
-                                              const remainingBoxes = limit > 0 ? limit - used : null;
-                                              const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
-                                              const wouldOverflow = capCarton > 0 
-                                                ? (taItemCount + outlet.items.length > capCarton)
-                                                : (limit > 0 && used + outletWeightT > limit);
-
-                                              return (
-                                                <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
-                                                  {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"}) (Trip {ta.tripNumber})
-                                                  {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
-                                                  {wouldOverflow ? " ⚠" : ""}
-                                                </SelectItem>
-                                              );
+                                    </TableCell>
+                                    <TableCell className="text-right align-top pt-4">
+                                      <span className={`font-mono text-sm font-semibold ${outletWeightT > 100 ? "text-amber-600" : "text-foreground"}`}>
+                                        {outletWeightT.toFixed(0)} Boxes
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="text-right pr-4 align-top pt-4">
+                                      {isFullyCompleted ? (
+                                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                                          Completed
+                                        </Badge>
+                                      ) : assignedTruck ? (
+                                        <div className="flex items-center justify-end gap-2">
+                                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1">
+                                            <Truck className="h-3 w-3" />
+                                            {assignedVeh?.plateNumber || "Truck"}
+                                          </Badge>
+                                          <Button
+                                            variant="ghost" size="sm"
+                                            className="h-6 w-6 p-0 text-red-400 hover:text-red-600"
+                                            onClick={() => unassignOutletMutation.mutate({
+                                              outletCode: outlet.outletCode,
+                                              sheetId: boardSheetId!
                                             })}
-                                          </SelectContent>
-                                        </Select>
-                                      </div>
-                                    )}
-                                  </TableCell>
-                                </TableRow>
-
-                                {/* Per-Storage Type Assignment Rows */}
-                                {!assignedTruck && storageTypes.length > 0 && storageTypes.map((st: string) => {
-                                  // Calculate total weight of items for this storage type
-                                  const stItems = outlet.items.filter((i: any) => i.storageType === st);
-                                  const isStCompleted = stItems.length > 0 && stItems.every((i: any) => ["delivered", "damaged"].includes(i.delivery?.status));
-                                  const stWeightT = stItems.reduce((sum: number, item: any) => {
-                                    return sum + parseFloat(item.weight || item.requestedQty || "0");
-                                  }, 0);
-
-                                  const stAssignment = outletAssignments.find(
-                                    (oa: any) => oa.outletCode === outlet.outletCode && oa.storageType === st &&
-                                      truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId)
-                                  );
-                                  const stAssignedTruck = stAssignment
-                                    ? truckAssignments.find((ta: any) => ta.id === stAssignment.truckAssignmentId)
-                                    : null;
-                                  const stAssignedVeh = stAssignedTruck ? getVehicleInfo(stAssignedTruck.truckId) : null;
-
-                                  const isExpanded = expandedStorageTypes[`${outlet.outletCode}-${st}`];
-                                  return (
-                                    <React.Fragment key={st}>
-                                      <TableRow 
-                                        className="bg-muted/5 border-t-0 hover:bg-muted/10 cursor-pointer"
-                                        onClick={() => setExpandedStorageTypes(prev => ({...prev, [`${outlet.outletCode}-${st}`]: !prev[`${outlet.outletCode}-${st}`]}))}
-                                      >
-                                        <TableCell className="pl-12 text-xs text-muted-foreground border-t-0 py-2 flex items-center gap-1 hover:text-foreground transition-colors">
-                                          {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                          ↳ {st} Items ({stItems.length})
-                                        </TableCell>
-                                        <TableCell className="text-right text-xs font-mono text-muted-foreground border-t-0 py-2">
-                                          {stWeightT.toFixed(0)} Boxes
-                                        </TableCell>
-                                        <TableCell className="text-right pr-4 border-t-0 py-2">
-                                          {isStCompleted ? (
-                                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5">
-                                              <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
-                                              Completed
-                                            </Badge>
-                                          ) : stAssignedTruck ? (
-                                            <div className="flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
-                                              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 text-[10px] h-5">
-                                                <Truck className="h-2.5 w-2.5" />
-                                                {stAssignedVeh?.plateNumber || "Truck"} (Trip {stAssignedTruck.tripNumber})
-                                              </Badge>
+                                          >
+                                            <X className="h-3 w-3" />
+                                          </Button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-end gap-1">
+                                          {zoneTrucks.map((ta: any) => {
+                                            const veh = getVehicleInfo(ta.truckId);
+                                            return (
                                               <Button
-                                                variant="ghost" size="sm"
-                                                className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  unassignOutletMutation.mutate({
-                                                    outletCode: outlet.outletCode,
-                                                    sheetId: boardSheetId!,
-                                                    storageType: st
-                                                  } as any);
-                                                }}
+                                                key={ta.id}
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 px-2 text-[10px] border-dashed hover:border-primary hover:text-primary animate-none"
+                                                onClick={() => handleAssign(outlet, outletWeightT, ta.id)}
                                               >
-                                                <X className="h-3 w-3" />
+                                                <Truck className="h-3 w-3 mr-1" />
+                                                {veh?.plateNumber || "Truck"} (T{ta.tripNumber})
                                               </Button>
-                                            </div>
-                                          ) : (
-                                            <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
-                                              {zoneTrucks.map((ta: any) => {
+                                            );
+                                          })}
+                                          <Select onValueChange={(truckAssignId) => handleAssign(outlet, outletWeightT, truckAssignId)}>
+                                            <SelectTrigger className="h-7 w-8 px-0 flex justify-center items-center border-dashed bg-transparent text-muted-foreground hover:text-primary">
+                                              <MoreHorizontal className="h-3 w-3" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {truckAssignments.map((ta: any) => {
                                                 const veh = getVehicleInfo(ta.truckId);
+                                                const zoneName = getZoneName(ta.zoneId);
+                                                const cap = parseFloat(veh?.capacity || "0");
+                                                const capCarton = parseInt(veh?.cartonCapacity || "0");
+                                                const used = parseFloat(ta.usedCapacity || "0");
+                                                const taItemCount = getTruckAssignedItemsCount(ta.id);
+
+                                                const limit = cap < 100 ? cap * 1000 : cap;
+                                                const remainingBoxes = limit > 0 ? limit - used : null;
+                                                const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
+                                                const wouldOverflow = capCarton > 0
+                                                  ? (taItemCount + outlet.items.length > capCarton)
+                                                  : (limit > 0 && used + outletWeightT > limit);
+
                                                 return (
-                                                  <Button 
-                                                    key={ta.id} 
-                                                    variant="outline" 
-                                                    size="sm" 
-                                                    className="h-6 px-1.5 text-[10px] border-dashed hover:border-primary hover:text-primary animate-none"
-                                                    onClick={() => handleAssign(outlet, stWeightT, ta.id, st)}
-                                                  >
-                                                    <Truck className="h-2.5 w-2.5 mr-1" />
-                                                    {veh?.plateNumber || "Truck"} (T{ta.tripNumber})
-                                                  </Button>
+                                                  <SelectItem key={ta.id} value={ta.id} className={wouldOverflow ? "text-red-500" : ""}>
+                                                    {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"}) (Trip {ta.tripNumber})
+                                                    {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
+                                                    {wouldOverflow ? " ⚠" : ""}
+                                                  </SelectItem>
                                                 );
                                               })}
-                                              <Select onValueChange={(truckAssignId) => handleAssign(outlet, stWeightT, truckAssignId, st)}>
-                                                <SelectTrigger className="h-6 w-6 px-0 flex justify-center items-center border-dashed bg-transparent text-muted-foreground hover:text-primary ml-1">
-                                                  <MoreHorizontal className="h-2.5 w-2.5" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  {truckAssignments.map((ta: any) => {
-                                                    const veh = getVehicleInfo(ta.truckId);
-                                                    const zoneName = getZoneName(ta.zoneId);
-                                                    const cap = parseFloat(veh?.capacity || "0");
-                                                    const capCarton = parseInt(veh?.cartonCapacity || "0");
-                                                    const used = parseFloat(ta.usedCapacity || "0");
-                                                    const taItemCount = getTruckAssignedItemsCount(ta.id);
-                                                    
-                                                    const limit = cap < 100 ? cap * 1000 : cap;
-                                                    const remainingBoxes = limit > 0 ? limit - used : null;
-                                                    const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
-                                                    const wouldOverflow = capCarton > 0 
-                                                      ? (taItemCount + stItems.length > capCarton)
-                                                      : (limit > 0 && used + stWeightT > limit);
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
 
-                                                    return (
-                                                      <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
-                                                        {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"}) (Trip {ta.tripNumber})
-                                                        {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
-                                                        {wouldOverflow ? " ⚠" : ""}
-                                                      </SelectItem>
-                                                    );
-                                                  })}
-                                                </SelectContent>
-                                              </Select>
-                                            </div>
-                                          )}
-                                        </TableCell>
-                                      </TableRow>
-                                      
-                                      {isExpanded && stItems.map((item: any, itemIdx: number) => {
-                                        const boxCount = parseFloat(item.weight || item.requestedQty || "0");
-                                        
-                                        return (
-                                          <TableRow key={item.id || itemIdx} className="bg-muted/10 border-t-0">
-                                            <TableCell className="pl-16 py-1.5 text-[10px] text-muted-foreground/80 border-t-0">
-                                              {item.itemCode} - {item.description}
-                                            </TableCell>
-                                            <TableCell className="text-right text-[10px] font-mono text-muted-foreground/80 border-t-0 py-1.5">
-                                              {boxCount.toFixed(0)} Boxes
-                                            </TableCell>
-                                            <TableCell className="border-t-0 py-1.5">
-                                            </TableCell>
-                                          </TableRow>
-                                        );
-                                      })}
-                                    </React.Fragment>
-                                  );
-                                })}
-                              </React.Fragment>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    )}
+                                  {/* Per-Storage Type Assignment Rows */}
+                                  {!assignedTruck && storageTypes.length > 0 && storageTypes.map((st: string) => {
+                                    // Calculate total weight of items for this storage type
+                                    const stItems = outlet.items.filter((i: any) => i.storageType === st);
+                                    const isStCompleted = stItems.length > 0 && stItems.every((i: any) => ["delivered", "damaged"].includes(i.delivery?.status));
+                                    const stWeightT = stItems.reduce((sum: number, item: any) => {
+                                      return sum + parseFloat(item.weight || item.requestedQty || "0");
+                                    }, 0);
+
+                                    const stAssignment = outletAssignments.find(
+                                      (oa: any) => oa.outletCode === outlet.outletCode && oa.storageType === st &&
+                                        truckAssignments.some((ta: any) => ta.id === oa.truckAssignmentId)
+                                    );
+                                    const stAssignedTruck = stAssignment
+                                      ? truckAssignments.find((ta: any) => ta.id === stAssignment.truckAssignmentId)
+                                      : null;
+                                    const stAssignedVeh = stAssignedTruck ? getVehicleInfo(stAssignedTruck.truckId) : null;
+
+                                    const isExpanded = expandedStorageTypes[`${outlet.outletCode}-${st}`];
+                                    return (
+                                      <React.Fragment key={st}>
+                                        <TableRow
+                                          className="bg-muted/5 border-t-0 hover:bg-muted/10 cursor-pointer"
+                                          onClick={() => setExpandedStorageTypes(prev => ({ ...prev, [`${outlet.outletCode}-${st}`]: !prev[`${outlet.outletCode}-${st}`] }))}
+                                        >
+                                          <TableCell className="pl-12 text-xs text-muted-foreground border-t-0 py-2 flex items-center gap-1 hover:text-foreground transition-colors">
+                                            {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                            ↳ {st} Items ({stItems.length})
+                                          </TableCell>
+                                          <TableCell className="text-right text-xs font-mono text-muted-foreground border-t-0 py-2">
+                                            {stWeightT.toFixed(0)} Boxes
+                                          </TableCell>
+                                          <TableCell className="text-right pr-4 border-t-0 py-2">
+                                            {isStCompleted ? (
+                                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] h-5">
+                                                <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
+                                                Completed
+                                              </Badge>
+                                            ) : stAssignedTruck ? (
+                                              <div className="flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
+                                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 gap-1 text-[10px] h-5">
+                                                  <Truck className="h-2.5 w-2.5" />
+                                                  {stAssignedVeh?.plateNumber || "Truck"} (Trip {stAssignedTruck.tripNumber})
+                                                </Badge>
+                                                <Button
+                                                  variant="ghost" size="sm"
+                                                  className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    unassignOutletMutation.mutate({
+                                                      outletCode: outlet.outletCode,
+                                                      sheetId: boardSheetId!,
+                                                      storageType: st
+                                                    } as any);
+                                                  }}
+                                                >
+                                                  <X className="h-3 w-3" />
+                                                </Button>
+                                              </div>
+                                            ) : (
+                                              <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                                                {zoneTrucks.map((ta: any) => {
+                                                  const veh = getVehicleInfo(ta.truckId);
+                                                  return (
+                                                    <Button
+                                                      key={ta.id}
+                                                      variant="outline"
+                                                      size="sm"
+                                                      className="h-6 px-1.5 text-[10px] border-dashed hover:border-primary hover:text-primary animate-none"
+                                                      onClick={() => handleAssign(outlet, stWeightT, ta.id, st)}
+                                                    >
+                                                      <Truck className="h-2.5 w-2.5 mr-1" />
+                                                      {veh?.plateNumber || "Truck"} (T{ta.tripNumber})
+                                                    </Button>
+                                                  );
+                                                })}
+                                                <Select onValueChange={(truckAssignId) => handleAssign(outlet, stWeightT, truckAssignId, st)}>
+                                                  <SelectTrigger className="h-6 w-6 px-0 flex justify-center items-center border-dashed bg-transparent text-muted-foreground hover:text-primary ml-1">
+                                                    <MoreHorizontal className="h-2.5 w-2.5" />
+                                                  </SelectTrigger>
+                                                  <SelectContent>
+                                                    {truckAssignments.map((ta: any) => {
+                                                      const veh = getVehicleInfo(ta.truckId);
+                                                      const zoneName = getZoneName(ta.zoneId);
+                                                      const cap = parseFloat(veh?.capacity || "0");
+                                                      const capCarton = parseInt(veh?.cartonCapacity || "0");
+                                                      const used = parseFloat(ta.usedCapacity || "0");
+                                                      const taItemCount = getTruckAssignedItemsCount(ta.id);
+
+                                                      const limit = cap < 100 ? cap * 1000 : cap;
+                                                      const remainingBoxes = limit > 0 ? limit - used : null;
+                                                      const remainingCartons = capCarton > 0 ? capCarton - taItemCount : null;
+                                                      const wouldOverflow = capCarton > 0
+                                                        ? (taItemCount + stItems.length > capCarton)
+                                                        : (limit > 0 && used + stWeightT > limit);
+
+                                                      return (
+                                                        <SelectItem key={ta.id} value={ta.id} className={`text-xs ${wouldOverflow ? "text-red-500" : ""}`}>
+                                                          {zoneName} - {veh?.name || "Truck"} ({veh?.plateNumber || "N/A"}) (Trip {ta.tripNumber})
+                                                          {remainingCartons !== null ? ` - ${remainingCartons} boxes free` : remainingBoxes !== null ? ` - ${remainingBoxes.toFixed(0)} boxes free` : ""}
+                                                          {wouldOverflow ? " ⚠" : ""}
+                                                        </SelectItem>
+                                                      );
+                                                    })}
+                                                  </SelectContent>
+                                                </Select>
+                                              </div>
+                                            )}
+                                          </TableCell>
+                                        </TableRow>
+
+                                        {isExpanded && stItems.map((item: any, itemIdx: number) => {
+                                          const boxCount = parseFloat(item.weight || item.requestedQty || "0");
+
+                                          return (
+                                            <TableRow key={item.id || itemIdx} className="bg-muted/10 border-t-0">
+                                              <TableCell className="pl-16 py-1.5 text-[10px] text-muted-foreground/80 border-t-0">
+                                                {item.itemCode} - {item.description}
+                                              </TableCell>
+                                              <TableCell className="text-right text-[10px] font-mono text-muted-foreground/80 border-t-0 py-1.5">
+                                                {boxCount.toFixed(0)} Boxes
+                                              </TableCell>
+                                              <TableCell className="border-t-0 py-1.5">
+                                              </TableCell>
+                                            </TableRow>
+                                          );
+                                        })}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </React.Fragment>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      )}
                     </CardContent>
                   )}
                 </Card>
@@ -4571,7 +4584,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
   const { data: drivers = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
 
   const queryKey = ["/api/dispatch/pending-advanced", { startDate, endDate, routeId: routeFilter, outletId: outletFilter, driverId: driverFilter, storageType: storageTypeFilter }];
-  
+
   const { data: pendingDeliveries = [], isLoading } = useQuery<any[]>({
     queryKey,
     queryFn: async () => {
@@ -4589,31 +4602,31 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
   const allStorageTypes = new Set<string>();
   const groupedData: { zoneName: string; outlets: any[] }[] = [];
-  
+
   // Group by zoneName -> outletName -> items
   const routeMap = new Map<string, any>();
-  
+
   pendingDeliveries.forEach((item: any) => {
     if (item.storageType) allStorageTypes.add(item.storageType);
-    
+
     if (!routeMap.has(item.zoneName)) {
       routeMap.set(item.zoneName, { zoneName: item.zoneName, outletsMap: new Map() });
     }
-    
+
     const r = routeMap.get(item.zoneName);
     const outletKey = `${item.outletCode}-${item.outletName}`;
-    
+
     if (!r.outletsMap.has(outletKey)) {
-      r.outletsMap.set(outletKey, { 
-        outletName: item.outletName, 
-        outletCode: item.outletCode, 
-        items: [] 
+      r.outletsMap.set(outletKey, {
+        outletName: item.outletName,
+        outletCode: item.outletCode,
+        items: []
       });
     }
-    
+
     r.outletsMap.get(outletKey).items.push(item);
   });
-  
+
   routeMap.forEach(r => {
     groupedData.push({
       zoneName: r.zoneName,
@@ -4642,7 +4655,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
               </Button>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-4 pt-4 border-t">
             <div className="space-y-1.5">
               <Label className="text-xs">Start Date</Label>
@@ -4694,7 +4707,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
             </div>
           </div>
         </CardHeader>
-        
+
         <CardContent className="p-0">
           {isLoading ? (
             <div className="p-12 text-center text-muted-foreground flex items-center justify-center">
@@ -4725,7 +4738,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                 <tbody className="divide-y divide-slate-200">
                   {groupedData.map(zone => {
                     const isRouteExpanded = expandedRoutes[zone.zoneName] !== false; // Default true
-                    
+
                     return (
                       <React.Fragment key={zone.zoneName}>
                         <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneName)}>
@@ -4770,7 +4783,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                                 const delQty = parseFloat(p.deliveredQty || p.totalDelivered || "0");
                                 let remQty = parseFloat(p.remainingQty || p.remaining || "0");
                                 if (remQty === 0 && !p.remainingQty && !p.remaining) remQty = reqQty - delQty;
-                                
+
                                 return (
                                   <tr key={p.id} className="hover:bg-slate-50 text-slate-600 bg-white">
                                     <td className="py-1.5 px-3 border-r pl-12 text-xs text-muted-foreground">
@@ -4865,7 +4878,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   const [driverFilter, setDriverFilter] = useState("all");
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
-  const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; pods: {url: string, date: string}[] }>({ isOpen: false, title: "", pods: [] });
+  const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; pods: { url: string, date: string }[] }>({ isOpen: false, title: "", pods: [] });
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [includeAttachments, setIncludeAttachments] = useState(true);
   const { toast } = useToast();
@@ -4947,23 +4960,23 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
 
   // Group by Route -> Outlet
   const groupedMap = new Map<string, { zoneId: string; zoneName: string; outlets: Map<string, { outletId: string; outletCode: string; outletName: string; items: any[]; pods: Map<string, string> }> }>();
-  
+
   filteredDeliveries.forEach(d => {
     const routeId = d.routeId || "unassigned";
     const routeName = d.zoneName || "Unassigned Route";
     const outletId = d.outletId || d.outletCode || "unassigned";
-    
+
     if (!groupedMap.has(routeId)) {
       groupedMap.set(routeId, { zoneId: routeId, zoneName: routeName, outlets: new Map() });
     }
     const routeGroup = groupedMap.get(routeId)!;
-    
+
     if (!routeGroup.outlets.has(outletId)) {
       routeGroup.outlets.set(outletId, { outletId: d.outletId, outletCode: d.outletCode, outletName: d.outletName || "Unassigned", items: [], pods: new Map() });
     }
     const outletGroup = routeGroup.outlets.get(outletId)!;
     outletGroup.items.push(d);
-    
+
     if (d.podUrl) {
       d.podUrl.split(",").forEach((p: string) => {
         const trimmed = p.trim();
@@ -4983,26 +4996,35 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   });
 
   const groupedData = Array.from(groupedMap.values()).map(r => ({ ...r, outlets: Array.from(r.outlets.values()) }));
-  
+
   const handlePrint = () => window.print();
-  
-  const handleExport = () => {
+
+  const handleExport = async () => {
     if (!filteredDeliveries.length) return;
-    const ws = XLSX.utils.json_to_sheet(filteredDeliveries.map(d => ({
-      Date: safeFormatDate(d.deliveredAt, "dd/MM/yyyy HH:mm"),
-      Route: d.zoneName,
-      Outlet: d.outletName,
-      Code: d.outletCode,
-      ItemCode: d.itemCode,
-      Description: d.description,
-      RequestedQty: d.requestedQty,
-      DeliveredQty: d.deliveredQty,
-      Driver: d.driverName,
-      Status: d.status
-    })));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Completed Deliveries");
-    XLSX.writeFile(wb, `Completed_Deliveries_${startDate}_to_${endDate}.xlsx`);
+    const formattedData = filteredDeliveries.map((d, idx) => ({
+      "SN": idx + 1,
+      "Date": safeFormatDate(d.deliveredAt || d.sheetDate, "dd/MM/yyyy"),
+      "Type of Goods": d.storageType || "Frozen",
+      "Brand": d.brandName || "General",
+      "Route": d.zoneName,
+      "Truck No": d.truckNo || "Unassigned",
+      "Outlet Code": d.outletCode,
+      "Outlet Name": d.outletName,
+      "TO / GDN": d.toNo || "-",
+      "Item Code": d.itemCode,
+      "Description": d.description,
+      "UOM": d.uom || "CT",
+      "Requested Qty": Number(d.requestedQty || 0),
+      "Delivered Qty": Number(d.deliveredQty || 0),
+      "Cases Handled": Number(d.deliveredQty || d.requestedQty || 0),
+      "Reporting Time [1]": d.reportingTime || "10:45 AM",
+      "Depart Time [2]": d.departTime || "11:15 AM",
+      "Drop Start Time [3]": d.deliveryStartTime ? safeFormatDate(d.deliveryStartTime, "hh:mm a") : "01:20 PM",
+      "Drop End Time [4]": d.deliveryEndTime ? safeFormatDate(d.deliveryEndTime, "hh:mm a") : (d.deliveredAt ? safeFormatDate(d.deliveredAt, "hh:mm a") : "01:35 PM"),
+      "Driver": d.driverName,
+      "Status": d.status
+    }));
+    await exportCompletedDeliveriesExcel(formattedData, `Completed_Deliveries_${startDate}_to_${endDate}`);
   };
 
   return (
@@ -5037,7 +5059,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
             <Button variant="outline" size="sm" onClick={handlePrint} className="print:hidden"><Printer className="h-4 w-4 mr-2" /> Print</Button>
           </div>
         </CardHeader>
-        
+
         <div className="px-6 pb-4 border-b space-y-4 print:hidden">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div className="space-y-1">
@@ -5164,16 +5186,16 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                     })()}
                                     <div className="flex-1" />
                                     {outlet.pods.size > 0 && (
-                                      <Button 
-                                        variant="outline" 
-                                        size="sm" 
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
                                         className="h-6 text-[10px] px-2 print:hidden flex-shrink-0 whitespace-nowrap"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setViewPodsModal({ 
-                                            isOpen: true, 
-                                            title: outlet.outletName, 
-                                            pods: Array.from(outlet.pods.entries()).map(([url, date]) => ({ url, date: date as string })) 
+                                          setViewPodsModal({
+                                            isOpen: true,
+                                            title: outlet.outletName,
+                                            pods: Array.from(outlet.pods.entries()).map(([url, date]) => ({ url, date: date as string }))
                                           });
                                         }}
                                       >
@@ -5290,7 +5312,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
           )}
         </CardContent>
       </Card>
-      
+
       <Dialog open={viewPodsModal.isOpen} onOpenChange={(v) => setViewPodsModal(prev => ({ ...prev, isOpen: v }))}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -5304,7 +5326,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
               const url = pod.url.replace(/\\/g, '/');
               const srcUrl = (url.startsWith('http') || url.startsWith('data:') || url.startsWith('/')) ? url : `/${url}`;
               const dateStr = safeFormatDate(pod.date, "dd MMM yyyy, HH:mm") || "Unknown Date";
-              
+
               return (
                 <div key={idx} className="border rounded-md overflow-hidden bg-slate-50 flex flex-col min-h-[300px]">
                   <div className="p-2 bg-slate-100 border-b text-xs font-medium text-slate-600 text-center flex items-center justify-center gap-2">
@@ -5313,10 +5335,10 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                   </div>
                   <div className="flex-1 flex items-center justify-center p-2">
                     {url.match(/\.(jpeg|jpg|gif|png|webp)$/i) || url.startsWith("data:image") ? (
-                      <img 
-                        src={encodeURI(srcUrl)} 
-                        alt={`Attachment ${idx + 1}`} 
-                        className="w-full h-auto object-contain max-h-[400px] cursor-pointer hover:opacity-90 transition-opacity" 
+                      <img
+                        src={encodeURI(srcUrl)}
+                        alt={`Attachment ${idx + 1}`}
+                        className="w-full h-auto object-contain max-h-[400px] cursor-pointer hover:opacity-90 transition-opacity"
                         onClick={() => setFullScreenImage(encodeURI(srcUrl))}
                       />
                     ) : (
@@ -5336,12 +5358,12 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
       </Dialog>
 
       {fullScreenImage && (
-        <div 
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 cursor-pointer backdrop-blur-sm" 
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 cursor-pointer backdrop-blur-sm"
           onClick={() => setFullScreenImage(null)}
         >
-          <button 
-            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors bg-black/50 p-2 rounded-full" 
+          <button
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors bg-black/50 p-2 rounded-full"
             onClick={(e) => {
               e.stopPropagation();
               setFullScreenImage(null);
@@ -5349,9 +5371,9 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
           >
             <X className="h-6 w-6" />
           </button>
-          <img 
-            src={fullScreenImage} 
-            className="max-w-full max-h-[90vh] object-contain cursor-default rounded-md shadow-2xl" 
+          <img
+            src={fullScreenImage}
+            className="max-w-full max-h-[90vh] object-contain cursor-default rounded-md shadow-2xl"
             onClick={(e) => e.stopPropagation()}
             alt="Full screen attachment"
           />

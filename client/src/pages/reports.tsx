@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart3, Users, Truck, ShoppingCart, Receipt, CreditCard, TrendingUp, Calendar, Building2, AlertTriangle, PackageX, Package, Scale, Landmark, Wallet, Briefcase, Printer, Wrench } from "lucide-react";
+import { BarChart3, Users, Truck, ShoppingCart, Receipt, CreditCard, TrendingUp, Calendar, Building2, AlertTriangle, PackageX, Package, Scale, Landmark, Wallet, Briefcase, Printer, Wrench, FileSpreadsheet } from "lucide-react";
+import CustomerReportView from "@/components/customer-report-view";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import type { Shop, Branch, Sale, Purchase, Customer, Supplier, Product, Employee, Project } from "@shared/schema";
@@ -248,6 +249,7 @@ export default function Reports() {
     { id: "employee-work", label: "Employee Work Report", icon: Users },
     { id: "driver-attendance", label: "Driver Attendance Report", icon: Users },
     { id: "driver-delivery", label: "Driver Delivery Report", icon: Truck },
+    { id: "customer-activity-utilization", label: "Customer Activity & Utilization", icon: FileSpreadsheet },
     { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck },
     { id: "trip-profitability", label: "Trip Profitability", icon: TrendingUp },
     { id: "vehicle-profitability", label: "Vehicle Profitability", icon: Truck },
@@ -1692,6 +1694,7 @@ export default function Reports() {
       case "employee-work": return renderEmployeeWorkReport();
       case "driver-attendance": return renderDriverAttendanceReport();
       case "driver-delivery": return renderDriverDeliveryReport();
+      case "customer-activity-utilization": return <CustomerReportView />;
       case "logistics-kpi": return renderLogisticsKPIs();
       case "trip-profitability": return renderTripProfitability();
       case "vehicle-profitability": return renderVehicleProfitability();
