@@ -50,18 +50,20 @@ stages {
                 cp -r dist dist_backup
             fi
 
-            # SAFE GIT PULL (no data loss)
-            echo 'Pulling latest code safely...'
-            git stash push -m 'jenkins-auto-stash' || true
+            # SAFE GIT SYNC
+            echo 'Clearing any previous git conflicts or rebases...'
+            git rebase --abort 2>/dev/null || true
+            git merge --abort 2>/dev/null || true
 
-            git pull --rebase origin $BRANCH || {
-                echo 'Git pull failed (possible conflict)'
-                exit 1
-            }
+            echo 'Resetting tracked files to clean state...'
+            git checkout -f HEAD 2>/dev/null || true
+            git reset --hard HEAD || true
 
-            git stash pop || {
-                echo 'Stash apply had conflicts (manual fix may be needed)'
-            }
+            echo 'Fetching latest code safely...'
+            git fetch origin $BRANCH
+
+            echo "Syncing code to origin/$BRANCH (untracked .env and uploads/ are preserved)..."
+            git reset --hard origin/$BRANCH
 
             echo 'Installing dependencies...'
             npm ci || npm install
