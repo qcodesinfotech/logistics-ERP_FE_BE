@@ -40,17 +40,19 @@ pipeline {
 
                 echo "Deployment started..."
  
-                sh """
+                sh '''
 
-                    ssh -o StrictHostKeyChecking=no "$SERVER" 'bash -s' <<'REMOTE_SCRIPT'
- 
+                    ssh -o StrictHostKeyChecking=no "$SERVER" \
+
+                    "PROJECT_PATH='$PROJECT_PATH' BRANCH='$BRANCH' APP_NAME='$APP_NAME' bash -s" <<'EOF'
+
                     set -e
  
-                    echo '============================='
+                    echo "============================="
 
-                    echo ' LOGISTICS ERP DEPLOY START'
+                    echo " LOGISTICS ERP DEPLOY START"
 
-                    echo '============================='
+                    echo "============================="
  
                     cd "$PROJECT_PATH"
  
@@ -90,14 +92,10 @@ pipeline {
 
                     git reset --hard HEAD
  
-                    # Fetch latest code
-
                     echo "Fetching latest code safely..."
 
                     git fetch origin "$BRANCH"
  
-                    # Sync to latest branch
-
                     echo "Syncing code to origin/$BRANCH..."
 
                     git reset --hard "origin/$BRANCH"
@@ -128,15 +126,15 @@ pipeline {
  
                     pm2 save
  
-                    echo '============================='
+                    echo "============================="
 
-                    echo ' DEPLOYMENT SUCCESS'
+                    echo " DEPLOYMENT SUCCESS"
 
-                    echo '============================='
+                    echo "============================="
  
-                    REMOTE_SCRIPT
+                    EOF
 
-                """
+                '''
 
             }
 
@@ -150,9 +148,11 @@ pipeline {
 
             echo "Build failed! Starting rollback..."
  
-            sh """
+            sh '''
 
-                ssh -o StrictHostKeyChecking=no "$SERVER" 'bash -s' <<'REMOTE_ROLLBACK'
+                ssh -o StrictHostKeyChecking=no "$SERVER" \
+
+                "PROJECT_PATH='$PROJECT_PATH' APP_NAME='$APP_NAME' bash -s" <<'EOF'
  
                 cd "$PROJECT_PATH"
  
@@ -176,9 +176,9 @@ pipeline {
  
                 fi
  
-                REMOTE_ROLLBACK
+                EOF
 
-            """
+            '''
 
         }
  
