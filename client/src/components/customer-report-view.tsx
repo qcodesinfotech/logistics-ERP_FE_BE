@@ -17,12 +17,13 @@ import { Badge } from "@/components/ui/badge";
 import { 
   FileSpreadsheet, Download, Printer, RefreshCw, Search, Calendar, 
   Truck, CheckCircle2, AlertTriangle, Building2, TrendingUp, Clock, Package, Filter,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Gauge, Thermometer
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { exportCustomerReportExcel } from "@/lib/customer-excel-export";
 
 export default function CustomerReportView() {
+  const [dateMode, setDateMode] = useState<"single" | "range">("single");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [selectedBrand, setSelectedBrand] = useState<string>("all");
@@ -207,26 +208,91 @@ export default function CustomerReportView() {
       {/* Filter Toolbar */}
       <Card className="print:hidden border-slate-200 dark:border-slate-800 shadow-sm">
         <CardContent className="pt-5 pb-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground">Start Date</Label>
-              <Input 
-                type="date" 
-                value={startDate} 
-                onChange={e => setStartDate(e.target.value)} 
-                className="h-8 text-xs"
-              />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
+            <div className="sm:col-span-2 lg:col-span-4 space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground">
+                  {dateMode === "single" ? "Single Day Selection" : "Date Range"}
+                </Label>
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded p-0.5 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateMode("single");
+                      if (startDate) setEndDate(startDate);
+                    }}
+                    className={`px-2 py-0.5 rounded font-medium transition-colors ${dateMode === "single" ? "bg-white dark:bg-slate-700 shadow-xs text-primary font-bold" : "text-muted-foreground"}`}
+                  >
+                    Single Day
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDateMode("range")}
+                    className={`px-2 py-0.5 rounded font-medium transition-colors ${dateMode === "range" ? "bg-white dark:bg-slate-700 shadow-xs text-primary font-bold" : "text-muted-foreground"}`}
+                  >
+                    Date Range
+                  </button>
+                </div>
+              </div>
+
+              {dateMode === "single" ? (
+                <div className="flex gap-1.5 items-center">
+                  <Input 
+                    type="date" 
+                    value={startDate} 
+                    onChange={e => {
+                      setStartDate(e.target.value);
+                      setEndDate(e.target.value);
+                    }} 
+                    className="h-8 text-xs flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[11px] px-2"
+                    onClick={() => {
+                      const today = new Date().toISOString().split("T")[0];
+                      setStartDate(today);
+                      setEndDate(today);
+                    }}
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[11px] px-2"
+                    onClick={() => {
+                      setStartDate("2026-09-01");
+                      setEndDate("2026-09-01");
+                    }}
+                  >
+                    1-Sep
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Input 
+                    type="date" 
+                    value={startDate} 
+                    onChange={e => setStartDate(e.target.value)} 
+                    placeholder="Start"
+                    className="h-8 text-xs"
+                  />
+                  <Input 
+                    type="date" 
+                    value={endDate} 
+                    onChange={e => setEndDate(e.target.value)} 
+                    placeholder="End"
+                    className="h-8 text-xs"
+                  />
+                </div>
+              )}
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground">End Date</Label>
-              <Input 
-                type="date" 
-                value={endDate} 
-                onChange={e => setEndDate(e.target.value)} 
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
+
+            <div className="sm:col-span-1 lg:col-span-2 space-y-1">
               <Label className="text-xs font-semibold text-muted-foreground">Brand</Label>
               <Select value={selectedBrand} onValueChange={setSelectedBrand}>
                 <SelectTrigger className="h-8 text-xs">
@@ -240,7 +306,8 @@ export default function CustomerReportView() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+
+            <div className="sm:col-span-1 lg:col-span-2 space-y-1">
               <Label className="text-xs font-semibold text-muted-foreground">Type of Goods</Label>
               <Select value={selectedStorageType} onValueChange={setSelectedStorageType}>
                 <SelectTrigger className="h-8 text-xs">
@@ -254,7 +321,8 @@ export default function CustomerReportView() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
+
+            <div className="sm:col-span-1 lg:col-span-2 space-y-1">
               <Label className="text-xs font-semibold text-muted-foreground">Truck No</Label>
               <Select value={selectedTruck} onValueChange={setSelectedTruck}>
                 <SelectTrigger className="h-8 text-xs">
@@ -268,7 +336,8 @@ export default function CustomerReportView() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex gap-2">
+
+            <div className="sm:col-span-1 lg:col-span-2 flex gap-2">
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -280,7 +349,7 @@ export default function CustomerReportView() {
                   setSelectedTruck("all");
                   setSearchQuery("");
                 }}
-                className="h-8 text-xs text-muted-foreground"
+                className="h-8 text-xs text-muted-foreground w-full"
               >
                 Reset Filters
               </Button>
@@ -290,7 +359,7 @@ export default function CustomerReportView() {
       </Card>
 
       {/* KPI Cards Header */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
           <CardContent className="pt-4 pb-3">
             <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -310,7 +379,7 @@ export default function CustomerReportView() {
             <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
               {Math.round(totalCases).toLocaleString()} <span className="text-xs font-normal text-slate-500">CS</span>
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Qty handled & delivered</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Qty delivered</div>
           </CardContent>
         </Card>
         <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
@@ -321,7 +390,7 @@ export default function CustomerReportView() {
             <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
               {avgUtil}%
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Target: 100% (10h/day)</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Target: 100% (10h)</div>
           </CardContent>
         </Card>
         <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
@@ -332,7 +401,7 @@ export default function CustomerReportView() {
             <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
               {avgCarton}%
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Target: 95% capacity</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Target: 95% cap</div>
           </CardContent>
         </Card>
         <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
@@ -343,7 +412,18 @@ export default function CustomerReportView() {
             <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">
               {utilizationRecords.length}
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Truck daily dispatches</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Truck dispatches</div>
+          </CardContent>
+        </Card>
+        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
+          <CardContent className="pt-4 pb-3">
+            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <Gauge className="h-3.5 w-3.5 text-cyan-600" /> Total KM Used
+            </div>
+            <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">
+              {(reportData?.totalKmUsed || 0).toLocaleString()} <span className="text-xs font-normal text-slate-500">KM</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Fleet travel distance</div>
           </CardContent>
         </Card>
         <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
@@ -441,6 +521,7 @@ export default function CustomerReportView() {
                           <TableHead className="font-bold">Vehicle Type</TableHead>
                           <TableHead className="text-center font-bold">No of Rest.</TableHead>
                           <TableHead className="text-right font-bold text-emerald-700 dark:text-emerald-400">Cases Handled</TableHead>
+                          <TableHead className="text-center font-bold">Temp</TableHead>
                           <TableHead className="font-bold text-center bg-blue-50/50 dark:bg-blue-950/20">ReportingTime [1]</TableHead>
                           <TableHead className="font-bold text-center bg-indigo-50/50 dark:bg-indigo-950/20">DepartTime [2]</TableHead>
                           <TableHead className="font-bold text-center bg-emerald-50/50 dark:bg-emerald-950/20">DropStartTime [3]</TableHead>
@@ -490,11 +571,24 @@ export default function CustomerReportView() {
                             <TableCell className="text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                               {a.cases} CS
                             </TableCell>
+                            <TableCell className="text-center font-mono">
+                              {a.temperature && a.temperature !== "-" ? (
+                                <Badge variant="outline" className="text-[11px] font-mono border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+                                  <Thermometer className="h-3 w-3 mr-1" />
+                                  {a.temperature}°C
+                                </Badge>
+                              ) : (
+                                <span className="text-slate-400">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-center font-mono text-slate-600 dark:text-slate-300 bg-blue-50/20 dark:bg-blue-950/10 whitespace-nowrap">
                               {a.reportingTime}
                             </TableCell>
                             <TableCell className="text-center font-mono text-slate-600 dark:text-slate-300 bg-indigo-50/20 dark:bg-indigo-950/10 whitespace-nowrap">
-                              {a.departTime}
+                              <div>{a.departTime}</div>
+                              {a.loadingDurationMinutes !== null && a.loadingDurationMinutes !== undefined && (
+                                <div className="text-[10px] text-muted-foreground font-sans">({a.loadingDurationMinutes}m load)</div>
+                              )}
                             </TableCell>
                             <TableCell className="text-center font-mono text-emerald-700 dark:text-emerald-300 font-medium bg-emerald-50/20 dark:bg-emerald-950/10 whitespace-nowrap">
                               {a.dropStartTime}
@@ -713,6 +807,9 @@ export default function CustomerReportView() {
                       <TableHead className="text-right font-bold">Actual (Hrs)</TableHead>
                       <TableHead className="text-center font-bold bg-amber-50/50 dark:bg-amber-950/20">Utilization %</TableHead>
                       <TableHead className="text-center font-bold bg-indigo-50/50 dark:bg-indigo-950/20">Carton %</TableHead>
+                      <TableHead className="text-right font-bold">Opening KM</TableHead>
+                      <TableHead className="text-right font-bold">Closing KM</TableHead>
+                      <TableHead className="text-right font-bold text-cyan-600 dark:text-cyan-400">Distance (KM)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody className="text-xs font-mono">
@@ -762,6 +859,15 @@ export default function CustomerReportView() {
                           <span className={`px-2 py-0.5 rounded text-[11px] ${u.cartonPercent >= 85 ? 'text-emerald-700 bg-emerald-100 dark:bg-emerald-950' : 'text-indigo-700 bg-indigo-100 dark:bg-indigo-950'}`}>
                             {u.cartonPercent}%
                           </span>
+                        </TableCell>
+                        <TableCell className="text-right text-slate-600 dark:text-slate-400">
+                          {u.openingKm && u.openingKm !== "-" ? Number(u.openingKm).toLocaleString() : "-"}
+                        </TableCell>
+                        <TableCell className="text-right text-slate-600 dark:text-slate-400">
+                          {u.closingKm && u.closingKm !== "-" ? Number(u.closingKm).toLocaleString() : "-"}
+                        </TableCell>
+                        <TableCell className="text-right font-bold text-cyan-600 dark:text-cyan-400">
+                          {u.kmRun ? `${Number(u.kmRun).toLocaleString()} KM` : "-"}
                         </TableCell>
                       </TableRow>
                     ))}

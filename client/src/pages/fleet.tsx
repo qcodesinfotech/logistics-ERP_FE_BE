@@ -36,6 +36,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
 import { CurrencyDisplay } from "@/components/currency-display";
 import { MetricCard } from "@/components/metric-card";
@@ -47,6 +48,12 @@ const vehicleSchema = z.object({
   type: z.enum(["owned", "outsourced"]),
   capacity: z.string().optional(),
   cartonCapacity: z.coerce.number().optional(),
+  typeCapacities: z.object({
+    FROZEN: z.coerce.number().optional(),
+    DRY: z.coerce.number().optional(),
+    CHILLED: z.coerce.number().optional(),
+    PACKAGING: z.coerce.number().optional(),
+  }).optional().default({}),
   storageType: z.string().optional(),
   photos: z.array(z.string()).default([]),
   chassisNumber: z.string().optional(),
@@ -108,6 +115,12 @@ export default function FleetPage() {
       type: "owned",
       capacity: "",
       cartonCapacity: 0,
+      typeCapacities: {
+        FROZEN: 0,
+        DRY: 0,
+        CHILLED: 0,
+        PACKAGING: 0,
+      },
       storageType: "",
       photos: [],
       chassisNumber: "",
@@ -291,6 +304,12 @@ export default function FleetPage() {
       type: vehicle.type as any,
       capacity: vehicle.capacity || "",
       cartonCapacity: vehicle.cartonCapacity || 0,
+      typeCapacities: {
+        FROZEN: (vehicle.typeCapacities as any)?.FROZEN || 0,
+        DRY: (vehicle.typeCapacities as any)?.DRY || 0,
+        CHILLED: (vehicle.typeCapacities as any)?.CHILLED || 0,
+        PACKAGING: (vehicle.typeCapacities as any)?.PACKAGING || 0,
+      },
       storageType: vehicle.storageType || "",
       photos: vehicle.photos || [],
       documents: vehicle.documents || [],
@@ -485,7 +504,18 @@ export default function FleetPage() {
                               <div className="text-[10px] text-muted-foreground font-medium mt-0.5">{vehicle.storageType}</div>
                             )}
                           </TableCell>
-                          <TableCell className="text-xs">{vehicle.cartonCapacity ? `${vehicle.cartonCapacity} Boxes` : "N/A"}</TableCell>
+                          <TableCell className="text-xs">
+                            <div className="font-semibold">{vehicle.cartonCapacity ? `${vehicle.cartonCapacity} Boxes` : "N/A"}</div>
+                            {vehicle.typeCapacities && typeof vehicle.typeCapacities === "object" && Object.keys(vehicle.typeCapacities).length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1 max-w-[160px]">
+                                {Object.entries(vehicle.typeCapacities as Record<string, number>).map(([type, cap]) => Number(cap) > 0 && (
+                                  <span key={type} className="px-1.5 py-0.2 rounded text-[9px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
+                                    {type.slice(0, 4)}: {cap}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <div>{getZoneName(vehicle.currentZoneId)}</div>
                             {vehicle.assignedBrandId && <div className="text-xs text-muted-foreground">{getBrandName(vehicle.assignedBrandId)}</div>}
@@ -825,6 +855,67 @@ export default function FleetPage() {
                     </FormItem>
                   )}
                 />
+
+                <div className="col-span-full space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      Capacity by Cargo Type (Carton Boxes)
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Define specific carrying capacities for FROZEN, DRY, CHILLED, and PACKAGING goods.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <FormField
+                      control={vehicleForm.control}
+                      name="typeCapacities.FROZEN"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[11px] text-muted-foreground font-medium">Frozen</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="e.g. 280" {...field} className="h-8 text-xs font-mono" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={vehicleForm.control}
+                      name="typeCapacities.DRY"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[11px] text-muted-foreground font-medium">Dry</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="e.g. 350" {...field} className="h-8 text-xs font-mono" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={vehicleForm.control}
+                      name="typeCapacities.CHILLED"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[11px] text-muted-foreground font-medium">Chilled</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="e.g. 300" {...field} className="h-8 text-xs font-mono" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={vehicleForm.control}
+                      name="typeCapacities.PACKAGING"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[11px] text-muted-foreground font-medium">Packaging</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="e.g. 420" {...field} className="h-8 text-xs font-mono" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
               </div>
 
               {vehicleForm.watch("type") === "owned" && (

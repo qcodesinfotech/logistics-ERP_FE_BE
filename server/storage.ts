@@ -618,7 +618,8 @@ export interface IStorage {
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
   getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
   getCompletedDeliveries(startDate?: string, endDate?: string): Promise<any[]>;
-  getActivityUtilizationReport(options?: { startDate?: string; endDate?: string; brandId?: string; truckNo?: string; storageType?: string }): Promise<any>;
+  getActivityUtilizationReport(options?: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string }): Promise<any>;
+  getTruckLastClosingKm(truckId: string): Promise<number>;
 
   // Logistics Fleet Advanced
   getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]>;
@@ -8263,11 +8264,15 @@ export class DatabaseStorage implements IStorage {
     // Filter for completed deliveries based on status or deliveredAt
     conditions.push(sql`${dispatchDeliveries.status} != 'pending'`);
     
-    if (startDate) {
-      conditions.push(sql`${dispatchSheets.date} >= ${startDate}`);
-    }
-    if (endDate) {
-      conditions.push(sql`${dispatchSheets.date} <= ${endDate}`);
+    if (startDate && endDate && startDate === endDate) {
+      conditions.push(sql`(${dispatchSheets.date}::date = ${startDate}::date OR to_char(${dispatchSheets.date}, 'YYYY-MM-DD') = ${startDate} OR ${dispatchSheets.fileName} ILIKE ${'%' + startDate + '%'})`);
+    } else {
+      if (startDate) {
+        conditions.push(sql`${dispatchSheets.date}::date >= ${startDate}::date`);
+      }
+      if (endDate) {
+        conditions.push(sql`${dispatchSheets.date}::date <= ${endDate}::date`);
+      }
     }
 
     const query = db.select({
@@ -8476,8 +8481,14 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getActivityUtilizationReport(options: { startDate?: string; endDate?: string; brandId?: string; truckNo?: string; storageType?: string } = {}): Promise<any> {
-    const deliveries = await this.getCompletedDeliveries(options.startDate, options.endDate);
+  async getActivityUtilizationReport(options: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string } = {}): Promise<any> {
+    let sDate = options.startDate;
+    let eDate = options.endDate;
+    if (options.date && !sDate && !eDate) {
+      sDate = options.date;
+      eDate = options.date;
+    }
+    const deliveries = await this.getCompletedDeliveries(sDate, eDate);
 
     const formatTime12h = (timeInput: any): string => {
       if (!timeInput) return "";
@@ -8530,6 +8541,7 @@ export class DatabaseStorage implements IStorage {
       outletCode: string;
       vehicleType: string;
       cases: number;
+      temperature: string;
       reportingTime: string;
       departTime: string;
       dropStartTime: string;
@@ -8560,6 +8572,7 @@ export class DatabaseStorage implements IStorage {
           outletCode: d.outletCode,
           vehicleType: d.vehicleType || "7 TON",
           cases: 0,
+          temperature: d.temperature || "",
           reportingTime: d.reportingTime || "10:45 AM",
           departTime: d.departTime || "11:15 AM",
           dropStartTime: formatTime12h(d.deliveryStartTime) || "01:20 PM",
@@ -8574,6 +8587,9 @@ export class DatabaseStorage implements IStorage {
       stop.cases += qty;
       stop.items.push(d);
 
+      if (d.temperature && (!stop.temperature || stop.temperature === "")) {
+        stop.temperature = d.temperature;
+      }
       if (d.deliveryStartTime && (!stop.dropStartTime || stop.dropStartTime === "01:20 PM")) {
         stop.dropStartTime = formatTime12h(d.deliveryStartTime);
       }
@@ -8589,6 +8605,20 @@ export class DatabaseStorage implements IStorage {
       return a.sequence - b.sequence;
     });
 
+    // Query driver attendance records to link actual reporting time (checkInTime), warehouse departure, and odometer KM
+    const attendanceMap = new Map<string, any>();
+    try {
+      const attList = await db.select().from(driverAttendance);
+      for (const att of attList) {
+        const attDate = att.checkInTime ? new Date(att.checkInTime).toISOString().split('T')[0] : (att.createdAt ? new Date(att.createdAt).toISOString().split('T')[0] : null);
+        if (attDate && att.truckId) {
+          attendanceMap.set(`${attDate}_${att.truckId}`, att);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not query attendance records for activity report:", e);
+    }
+
     const tripIdMap = new Map<string, number>();
     let nextTripId = 53;
     const truckStopsCounter = new Map<string, number>();
@@ -8603,11 +8633,24 @@ export class DatabaseStorage implements IStorage {
       const stopCount = (truckStopsCounter.get(tripKey) || 0) + 1;
       truckStopsCounter.set(tripKey, stopCount);
 
+      // Check attendance for actual checkInTime and departureTime
+      const att = attendanceMap.get(`${rec.sheetDate}_${rec.truckNo}`);
+      let repTime = rec.reportingTime;
+      let depTime = rec.departTime;
+      if (att) {
+        if (att.checkInTime) repTime = formatTime12h(att.checkInTime);
+        if (att.departureTime) depTime = formatTime12h(att.departureTime);
+      }
+
       return {
         ...rec,
         trip: tripAnchor,
         seq: stopCount,
         noOfRestaurants: 1,
+        reportingTime: repTime,
+        departTime: depTime,
+        temperature: rec.temperature || "-",
+        loadingDurationMinutes: att?.loadingDurationMinutes ?? null,
         cases: Math.round(rec.cases * 10) / 10
       };
     });
@@ -8631,11 +8674,31 @@ export class DatabaseStorage implements IStorage {
     }>();
 
     const allVehicles = await db.select().from(vehicles);
-    const vehicleCapMap = new Map(allVehicles.map(v => [v.plateNumber, v.cartonCapacity || 320]));
+    const vehicleMap = new Map(allVehicles.map(v => [v.plateNumber, v]));
 
     for (const act of finalizedActivityRecords) {
       const uKey = `${act.sheetDate}_${act.truckNo}_${act.trip}`;
-      const targetCap = vehicleCapMap.get(act.truckNo) || 320;
+      
+      // Determine truck capacity based on cargo type (FROZEN, DRY, CHILLED, PACKAGING) or standard capacity
+      const veh = vehicleMap.get(act.truckNo);
+      let targetCap = 320;
+      if (veh) {
+        const normType = (act.storageType || "").trim().toUpperCase();
+        const typeCaps = (veh.typeCapacities as Record<string, number>) || {};
+        if (typeCaps[normType]) {
+          targetCap = Number(typeCaps[normType]);
+        } else if (normType.includes("FROZ") && typeCaps["FROZEN"]) {
+          targetCap = Number(typeCaps["FROZEN"]);
+        } else if (normType.includes("DRY") && typeCaps["DRY"]) {
+          targetCap = Number(typeCaps["DRY"]);
+        } else if (normType.includes("CHILL") && typeCaps["CHILLED"]) {
+          targetCap = Number(typeCaps["CHILLED"]);
+        } else if (normType.includes("PACK") && typeCaps["PACKAGING"]) {
+          targetCap = Number(typeCaps["PACKAGING"]);
+        } else if (veh.cartonCapacity) {
+          targetCap = Number(veh.cartonCapacity);
+        }
+      }
 
       if (!tripUtilizationMap.has(uKey)) {
         tripUtilizationMap.set(uKey, {
@@ -8664,6 +8727,7 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    let totalKmUsed = 0;
     const utilizationRecords = Array.from(tripUtilizationMap.values()).map(rec => {
       let actualHours = 4.5;
       try {
@@ -8691,12 +8755,34 @@ export class DatabaseStorage implements IStorage {
       const utilPct = Math.round((actualHours / rec.targetUtilization) * 100);
       const cartonPct = Math.round((rec.actualCases / rec.targetTruckCapacity) * 100);
 
+      // KM calculation from attendance
+      const att = attendanceMap.get(`${rec.sheetDate}_${rec.truckNo}`);
+      let opKm: number | string = "-";
+      let clKm: number | string = "-";
+      let kmRun = 0;
+      if (att && att.openingKm !== null && att.openingKm !== undefined) {
+        opKm = Number(att.openingKm);
+        if (att.closingKm !== null && att.closingKm !== undefined) {
+          clKm = Number(att.closingKm);
+          if (clKm >= opKm) {
+            kmRun = clKm - opKm;
+          }
+        }
+      }
+      if (kmRun === 0 && rec.noOfRestaurants > 0) {
+        kmRun = rec.noOfRestaurants * 14 + 18;
+      }
+      totalKmUsed += kmRun;
+
       return {
         ...rec,
         actualCases: Math.round(rec.actualCases),
         actualUtilization: actualHours,
         utilizationPercent: utilPct,
         cartonPercent: cartonPct,
+        openingKm: opKm,
+        closingKm: clKm,
+        kmRun: kmRun,
       };
     });
 
@@ -8801,10 +8887,29 @@ export class DatabaseStorage implements IStorage {
       masters: {
         outlets: outletMasters,
         vehicles: fleetMasters
-      }
+      },
+      totalKmUsed: Math.round(totalKmUsed)
     };
   }
 
+  async getTruckLastClosingKm(truckId: string): Promise<number> {
+    const cleanTruck = (truckId || "").trim().toLowerCase();
+    const cleanTruckAlnum = cleanTruck.replace(/[^a-z0-9]/g, '');
+    const allAtt = await db.select().from(driverAttendance);
+    const pastRecords = allAtt
+      .filter(a => {
+        if (!a.truckId || a.closingKm === null || a.closingKm === undefined) return false;
+        const aTruck = a.truckId.trim().toLowerCase();
+        const aTruckAlnum = aTruck.replace(/[^a-z0-9]/g, '');
+        return aTruck === cleanTruck || aTruckAlnum === cleanTruckAlnum || (cleanTruckAlnum && (aTruckAlnum.includes(cleanTruckAlnum) || cleanTruckAlnum.includes(aTruckAlnum)));
+      })
+      .sort((a, b) => {
+        const timeA = a.closingKmTimestamp ? new Date(a.closingKmTimestamp).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const timeB = b.closingKmTimestamp ? new Date(b.closingKmTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return timeB - timeA;
+      });
+    return pastRecords.length > 0 ? Number(pastRecords[0].closingKm) : 0;
+  }
 
   // Logistics Fleet Advanced
   async getVehicleMaintenance(vehicleId?: string, driverId?: string): Promise<VehicleMaintenance[]> {

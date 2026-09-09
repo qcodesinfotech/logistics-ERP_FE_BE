@@ -5,6 +5,7 @@ import { db, ensureDriverTablesSchema } from "./db";
 import { eq, and, or, inArray, desc, isNull, ne } from "drizzle-orm";
 import PDFDocument from "pdfkit";
 import * as schema from "@shared/schema";
+import { driverAttendance } from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
 import path from "path";
@@ -9418,6 +9419,13 @@ export async function registerRoutes(
         isWithinRange = true;
       }
 
+      // Restrict check-in if driver is outside authorized store/warehouse location (> 50km)
+      if (allLocations.length > 0 && minDistance > 50000 && minDistance !== Infinity) {
+        return res.status(403).json({
+          error: `Check-in restricted: You are ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}. Attendance check-in is strictly permitted only within the authorized store/warehouse location.`
+        });
+      }
+
       const isAuthorizedDevice = !!deviceToken;
 
       const attendance = await storage.createDriverAttendance({
@@ -9452,6 +9460,82 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/drivers/truck-last-closing-km/:truckId", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await ensureDriverTablesSchema();
+      const { truckId } = req.params;
+      const cleanTruck = (truckId || "").trim().toLowerCase();
+      const cleanTruckAlnum = cleanTruck.replace(/[^a-z0-9]/g, '');
+      const allAtt = await db.select().from(driverAttendance);
+      const pastRecords = allAtt
+        .filter(a => {
+          if (!a.truckId || a.closingKm === null || a.closingKm === undefined) return false;
+          const aTruck = a.truckId.trim().toLowerCase();
+          const aTruckAlnum = aTruck.replace(/[^a-z0-9]/g, '');
+          return aTruck === cleanTruck || aTruckAlnum === cleanTruckAlnum || (cleanTruckAlnum && (aTruckAlnum.includes(cleanTruckAlnum) || cleanTruckAlnum.includes(aTruckAlnum)));
+        })
+        .sort((a, b) => {
+          const timeA = a.closingKmTimestamp ? new Date(a.closingKmTimestamp).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+          const timeB = b.closingKmTimestamp ? new Date(b.closingKmTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+          return timeB - timeA;
+        });
+      const previousClosingKm = pastRecords.length > 0 ? Number(pastRecords[0].closingKm) : 0;
+      res.json({ truckId, previousClosingKm });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to fetch previous closing KM" });
+    }
+  });
+
+  app.post("/api/drivers/departure-time", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await ensureDriverTablesSchema();
+      const { attendanceId, departureTime, latitude, longitude } = req.body;
+      const effectiveDriverId = req.user?.employeeId || req.user?.id;
+
+      let targetRecord: any = null;
+      if (attendanceId) {
+        const list = await storage.getDriverAttendance();
+        targetRecord = list.find(r => r.id === attendanceId);
+      }
+      if (!targetRecord && effectiveDriverId) {
+        const records = await storage.getDriverAttendance(effectiveDriverId);
+        targetRecord = records.find(r => !r.closingKm);
+      }
+      if (!targetRecord) {
+        return res.status(404).json({ error: "Active attendance record not found" });
+      }
+
+      const depDate = departureTime ? new Date(departureTime) : new Date();
+      let loadingDurationMinutes = 0;
+      if (targetRecord.checkInTime) {
+        const checkInMs = new Date(targetRecord.checkInTime).getTime();
+        const diffMs = depDate.getTime() - checkInMs;
+        loadingDurationMinutes = Math.max(0, Math.round(diffMs / 60000));
+      }
+
+      const updated = await storage.updateDriverAttendance(targetRecord.id, {
+        departureTime: depDate,
+        loadingDurationMinutes,
+      });
+
+      await storage.createDriverActivity({
+        driverId: effectiveDriverId || targetRecord.driverId,
+        notes: `Truck departed store/warehouse at ${depDate.toLocaleTimeString()}. Loading duration: ${loadingDurationMinutes} minutes.`,
+      });
+
+      res.json({
+        success: true,
+        attendanceId: targetRecord.id,
+        departureTime: depDate,
+        loadingDurationMinutes,
+        record: updated,
+      });
+    } catch (error: any) {
+      console.error("Record departure time error:", error);
+      res.status(500).json({ error: error.message || "Failed to record departure time" });
+    }
+  });
+
   app.post("/api/drivers/opening-km", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { attendanceId, truckId, openingKm, latitude, longitude } = req.body;
@@ -9472,6 +9556,41 @@ export async function registerRoutes(
       }
       if (existing.closingKm !== null && existing.closingKm !== undefined) {
         return res.status(400).json({ error: "Cannot edit opening KM after duty has ended" });
+      }
+
+      // Enforce Opening KM >= previous closing KM for this truck
+      let previousClosingKm = 0;
+      try {
+        const targetTruckId = truckId || existing.truckId;
+        if (targetTruckId) {
+          const cleanTarget = (targetTruckId || "").trim().toLowerCase();
+          const cleanTargetAlnum = cleanTarget.replace(/[^a-z0-9]/g, '');
+          const allAtt = await db.select().from(driverAttendance);
+          const pastRecords = allAtt
+            .filter(a => {
+              if (a.id === attendanceId || !a.truckId || a.closingKm === null || a.closingKm === undefined) return false;
+              const aTruck = a.truckId.trim().toLowerCase();
+              const aTruckAlnum = aTruck.replace(/[^a-z0-9]/g, '');
+              return aTruck === cleanTarget || aTruckAlnum === cleanTargetAlnum || (cleanTargetAlnum && (aTruckAlnum.includes(cleanTargetAlnum) || cleanTargetAlnum.includes(aTruckAlnum)));
+            })
+            .sort((a, b) => {
+              const timeA = a.closingKmTimestamp ? new Date(a.closingKmTimestamp).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+              const timeB = b.closingKmTimestamp ? new Date(b.closingKmTimestamp).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+              return timeB - timeA;
+            });
+          if (pastRecords.length > 0) {
+            previousClosingKm = Number(pastRecords[0].closingKm);
+          }
+        }
+      } catch (err) {
+        console.warn("Error checking previous closing KM:", err);
+      }
+
+      if (previousClosingKm > 0 && kmVal < previousClosingKm) {
+        return res.status(400).json({
+          error: `Opening KM (${kmVal.toLocaleString()} KM) cannot be less than previous day closing KM (${previousClosingKm.toLocaleString()} KM). Please enter a value above or equal to ${previousClosingKm.toLocaleString()} KM.`,
+          previousClosingKm
+        });
       }
 
       const isUpdate = existing.openingKm !== null && existing.openingKm !== undefined;
@@ -9929,10 +10048,15 @@ export async function registerRoutes(
 
   app.get("/api/dispatch/activity-utilization-report", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { startDate, endDate, brandId, truckNo, storageType } = req.query as any;
+      let { startDate, endDate, date, brandId, truckNo, storageType } = req.query as any;
+      if (date && !startDate && !endDate) {
+        startDate = date;
+        endDate = date;
+      }
       const report = await storage.getActivityUtilizationReport({
         startDate,
         endDate,
+        date,
         brandId,
         truckNo,
         storageType

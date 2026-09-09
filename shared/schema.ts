@@ -1771,6 +1771,7 @@ export const vehicles = pgTable("vehicles", {
   type: text("type").notNull(), // "owned" or "outsourced"
   capacity: text("capacity"),
   cartonCapacity: integer("carton_capacity"),
+  typeCapacities: jsonb("type_capacities").$type<Record<string, number>>().default({}),
   storageType: text("storage_type"),
   photos: jsonb("photos").$type<string[]>().default([]),
   documents: jsonb("documents").$type<string[]>().default([]),
@@ -2030,6 +2031,8 @@ export const driverAttendance = pgTable("driver_attendance", {
   truckId: varchar("truck_id"),
   openingKm: integer("opening_km"),
   openingKmTimestamp: timestamp("opening_km_timestamp"),
+  departureTime: timestamp("departure_time"),
+  loadingDurationMinutes: integer("loading_duration_minutes"),
   closingKm: integer("closing_km"),
   closingKmTimestamp: timestamp("closing_km_timestamp"),
   checkInLocation: text("check_in_location"),

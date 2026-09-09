@@ -153,6 +153,11 @@ export async function ensureDriverTablesSchema() {
 
       ALTER TABLE "contracts" ADD COLUMN IF NOT EXISTS "daily_rate" numeric(12, 3) DEFAULT '0.000';
 
+      ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "departure_time" timestamp;
+      ALTER TABLE "driver_attendance" ADD COLUMN IF NOT EXISTS "loading_duration_minutes" integer;
+
+      ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "type_capacities" jsonb DEFAULT '{}'::jsonb;
+
       ALTER TABLE "dispatch_outlet_zone_overrides" ADD COLUMN IF NOT EXISTS "override_truck_id" varchar;
 
       CREATE TABLE IF NOT EXISTS "dispatch_truck_assignments" (

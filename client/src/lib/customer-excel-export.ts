@@ -22,7 +22,7 @@ const PALETTE = {
 };
 
 // Reusable border style generator
-function getThinBorder(colorArgb: string = PALETTE.borderLight): ExcelJS.Borders {
+function getThinBorder(colorArgb: string = PALETTE.borderLight): Partial<ExcelJS.Borders> {
   return {
     top: { style: "thin", color: { argb: `FF${colorArgb}` } },
     left: { style: "thin", color: { argb: `FF${colorArgb}` } },
@@ -51,7 +51,7 @@ export async function exportCustomerReportExcel(reportData: any) {
     views: [{ showGridLines: true }]
   });
 
-  // Define columns
+  // Define columns (including Temp)
   wsAct.columns = [
     { header: "Trip", key: "trip", width: 9 },
     { header: "Seq", key: "seq", width: 8 },
@@ -64,6 +64,7 @@ export async function exportCustomerReportExcel(reportData: any) {
     { header: "Vehicle Type", key: "vehicleType", width: 14 },
     { header: "No of Restaurants", key: "noOfRestaurants", width: 18 },
     { header: "Cases", key: "cases", width: 10 },
+    { header: "Temp (°C)", key: "temperature", width: 12 },
     { header: "ReportingTime [1]", key: "reportingTime", width: 18 },
     { header: "DepartTime [2]", key: "departTime", width: 18 },
     { header: "DropStartTime [3]", key: "dropStartTime", width: 18 },
@@ -76,7 +77,7 @@ export async function exportCustomerReportExcel(reportData: any) {
   // Format Header Row (Row 1)
   const actHeaderRow = wsAct.getRow(1);
   actHeaderRow.height = 28;
-  for (let c = 1; c <= 15; c++) {
+  for (let c = 1; c <= 16; c++) {
     const cell = actHeaderRow.getCell(c);
     cell.fill = {
       type: "pattern",
@@ -116,6 +117,7 @@ export async function exportCustomerReportExcel(reportData: any) {
       a.vehicleType || "",
       a.noOfRestaurants || 1,
       Number(a.cases || 0),
+      a.temperature && a.temperature !== "-" ? `${a.temperature}°C` : "-",
       a.reportingTime || "",
       a.departTime || "",
       a.dropStartTime || "",
@@ -123,7 +125,7 @@ export async function exportCustomerReportExcel(reportData: any) {
     ];
 
     // Style data cells
-    for (let c = 1; c <= 15; c++) {
+    for (let c = 1; c <= 16; c++) {
       const cell = row.getCell(c);
       cell.font = { name: "Calibri", size: 10, color: { argb: `FF${PALETTE.textDark}` } };
       cell.border = getThinBorder(PALETTE.borderLight);
@@ -168,10 +170,15 @@ export async function exportCustomerReportExcel(reportData: any) {
       if (c === 11) {
         cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.textDark}` } };
       }
+
+      // Temperature styling
+      if (c === 12 && a.temperature && a.temperature !== "-") {
+        cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.navyText}` } };
+      }
     }
   });
 
-  // Add Timestamp Legend to Column Q & R (Image 1 Legend)
+  // Add Timestamp Legend to Column R & S (Image 1 Legend)
   const legendItems = [
     { code: "[1]", label: "Time Arrived at Warehouse" },
     { code: "[2]", label: "Time Left the Warehouse" },
@@ -181,8 +188,8 @@ export async function exportCustomerReportExcel(reportData: any) {
 
   legendItems.forEach((item, i) => {
     const lRow = wsAct.getRow(i + 2);
-    const codeCell = lRow.getCell(17);
-    const labelCell = lRow.getCell(18);
+    const codeCell = lRow.getCell(18);
+    const labelCell = lRow.getCell(19);
 
     codeCell.value = item.code;
     codeCell.font = { name: "Calibri", size: 11, bold: true, color: { argb: `FF${PALETTE.legendNum}` } };
@@ -214,8 +221,11 @@ export async function exportCustomerReportExcel(reportData: any) {
     { header: "Actual Utilization (Hours)", key: "actualUtilization", width: 25 },
     { header: "Utilization %", key: "utilizationPercent", width: 16 },
     { header: "Carton %", key: "cartonPercent", width: 16 },
+    { header: "Opening KM", key: "openingKm", width: 15 },
+    { header: "Closing KM", key: "closingKm", width: 15 },
+    { header: "Distance (KM)", key: "kmRun", width: 16 },
     { header: "", key: "blank", width: 4 },
-    // Columns O - U for Weekly KPI Matrix
+    // Columns R - X for Weekly KPI Matrix
     { header: "", key: "kpi", width: 16 },
     { header: "", key: "target", width: 12 },
     { header: "", key: "wk1", width: 10 },
@@ -228,7 +238,7 @@ export async function exportCustomerReportExcel(reportData: any) {
   // Header 1: Main Utilization Table
   const utilHeaderRow = wsUtil.getRow(1);
   utilHeaderRow.height = 28;
-  for (let c = 1; c <= 13; c++) {
+  for (let c = 1; c <= 16; c++) {
     const cell = utilHeaderRow.getCell(c);
     cell.fill = {
       type: "pattern",
@@ -260,8 +270,11 @@ export async function exportCustomerReportExcel(reportData: any) {
     row.getCell(11).value = Number(u.actualUtilization || 0).toFixed(2);
     row.getCell(12).value = `${u.utilizationPercent}%`;
     row.getCell(13).value = `${u.cartonPercent}%`;
+    row.getCell(14).value = u.openingKm ? `${Number(u.openingKm).toLocaleString()}` : "-";
+    row.getCell(15).value = u.closingKm && u.closingKm !== "-" ? `${Number(u.closingKm).toLocaleString()}` : "-";
+    row.getCell(16).value = u.kmRun ? `${Number(u.kmRun).toLocaleString()} KM` : "-";
 
-    for (let c = 1; c <= 13; c++) {
+    for (let c = 1; c <= 16; c++) {
       const cell = row.getCell(c);
       cell.font = { name: "Calibri", size: 10, color: { argb: `FF${PALETTE.textDark}` } };
       cell.border = getThinBorder(PALETTE.borderLight);
@@ -279,14 +292,18 @@ export async function exportCustomerReportExcel(reportData: any) {
       if (c === 12 || c === 13) {
         cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.navyText}` } };
       }
+      // Distance format
+      if (c === 16) {
+        cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.greenHeader}` } };
+      }
     }
   });
 
-  // Weekly KPI Matrix (Columns O - U, Top Right of Image 2)
+  // Weekly KPI Matrix (Columns R - X, Top Right of Image 2)
   const kpiHeaders = ["KPI", "Target", "wk1", "wk2", "wk3", "wk4", "Total"];
   const kpiHeaderRow = wsUtil.getRow(1);
   kpiHeaders.forEach((title, i) => {
-    const colIdx = 15 + i;
+    const colIdx = 18 + i;
     const cell = kpiHeaderRow.getCell(colIdx);
     cell.value = title;
     cell.fill = {
@@ -302,8 +319,8 @@ export async function exportCustomerReportExcel(reportData: any) {
   weeklyKpis.forEach((k: any, i: number) => {
     const r = wsUtil.getRow(i + 2);
     const cells = [
-      r.getCell(15), r.getCell(16), r.getCell(17),
-      r.getCell(18), r.getCell(19), r.getCell(20), r.getCell(21)
+      r.getCell(18), r.getCell(19), r.getCell(20),
+      r.getCell(21), r.getCell(22), r.getCell(23), r.getCell(24)
     ];
 
     cells[0].value = k.kpi;
@@ -325,6 +342,15 @@ export async function exportCustomerReportExcel(reportData: any) {
       };
     });
   });
+
+  // Add Total KM Used Summary in Utilization Sheet
+  const totalKmRow = wsUtil.getRow(weeklyKpis.length + 3);
+  const totalKmLabelCell = totalKmRow.getCell(18);
+  const totalKmValCell = totalKmRow.getCell(19);
+  totalKmLabelCell.value = "Total KM Used:";
+  totalKmLabelCell.font = { name: "Calibri", size: 10.5, bold: true, color: { argb: `FF${PALETTE.slateHeader}` } };
+  totalKmValCell.value = `${(reportData?.totalKmUsed || 0).toLocaleString()} KM`;
+  totalKmValCell.font = { name: "Calibri", size: 11, bold: true, color: { argb: `FF${PALETTE.greenHeader}` } };
 
   // =========================================================================================
   // SHEET 3: OUTBOUND DEVIATIONS (Matching Screenshot 3)
