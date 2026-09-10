@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Truck, Plus, Calendar, Wrench, Fuel, DollarSign, PenTool, CheckCircle, ShieldAlert, Upload, X, Edit, FileText, Image as ImageIcon, Trash2 } from "lucide-react";
+import { Truck, Plus, Calendar, Wrench, Fuel, DollarSign, PenTool, CheckCircle, ShieldAlert, Upload, X, Edit, FileText, Image as ImageIcon, Trash2, Eye } from "lucide-react";
+import Vehicle3DDigitalTwinModal from "@/components/vehicle-3d-digital-twin";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -104,6 +105,7 @@ export default function FleetPage() {
   const [uploadingFuelPhotos, setUploadingFuelPhotos] = useState(false);
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [digitalTwinVehicle, setDigitalTwinVehicle] = useState<any | null>(null);
 
   const { toast } = useToast();
 
@@ -203,7 +205,7 @@ export default function FleetPage() {
                 let width = img.width;
                 let height = img.height;
                 const MAX_DIMENSION = 800;
-                
+
                 if (width > height) {
                   if (width > MAX_DIMENSION) {
                     height = Math.round((height *= MAX_DIMENSION / width));
@@ -215,7 +217,7 @@ export default function FleetPage() {
                     height = MAX_DIMENSION;
                   }
                 }
-                
+
                 canvas.width = width;
                 canvas.height = height;
                 const ctx = canvas.getContext("2d");
@@ -413,8 +415,8 @@ export default function FleetPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <PageHeader 
-        title="Asset Registry & Fleet Console" 
+      <PageHeader
+        title="Asset Registry & Fleet Console"
         description="Monitor owned and outsourced logistics fleets, compliance limits, maintenance scheduling, and fuel efficiency metrics."
       >
         <Button onClick={() => setIsFuelDialogOpen(true)} variant="outline" className="gap-2">
@@ -525,13 +527,38 @@ export default function FleetPage() {
                           <TableCell>
                             <StatusBadge status={vehicle.status} />
                           </TableCell>
-                           <TableCell className="text-right space-x-1">
+                          <TableCell className="text-right space-x-1">
+                            {/* <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              title="3D Digital Twin Inspection"
+                              className="text-sky-500 hover:text-sky-400 hover:bg-sky-500/10"
+                              onClick={() => {
+                                setDigitalTwinVehicle({
+                                  tripId: "",
+                                  vehicleId: vehicle.id,
+                                  driverId: vehicle.assignedDriverId || "",
+                                  driverName: (driversList as any[])?.find(d => d.id === vehicle.assignedDriverId || d.userId === vehicle.assignedDriverId)?.name || "Assigned Driver",
+                                  vehicleName: vehicle.name,
+                                  plateNumber: vehicle.plateNumber,
+                                  coords: { latitude: 26.2235, longitude: 50.5876, bearing: 45, speed: 0 },
+                                  diagnostics: {
+                                    cargoTemp: -18.2,
+                                    fuelPercent: 84,
+                                    storageType: vehicle.storageType,
+                                  },
+                                  timestamp: Date.now(),
+                                });
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button> */}
                             <Button variant="ghost" size="icon" onClick={() => editVehicle(vehicle)}>
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="text-red-500 hover:text-red-600 hover:bg-red-50"
                               onClick={() => {
                                 if (confirm(`Are you sure you want to delete vehicle ${vehicle.plateNumber}?`)) {
@@ -634,7 +661,7 @@ export default function FleetPage() {
                             <div className="flex gap-1 mt-1">
                               {log.photos.map((p: string, i: number) => (
                                 <button key={i} onClick={() => setViewingImage(p)} type="button" className="text-primary hover:underline flex items-center text-[10px]">
-                                  <ImageIcon className="h-3 w-3 mr-1" /> Photo {i+1}
+                                  <ImageIcon className="h-3 w-3 mr-1" /> Photo {i + 1}
                                 </button>
                               ))}
                             </div>
@@ -677,7 +704,7 @@ export default function FleetPage() {
                             <div className="flex gap-1 mt-1 justify-end">
                               {log.photos.map((p: string, i: number) => (
                                 <button key={i} onClick={() => setViewingImage(p)} type="button" className="text-primary hover:underline flex items-center text-[10px]">
-                                  <ImageIcon className="h-3 w-3 mr-1" /> Bill {i+1}
+                                  <ImageIcon className="h-3 w-3 mr-1" /> Bill {i + 1}
                                 </button>
                               ))}
                             </div>
@@ -1064,8 +1091,8 @@ export default function FleetPage() {
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createVehicleMutation.isPending}>
-                  {createVehicleMutation.isPending 
-                    ? (editingVehicleId ? "Saving..." : "Adding...") 
+                  {createVehicleMutation.isPending
+                    ? (editingVehicleId ? "Saving..." : "Adding...")
                     : (editingVehicleId ? "Save Changes" : "Add Vehicle")}
                 </Button>
               </DialogFooter>
@@ -1313,6 +1340,15 @@ export default function FleetPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 3D Digital Twin Inspection Modal */}
+      {digitalTwinVehicle && (
+        <Vehicle3DDigitalTwinModal
+          isOpen={!!digitalTwinVehicle}
+          onClose={() => setDigitalTwinVehicle(null)}
+          vehicle={digitalTwinVehicle}
+        />
+      )}
     </div>
   );
 }

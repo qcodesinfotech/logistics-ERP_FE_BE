@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { format } from "date-fns";
-import { 
-  BarChart3, Plus, Truck, User, ArrowRight, CheckCircle2, 
+import {
+  BarChart3, Plus, Truck, User, ArrowRight, CheckCircle2,
   AlertTriangle, Play, Check, Eye, FileUp, XCircle, Clock, RefreshCw, Trash2,
-  Calculator, Banknote, Building2, Building
+  Calculator, Banknote, Building2, Building, Compass
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
+import Fleet3DMap from "@/components/fleet-3d-map";
 import type { Trip, Order, Vehicle, Delivery, Client, Location } from "@shared/schema";
 
 interface MinimalEmployee {
@@ -42,6 +43,8 @@ interface MinimalEmployee {
 
 export default function DispatchPage() {
   const [location, setLocation] = useLocation();
+  const [is3DFleetMapVisible, setIs3DFleetMapVisible] = useState(false);
+  const [selected3DTripId, setSelected3DTripId] = useState<string | undefined>(undefined);
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isPODDialogOpen, setIsPODDialogOpen] = useState(false);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
@@ -49,10 +52,10 @@ export default function DispatchPage() {
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
-  
+
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [tripRoute, setTripRoute] = useState("");
-  
+
   const [launchTripsCount, setLaunchTripsCount] = useState("1");
   const [launchTrucksCount, setLaunchTrucksCount] = useState("1");
   const [launchTruckAssignments, setLaunchTruckAssignments] = useState<any[]>([{
@@ -88,9 +91,9 @@ export default function DispatchPage() {
   const [transitTrip, setTransitTrip] = useState<any>(null);
   const [transitLocation, setTransitLocation] = useState("");
   const [transitGps, setTransitGps] = useState("");
-  const [transitDelays, setTransitDelays] = useState<{reason: string; durationHours: string}[]>([{reason: "", durationHours: ""}]);
-  const [transitIncidents, setTransitIncidents] = useState<{description: string; cost: string}[]>([{description: "", cost: ""}]);
-  const [transitExpenses, setTransitExpenses] = useState<{name: string; cost: string}[]>([{name: "", cost: ""}]);
+  const [transitDelays, setTransitDelays] = useState<{ reason: string; durationHours: string }[]>([{ reason: "", durationHours: "" }]);
+  const [transitIncidents, setTransitIncidents] = useState<{ description: string; cost: string }[]>([{ description: "", cost: "" }]);
+  const [transitExpenses, setTransitExpenses] = useState<{ name: string; cost: string }[]>([{ name: "", cost: "" }]);
   const [selectedOrderIdForPOD, setSelectedOrderIdForPOD] = useState<string>("");
   const [podStatus, setPodStatus] = useState<string>("delivered");
   const [podUrl, setPodUrl] = useState<string>("");
@@ -186,7 +189,7 @@ export default function DispatchPage() {
       const orderExists = unassignedOrders.some(o => o.id === orderId);
       if (orderExists) {
         setSelectedOrderIds([orderId]);
-        
+
         // Auto-populate route and open trip dialog
         const order = unassignedOrders.find(o => o.id === orderId);
         if (order) {
@@ -199,7 +202,7 @@ export default function DispatchPage() {
           setTripRoute(summary);
           setIsAssignDialogOpen(true);
         }
-        
+
         // Clean URL parameter so it doesn't reopen on manual page refreshes
         window.history.replaceState({}, document.title, window.location.pathname);
       }
@@ -258,10 +261,10 @@ export default function DispatchPage() {
 
       if (data.orderIds.length > 0) {
         for (const orderId of data.orderIds) {
-           await apiRequest("PATCH", `/api/orders/${orderId}/dispatch-plan`, { 
-             noOfTrips: data.noOfTrips, 
-             noOfTrucks: data.trips.length 
-           });
+          await apiRequest("PATCH", `/api/orders/${orderId}/dispatch-plan`, {
+            noOfTrips: data.noOfTrips,
+            noOfTrucks: data.trips.length
+          });
         }
       }
 
@@ -276,7 +279,7 @@ export default function DispatchPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
       toast({ title: "Trips launched successfully! Vehicles and Drivers dispatched." });
       setIsAssignDialogOpen(false);
-      
+
       setSelectedOrderIds([]);
       setTripRoute("");
       setLaunchTripsCount("1");
@@ -293,7 +296,7 @@ export default function DispatchPage() {
   });
 
   const updateDispatchPlanMutation = useMutation({
-    mutationFn: (data: { orderId: string, noOfTrips: number, noOfTrucks: number }) => 
+    mutationFn: (data: { orderId: string, noOfTrips: number, noOfTrucks: number }) =>
       apiRequest("PATCH", `/api/orders/${data.orderId}/dispatch-plan`, { noOfTrips: data.noOfTrips, noOfTrucks: data.noOfTrucks }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
@@ -306,7 +309,7 @@ export default function DispatchPage() {
   });
 
   const updateTripMutation = useMutation({
-    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) => 
+    mutationFn: ({ id, ...data }: { id: string;[key: string]: any }) =>
       apiRequest("PUT", `/api/trips/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
@@ -367,13 +370,13 @@ export default function DispatchPage() {
     mutationFn: (tripId: string) => apiRequest("POST", `/api/trips/${tripId}/verify-pod`),
     onSuccess: (data, tripId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
-      toast({ 
-        title: "POD verified successfully!", 
+      toast({
+        title: "POD verified successfully!",
         description: "Trip status is Completed. You can now generate the customer invoice.",
         action: (
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             className="h-8 text-xs font-semibold border-indigo-200 text-indigo-600 hover:bg-indigo-50"
             onClick={() => generateInvoiceMutation.mutate(tripId)}
           >
@@ -388,7 +391,7 @@ export default function DispatchPage() {
   });
 
   const saveDriverSettlementMutation = useMutation({
-    mutationFn: ({ tripId, data }: { tripId: string; data: any }) => 
+    mutationFn: ({ tripId, data }: { tripId: string; data: any }) =>
       apiRequest("POST", `/api/trips/${tripId}/settlement`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
@@ -406,13 +409,13 @@ export default function DispatchPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/trips"] });
-      toast({ 
-        title: "Invoice generated successfully!", 
+      toast({
+        title: "Invoice generated successfully!",
         description: "Review invoice details and record payment under Invoices.",
         action: (
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             className="h-8 text-xs font-semibold border-indigo-200 text-indigo-600 hover:bg-indigo-50"
             onClick={() => setLocation("/logistics/invoices")}
           >
@@ -443,10 +446,10 @@ export default function DispatchPage() {
       }
     } catch (err: any) {
       console.error(err);
-      toast({ 
-        title: "Failed to upload POD document", 
+      toast({
+        title: "Failed to upload POD document",
         description: getErrorMessage(err) || "An unexpected error occurred",
-        variant: "destructive" 
+        variant: "destructive"
       });
     } finally {
       setIsUploading(false);
@@ -454,7 +457,7 @@ export default function DispatchPage() {
   };
 
   const handleOrderToggle = (orderId: string) => {
-    setSelectedOrderIds(prev => 
+    setSelectedOrderIds(prev =>
       prev.includes(orderId) ? prev.filter(id => id !== orderId) : [...prev, orderId]
     );
   };
@@ -562,21 +565,21 @@ export default function DispatchPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => {
                             setTransitTrip(trip);
-                            setTransitDelays([{reason: "", durationHours: ""}]);
+                            setTransitDelays([{ reason: "", durationHours: "" }]);
                             setActiveLogType("delays");
                           }}>
                             Log Transit Delays
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => {
                             setTransitTrip(trip);
-                            setTransitIncidents([{description: "", cost: ""}]);
+                            setTransitIncidents([{ description: "", cost: "" }]);
                             setActiveLogType("incidents");
                           }}>
                             Log Transit Incidents
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => {
                             setTransitTrip(trip);
-                            setTransitExpenses([{name: "", cost: ""}]);
+                            setTransitExpenses([{ name: "", cost: "" }]);
                             setActiveLogType("expenses");
                           }}>
                             Log Additional Expenses
@@ -614,31 +617,48 @@ export default function DispatchPage() {
                   )}
 
                   {trip.status === "in_transit" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
-                      onClick={async () => {
-                        try {
-                          const res = await apiRequest("GET", `/api/trips/${trip.id}/orders`);
-                          const orderData = await res.json();
-                          setSelectedTrip({ ...trip, orderIds: orderData.map((o: any) => o.id) } as any);
-                          if (orderData.length > 0) {
-                            setSelectedOrderIdForPOD(orderData[0].id);
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs border-blue-200 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                        onClick={async () => {
+                          try {
+                            const res = await apiRequest("GET", `/api/trips/${trip.id}/orders`);
+                            const orderData = await res.json();
+                            setSelectedTrip({ ...trip, orderIds: orderData.map((o: any) => o.id) } as any);
+                            if (orderData.length > 0) {
+                              setSelectedOrderIdForPOD(orderData[0].id);
+                            }
+                            setIsPODDialogOpen(true);
+                          } catch (err: any) {
+                            console.error(err);
+                            toast({
+                              title: "Error opening dialog",
+                              description: getErrorMessage(err) || "An unexpected error occurred",
+                              variant: "destructive"
+                            });
                           }
-                          setIsPODDialogOpen(true);
-                        } catch (err: any) {
-                          console.error(err);
-                          toast({
-                            title: "Error opening dialog",
-                            description: getErrorMessage(err) || "An unexpected error occurred",
-                            variant: "destructive"
-                          });
-                        }
-                      }}
-                    >
-                      Record POD
-                    </Button>
+                        }}
+                      >
+                        Record POD
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        title="Track Vehicle Live in 3D"
+                        className="h-8 text-xs border-sky-500/40 text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 gap-1.5 font-medium"
+                        onClick={() => {
+                          setSelected3DTripId(trip.id);
+                          setIs3DFleetMapVisible(true);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      >
+                        <Compass className="h-3.5 w-3.5" />
+                        3D Live
+                      </Button>
+                    </>
                   )}
 
                   {trip.status === "completed" && trip.podVerificationStatus === "pending" && (
@@ -714,35 +734,65 @@ export default function DispatchPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <PageHeader 
-        title="Dispatch Console" 
+      <PageHeader
+        title="Dispatch Console"
         description="Monitor physical assets, assign available trucks/drivers, and log Proof-of-Delivery status."
       >
-        <Button 
-          disabled={selectedOrderIds.length === 0} 
-          onClick={() => {
-            // Suggest a route based on selected orders
-            const routes = selectedOrderIds.map(oid => {
-              const ord = ordersList?.find(o => o.id === oid);
-              if (ord) {
-                const pick = ordersList?.find(o => o.pickupLocationId === ord.pickupLocationId);
-                return `${ord.orderNumber}`;
+        <div className="flex items-center gap-2">
+          {/* <Button
+            variant="outline"
+            onClick={() => {
+              setIs3DFleetMapVisible(!is3DFleetMapVisible);
+              if (is3DFleetMapVisible) {
+                setSelected3DTripId(undefined);
               }
-              return "";
-            }).filter(Boolean);
-            setTripRoute(routes.join(" + ") + " Consolidated Route");
-            setIsAssignDialogOpen(true);
-          }}
-          className="gap-2"
-        >
-          <Play className="h-4 w-4" /> Create Trip ({selectedOrderIds.length} orders)
-        </Button>
+            }}
+            className={`gap-1.5 text-xs font-semibold shadow-sm transition-all ${
+              is3DFleetMapVisible
+                ? "bg-sky-600 text-white border-sky-500 hover:bg-sky-500 shadow-sky-500/20"
+                : "border-sky-500/40 bg-sky-500/10 text-sky-500 hover:bg-sky-500/20"
+            }`}
+          >
+            <Compass className="h-4 w-4" />
+            {is3DFleetMapVisible ? "Close 3D Radar" : "3D Live Fleet Radar"}
+          </Button> */}
+
+          <Button
+            disabled={selectedOrderIds.length === 0}
+            onClick={() => {
+              // Suggest a route based on selected orders
+              const routes = selectedOrderIds.map(oid => {
+                const ord = ordersList?.find(o => o.id === oid);
+                if (ord) {
+                  const pick = ordersList?.find(o => o.pickupLocationId === ord.pickupLocationId);
+                  return `${ord.orderNumber}`;
+                }
+                return "";
+              }).filter(Boolean);
+              setTripRoute(routes.join(" + ") + " Consolidated Route");
+              setIsAssignDialogOpen(true);
+            }}
+            className="gap-2"
+          >
+            <Play className="h-4 w-4" /> Create Trip ({selectedOrderIds.length} orders)
+          </Button>
+        </div>
       </PageHeader>
+
+      {/* 3D Live Fleet Radar Display */}
+      {is3DFleetMapVisible && (
+        <div className="relative overflow-hidden rounded-2xl border border-sky-500/30 bg-slate-950 shadow-2xl transition-all duration-300">
+          <Fleet3DMap
+            height={560}
+            selectedTripId={selected3DTripId}
+          />
+        </div>
+      )}
 
       {/* Workflow Navigation Tracker */}
       <div className="flex items-center gap-2 border bg-card/40 p-3 rounded-lg shadow-sm w-fit bg-slate-50/50">
         <Link href="/logistics/rfq">
-          <Button 
+          <Button
             variant="outline"
             className="h-8 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900"
           >
@@ -752,7 +802,7 @@ export default function DispatchPage() {
         </Link>
         <div className="h-[2px] w-6 bg-slate-200" />
         <Link href="/logistics/orders">
-          <Button 
+          <Button
             variant="outline"
             className="h-8 px-3 text-xs font-semibold text-slate-600 hover:text-slate-900"
           >
@@ -762,7 +812,7 @@ export default function DispatchPage() {
         </Link>
         <div className="h-[2px] w-6 bg-slate-200" />
         <Link href="/logistics/dispatch">
-          <Button 
+          <Button
             variant="default"
             className="h-8 px-3 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
           >
@@ -835,7 +885,7 @@ export default function DispatchPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Orders Queue Card */}
         <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg border-muted bg-card/60 backdrop-blur-md">
@@ -862,21 +912,20 @@ export default function DispatchPage() {
                     const pickup = locationsList?.find((l: Location) => l.id === order.pickupLocationId);
                     const delivery = locationsList?.find((l: Location) => l.id === order.deliveryLocationId);
                     const isSelected = selectedOrderIds.includes(order.id);
-                    
+
                     const orderTripsCount = tripsList?.filter(t => [...(t.orderIds || []), t.orderId].includes(order.id)).length || 0;
 
                     return (
-                      <div 
-                        key={order.id} 
+                      <div
+                        key={order.id}
                         onClick={() => handleOrderToggle(order.id)}
-                        className={`p-4 cursor-pointer transition-all hover:bg-accent/40 flex items-start gap-3 ${
-                          isSelected ? "bg-primary/5 border-l-4 border-primary" : ""
-                        }`}
+                        className={`p-4 cursor-pointer transition-all hover:bg-accent/40 flex items-start gap-3 ${isSelected ? "bg-primary/5 border-l-4 border-primary" : ""
+                          }`}
                       >
-                        <input 
-                          type="checkbox" 
-                          checked={isSelected} 
-                          onChange={() => {}} // handled by div click
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => { }} // handled by div click
                           className="mt-1 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                         />
                         <div className="space-y-1 flex-1 min-w-0">
@@ -979,10 +1028,10 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4 bg-muted/30 p-3 rounded-md border">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Number of Trucks *</label>
-                <Input 
+                <Input
                   type="number"
                   min="1"
-                  value={launchTrucksCount} 
+                  value={launchTrucksCount}
                   onChange={(e) => {
                     const count = parseInt(e.target.value) || 1;
                     setLaunchTrucksCount(e.target.value);
@@ -1001,25 +1050,25 @@ export default function DispatchPage() {
                       }
                       return newArr;
                     });
-                  }} 
+                  }}
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Number of Trips *</label>
-                <Input 
+                <Input
                   type="number"
                   min="1"
-                  value={launchTripsCount} 
-                  onChange={(e) => setLaunchTripsCount(e.target.value)} 
+                  value={launchTripsCount}
+                  onChange={(e) => setLaunchTripsCount(e.target.value)}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Consolidated Route Summary *</label>
-              <Input 
-                value={tripRoute} 
-                onChange={(e) => setTripRoute(e.target.value)} 
+              <Input
+                value={tripRoute}
+                onChange={(e) => setTripRoute(e.target.value)}
                 placeholder="Transit nodes summary for all trucks"
               />
             </div>
@@ -1039,7 +1088,7 @@ export default function DispatchPage() {
                     <div className="absolute top-0 right-0 bg-primary text-primary-foreground px-2 py-1 text-xs font-bold rounded-bl-md rounded-tr-md">
                       Truck {index + 1}
                     </div>
-                    
+
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Truck Source *</label>
                       <Select onValueChange={(val: any) => updateAssignment('truckSource', val)} value={assignment.truckSource}>
@@ -1069,48 +1118,48 @@ export default function DispatchPage() {
                       </div>
                     ) : (
                       <div className="grid grid-cols-2 gap-4">
-                         <div className="space-y-2">
-                           <label className="text-sm font-medium">Truck Type *</label>
-                           <Select onValueChange={(val) => updateAssignment('rentedTruckType', val)} value={assignment.rentedTruckType}>
-                             <SelectTrigger>
-                               <SelectValue placeholder="Select Truck Type" />
-                             </SelectTrigger>
-                             <SelectContent>
-                               <SelectItem value="Flatbed">Flatbed</SelectItem>
-                               <SelectItem value="Reefer">Reefer</SelectItem>
-                               <SelectItem value="Box Truck">Box Truck</SelectItem>
-                               <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
-                               <SelectItem value="Lowboy">Lowboy</SelectItem>
-                               <SelectItem value="Container Carrier">Container Carrier</SelectItem>
-                               <SelectItem value="Tanker">Tanker</SelectItem>
-                               <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
-                             </SelectContent>
-                           </Select>
-                         </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Truck Type *</label>
+                          <Select onValueChange={(val) => updateAssignment('rentedTruckType', val)} value={assignment.rentedTruckType}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select Truck Type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Flatbed">Flatbed</SelectItem>
+                              <SelectItem value="Reefer">Reefer</SelectItem>
+                              <SelectItem value="Box Truck">Box Truck</SelectItem>
+                              <SelectItem value="Curtain Sider">Curtain Sider</SelectItem>
+                              <SelectItem value="Lowboy">Lowboy</SelectItem>
+                              <SelectItem value="Container Carrier">Container Carrier</SelectItem>
+                              <SelectItem value="Tanker">Tanker</SelectItem>
+                              <SelectItem value="Pickup Truck">Pickup Truck</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Plate Number *</label>
-                          <Input 
-                            value={assignment.rentedTruckNumber} 
-                            onChange={(e) => updateAssignment('rentedTruckNumber', e.target.value)} 
+                          <Input
+                            value={assignment.rentedTruckNumber}
+                            onChange={(e) => updateAssignment('rentedTruckNumber', e.target.value)}
                             placeholder="e.g. 12345"
                           />
                         </div>
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Capacity (Tons) *</label>
-                          <Input 
+                          <Input
                             type="number"
-                            value={assignment.rentedCapacity} 
-                            onChange={(e) => updateAssignment('rentedCapacity', e.target.value)} 
+                            value={assignment.rentedCapacity}
+                            onChange={(e) => updateAssignment('rentedCapacity', e.target.value)}
                             placeholder="e.g. 10"
                           />
                         </div>
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Truck Price (BD) *</label>
-                          <Input 
+                          <Input
                             type="number"
                             step="0.001"
-                            value={assignment.rentedTruckPrice} 
-                            onChange={(e) => updateAssignment('rentedTruckPrice', e.target.value)} 
+                            value={assignment.rentedTruckPrice}
+                            onChange={(e) => updateAssignment('rentedTruckPrice', e.target.value)}
                             placeholder="0.000"
                           />
                         </div>
@@ -1134,10 +1183,10 @@ export default function DispatchPage() {
                         </SelectContent>
                       </Select>
                       {assignment.driverId === "manual" && (
-                        <Input 
-                          placeholder="Enter manual driver name..." 
-                          value={assignment.manualDriverName} 
-                          onChange={(e) => updateAssignment('manualDriverName', e.target.value)} 
+                        <Input
+                          placeholder="Enter manual driver name..."
+                          value={assignment.manualDriverName}
+                          onChange={(e) => updateAssignment('manualDriverName', e.target.value)}
                           className="mt-2"
                         />
                       )}
@@ -1146,19 +1195,19 @@ export default function DispatchPage() {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Trailer Number</label>
-                        <Input 
-                          value={assignment.trailerNumber} 
-                          onChange={(e) => updateAssignment('trailerNumber', e.target.value)} 
+                        <Input
+                          value={assignment.trailerNumber}
+                          onChange={(e) => updateAssignment('trailerNumber', e.target.value)}
                           placeholder="e.g. TR-890"
                         />
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Trip Price / Revenue (BD)</label>
-                        <Input 
+                        <Input
                           type="number"
                           step="0.001"
-                          value={assignment.tripPrice} 
-                          onChange={(e) => updateAssignment('tripPrice', e.target.value)} 
+                          value={assignment.tripPrice}
+                          onChange={(e) => updateAssignment('tripPrice', e.target.value)}
                           placeholder="0.000"
                         />
                       </div>
@@ -1172,8 +1221,8 @@ export default function DispatchPage() {
             <Button type="button" variant="outline" onClick={() => setIsAssignDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              type="button" 
+            <Button
+              type="button"
               onClick={() => {
                 createBatchTripsMutation.mutate({
                   trips: launchTruckAssignments,
@@ -1182,10 +1231,10 @@ export default function DispatchPage() {
                 });
               }}
               disabled={
-                !tripRoute || 
-                createBatchTripsMutation.isPending || 
-                launchTruckAssignments.some(t => 
-                  t.truckSource === 'owned' 
+                !tripRoute ||
+                createBatchTripsMutation.isPending ||
+                launchTruckAssignments.some(t =>
+                  t.truckSource === 'owned'
                     ? (!t.vehicleId || !t.driverId || (t.driverId === 'manual' && !t.manualDriverName))
                     : (!t.rentedTruckType || !t.rentedTruckNumber || !t.rentedCapacity || !t.driverId || (t.driverId === 'manual' && !t.manualDriverName))
                 )
@@ -1237,7 +1286,7 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Actual Delivery Date *</label>
-                <Input 
+                <Input
                   type="date"
                   value={podDeliveryDate}
                   onChange={(e) => setPodDeliveryDate(e.target.value)}
@@ -1245,7 +1294,7 @@ export default function DispatchPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Actual Delivery Time *</label>
-                <Input 
+                <Input
                   type="time"
                   value={podDeliveryTime}
                   onChange={(e) => setPodDeliveryTime(e.target.value)}
@@ -1256,7 +1305,7 @@ export default function DispatchPage() {
             <div className="grid grid-cols-3 gap-2">
               <div className="space-y-2">
                 <label className="text-xs font-medium">Received Qty</label>
-                <Input 
+                <Input
                   type="number"
                   step="0.001"
                   value={podReceivedQty}
@@ -1265,7 +1314,7 @@ export default function DispatchPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-medium">Shortage Qty</label>
-                <Input 
+                <Input
                   type="number"
                   step="0.001"
                   value={podShortageQty}
@@ -1274,7 +1323,7 @@ export default function DispatchPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-medium">Damaged Qty</label>
-                <Input 
+                <Input
                   type="number"
                   step="0.001"
                   value={podDamagedQty}
@@ -1285,7 +1334,7 @@ export default function DispatchPage() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Damage / Shortage Reason</label>
-              <Input 
+              <Input
                 value={podDamageReason}
                 onChange={(e) => setPodDamageReason(e.target.value)}
                 placeholder="e.g. Wet bags, torn packaging, rough driving"
@@ -1295,7 +1344,7 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Receiver Name</label>
-                <Input 
+                <Input
                   value={podReceiverName}
                   onChange={(e) => setPodReceiverName(e.target.value)}
                   placeholder="e.g. Zakaria Ali"
@@ -1303,7 +1352,7 @@ export default function DispatchPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Receiver Contact</label>
-                <Input 
+                <Input
                   value={podReceiverContact}
                   onChange={(e) => setPodReceiverContact(e.target.value)}
                   placeholder="e.g. +973 33445566"
@@ -1314,10 +1363,10 @@ export default function DispatchPage() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Proof-of-Delivery Attachment (Image/PDF)</label>
               <div className="flex gap-2">
-                <Input 
-                  type="file" 
+                <Input
+                  type="file"
                   className="cursor-pointer"
-                  onChange={handleFileUpload} 
+                  onChange={handleFileUpload}
                   disabled={isUploading}
                 />
                 {isUploading && <Button disabled variant="outline"><RefreshCw className="h-4 w-4 animate-spin" /></Button>}
@@ -1331,9 +1380,9 @@ export default function DispatchPage() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Issue Log / Exceptions Notes</label>
-              <Textarea 
-                value={issueLog} 
-                onChange={(e) => setIssueLog(e.target.value)} 
+              <Textarea
+                value={issueLog}
+                onChange={(e) => setIssueLog(e.target.value)}
                 placeholder="Log damages, returned bags, or warehouse delays here..."
               />
             </div>
@@ -1342,8 +1391,8 @@ export default function DispatchPage() {
             <Button type="button" variant="outline" onClick={() => setIsPODDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              type="button" 
+            <Button
+              type="button"
               onClick={() => updateDeliveryMutation.mutate({
                 tripId: selectedTrip?.id || "",
                 orderId: selectedOrderIdForPOD,
@@ -1390,7 +1439,7 @@ export default function DispatchPage() {
                 </SelectContent>
               </Select>
             </div>
-            
+
             {selectedOutletIdForHistory && (
               <div className="mt-4 border rounded-md">
                 <Table>
@@ -1452,18 +1501,18 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-medium">Driver Entitlement *</label>
-                <Input 
-                  type="number" 
-                  value={settlementEntitlement} 
-                  onChange={(e) => setSettlementEntitlement(e.target.value)} 
+                <Input
+                  type="number"
+                  value={settlementEntitlement}
+                  onChange={(e) => setSettlementEntitlement(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-xs font-medium">Driver Advance Paid</label>
-                <Input 
-                  type="number" 
-                  value={settlementAdvance} 
-                  onChange={(e) => setSettlementAdvance(e.target.value)} 
+                <Input
+                  type="number"
+                  value={settlementAdvance}
+                  onChange={(e) => setSettlementAdvance(e.target.value)}
                 />
               </div>
             </div>
@@ -1471,26 +1520,26 @@ export default function DispatchPage() {
             <div className="grid grid-cols-3 gap-2">
               <div className="space-y-2">
                 <label className="text-[11px] font-medium">Fuel Expenses</label>
-                <Input 
-                  type="number" 
-                  value={settlementFuel} 
-                  onChange={(e) => setSettlementFuel(e.target.value)} 
+                <Input
+                  type="number"
+                  value={settlementFuel}
+                  onChange={(e) => setSettlementFuel(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-medium">Tolls / Border Fees</label>
-                <Input 
-                  type="number" 
-                  value={settlementTolls} 
-                  onChange={(e) => setSettlementTolls(e.target.value)} 
+                <Input
+                  type="number"
+                  value={settlementTolls}
+                  onChange={(e) => setSettlementTolls(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-medium">Other Expenses</label>
-                <Input 
-                  type="number" 
-                  value={settlementOther} 
-                  onChange={(e) => setSettlementOther(e.target.value)} 
+                <Input
+                  type="number"
+                  value={settlementOther}
+                  onChange={(e) => setSettlementOther(e.target.value)}
                 />
               </div>
             </div>
@@ -1498,10 +1547,10 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-medium">Deductions / Fines</label>
-                <Input 
-                  type="number" 
-                  value={settlementDeductions} 
-                  onChange={(e) => setSettlementDeductions(e.target.value)} 
+                <Input
+                  type="number"
+                  value={settlementDeductions}
+                  onChange={(e) => setSettlementDeductions(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
@@ -1535,8 +1584,8 @@ export default function DispatchPage() {
             <Button type="button" variant="outline" onClick={() => setIsSettlementDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              type="button" 
+            <Button
+              type="button"
               onClick={() => {
                 const totalExp = parseFloat(settlementFuel || "0") + parseFloat(settlementTolls || "0") + parseFloat(settlementOther || "0");
                 const balance = parseFloat(settlementEntitlement || "0") + totalExp - parseFloat(settlementAdvance || "0") - parseFloat(settlementDeductions || "0");
@@ -1577,7 +1626,7 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Actual Pickup Date *</label>
-                <Input 
+                <Input
                   type="date"
                   value={departPickupDate}
                   onChange={(e) => setDepartPickupDate(e.target.value)}
@@ -1585,7 +1634,7 @@ export default function DispatchPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Actual Pickup Time *</label>
-                <Input 
+                <Input
                   type="time"
                   value={departPickupTime}
                   onChange={(e) => setDepartPickupTime(e.target.value)}
@@ -1596,7 +1645,7 @@ export default function DispatchPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Loaded Quantity</label>
-                <Input 
+                <Input
                   type="number"
                   step="0.001"
                   value={departLoadedQty}
@@ -1622,7 +1671,7 @@ export default function DispatchPage() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Loading Notes</label>
-              <Textarea 
+              <Textarea
                 value={departLoadingNotes}
                 onChange={(e) => setDepartLoadingNotes(e.target.value)}
                 placeholder="Log any seals, temperature readings, or packaging observations..."
@@ -1633,8 +1682,8 @@ export default function DispatchPage() {
             <Button type="button" variant="outline" onClick={() => setIsDepartDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              type="button" 
+            <Button
+              type="button"
               onClick={() => {
                 if (departTrip) {
                   updateTripMutation.mutate({
@@ -1687,7 +1736,7 @@ export default function DispatchPage() {
                           .flatMap(o => (o.routeLegs as any[] || []).flatMap(leg => [leg.originCity, leg.destinationCity]))
                       )).filter(Boolean).map(city => <option key={city} value={city} />)}
                     </datalist>
-                    <Input 
+                    <Input
                       list="route-leg-cities"
                       value={transitLocation}
                       onChange={(e) => setTransitLocation(e.target.value)}
@@ -1696,7 +1745,7 @@ export default function DispatchPage() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-medium">GPS Coordinates</label>
-                    <Input 
+                    <Input
                       value={transitGps}
                       onChange={(e) => setTransitGps(e.target.value)}
                       placeholder="e.g. 22.012, 56.124"
@@ -1711,15 +1760,15 @@ export default function DispatchPage() {
               <div className="p-4 border rounded-md bg-muted/30 space-y-3">
                 <div className="flex justify-between items-center">
                   <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Delays</h3>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitDelays([...transitDelays, {reason: "", durationHours: ""}])}>
-                    <Plus className="h-3 w-3 mr-1"/> Add Delay
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitDelays([...transitDelays, { reason: "", durationHours: "" }])}>
+                    <Plus className="h-3 w-3 mr-1" /> Add Delay
                   </Button>
                 </div>
                 {transitDelays.map((delay, index) => (
                   <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
                     <div className="space-y-2">
                       <label className="text-xs font-medium">Delay Reason</label>
-                      <Input 
+                      <Input
                         value={delay.reason}
                         onChange={(e) => {
                           const newDelays = [...transitDelays];
@@ -1731,7 +1780,7 @@ export default function DispatchPage() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-medium">Duration (Hours)</label>
-                      <Input 
+                      <Input
                         type="number"
                         value={delay.durationHours}
                         onChange={(e) => {
@@ -1759,15 +1808,15 @@ export default function DispatchPage() {
               <div className="p-4 border rounded-md bg-muted/30 space-y-3">
                 <div className="flex justify-between items-center">
                   <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Transit Incidents</h3>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitIncidents([...transitIncidents, {description: "", cost: ""}])}>
-                    <Plus className="h-3 w-3 mr-1"/> Add Incident
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitIncidents([...transitIncidents, { description: "", cost: "" }])}>
+                    <Plus className="h-3 w-3 mr-1" /> Add Incident
                   </Button>
                 </div>
                 {transitIncidents.map((incident, index) => (
                   <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
                     <div className="space-y-2">
                       <label className="text-xs font-medium">Incident Description</label>
-                      <Input 
+                      <Input
                         value={incident.description}
                         onChange={(e) => {
                           const newIncidents = [...transitIncidents];
@@ -1779,7 +1828,7 @@ export default function DispatchPage() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-medium">Estimated Cost (BD)</label>
-                      <Input 
+                      <Input
                         type="number"
                         step="0.001"
                         value={incident.cost}
@@ -1808,15 +1857,15 @@ export default function DispatchPage() {
               <div className="p-4 border rounded-md bg-muted/30 space-y-3">
                 <div className="flex justify-between items-center">
                   <h3 className="font-semibold text-xs text-primary uppercase tracking-wider">Log Additional Expenses</h3>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitExpenses([...transitExpenses, {name: "", cost: ""}])}>
-                    <Plus className="h-3 w-3 mr-1"/> Add Expense
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setTransitExpenses([...transitExpenses, { name: "", cost: "" }])}>
+                    <Plus className="h-3 w-3 mr-1" /> Add Expense
                   </Button>
                 </div>
                 {transitExpenses.map((expense, index) => (
                   <div key={index} className="grid grid-cols-[1fr,1fr,auto] gap-4 items-end">
                     <div className="space-y-2">
                       <label className="text-xs font-medium">Expense Title</label>
-                      <Input 
+                      <Input
                         value={expense.name}
                         onChange={(e) => {
                           const newExpenses = [...transitExpenses];
@@ -1828,7 +1877,7 @@ export default function DispatchPage() {
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-medium">Cost Amount (BD)</label>
-                      <Input 
+                      <Input
                         type="number"
                         step="0.001"
                         value={expense.cost}
@@ -1856,8 +1905,8 @@ export default function DispatchPage() {
             <Button type="button" variant="outline" onClick={() => setActiveLogType(null)}>
               Cancel
             </Button>
-            <Button 
-              type="button" 
+            <Button
+              type="button"
               onClick={() => {
                 if (transitTrip) {
                   // Merge/append delays
@@ -1939,20 +1988,20 @@ export default function DispatchPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Number of Trips *</label>
-              <Input 
+              <Input
                 type="number"
                 min="1"
-                value={configTrips} 
-                onChange={(e) => setConfigTrips(e.target.value)} 
+                value={configTrips}
+                onChange={(e) => setConfigTrips(e.target.value)}
               />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Number of Trucks *</label>
-              <Input 
+              <Input
                 type="number"
                 min="1"
-                value={configTrucks} 
-                onChange={(e) => setConfigTrucks(e.target.value)} 
+                value={configTrucks}
+                onChange={(e) => setConfigTrucks(e.target.value)}
               />
             </div>
             <div className="pt-2">
@@ -1967,8 +2016,8 @@ export default function DispatchPage() {
             <Button type="button" variant="outline" onClick={() => setIsConfigureTripsDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              type="button" 
+            <Button
+              type="button"
               onClick={() => {
                 if (configuringOrder) {
                   updateDispatchPlanMutation.mutate({
@@ -1992,11 +2041,11 @@ export default function DispatchPage() {
           <DialogHeader>
             <DialogTitle>Trucking Invoice</DialogTitle>
           </DialogHeader>
-          
+
           {selectedInvoice && (() => {
             const client = clientsList?.find(c => c.id === selectedInvoice.customerId);
             const trip = tripsList?.find(t => t.id === selectedInvoice.tripId);
-            
+
             return (
               <div className="space-y-8 bg-white text-black p-8 border rounded-md">
                 <div className="flex justify-between items-start border-b pb-6">
@@ -2075,11 +2124,11 @@ export default function DispatchPage() {
                 {trip && (() => {
                   const isProfitable = parseFloat(trip.grossProfit || "0") >= 0;
                   const additionalExpensesTotal = trip.additionalExpenses?.reduce((s: number, e: any) => s + parseFloat(e.cost || 0), 0) || 0;
-                  
+
                   return (
                     <div className="mt-8 border-t pt-6 space-y-4">
                       <h3 className="font-bold text-sm text-gray-800 uppercase tracking-wider">Trip Profitability & Expenses (Internal Audit)</h3>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         {/* Revenue Card */}
                         <div className="bg-blue-50/50 p-4 border border-blue-100 rounded-md">
@@ -2099,7 +2148,7 @@ export default function DispatchPage() {
                         <div className={`p-4 border rounded-md ${isProfitable ? 'bg-green-50/50 border-green-100' : 'bg-rose-50/50 border-rose-100'}`}>
                           <p className={`text-[10px] font-bold uppercase ${isProfitable ? 'text-green-600' : 'text-rose-600'}`}>Net Profit / Margin</p>
                           <p className={`text-lg font-extrabold mt-1 ${isProfitable ? 'text-green-900' : 'text-rose-900'}`}>
-                            {formatCurrency(parseFloat(trip.grossProfit || "0"))} 
+                            {formatCurrency(parseFloat(trip.grossProfit || "0"))}
                             <span className="text-xs font-semibold ml-1.5">({trip.profitMargin || "0.00"}%)</span>
                           </p>
                           <span className={`text-[9px] ${isProfitable ? 'text-green-500' : 'text-rose-500'}`}>

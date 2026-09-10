@@ -21,6 +21,12 @@ import {
 } from "./date-validation";
  import { validateProductDates, validateTransactionDates, validateDocumentDates, validateReminderDates, validateProjectDates } from "@shared/date-validation";
 import { sendTaskThresholdNotification } from "./lib/email";
+import { 
+  initTelemetryWebSocket, 
+  getLiveFleetTelemetry, 
+  getTripTelemetryHistory, 
+  updateVehicleTelemetry 
+} from "./telemetry-ws";
 
 const uploadDir = path.join(process.cwd(), "uploads", "invoices");
 if (!fs.existsSync(uploadDir)) {
@@ -10853,6 +10859,27 @@ export async function registerRoutes(
     } catch (e: any) {
       console.error("Generate Delivery PDF report error:", e);
       res.status(500).json({ error: "Failed to generate Delivery POD PDF receipt", details: e?.message });
+    }
+  });
+
+  // Initialize 3D Live Vehicle Telemetry WebSocket Gateway
+  initTelemetryWebSocket(httpServer);
+
+  // 3D Telemetry REST Fallback Endpoints
+  app.get("/api/telemetry/live", (_req: Request, res: Response) => {
+    res.json(getLiveFleetTelemetry());
+  });
+
+  app.get("/api/telemetry/history/:tripId", (req: Request, res: Response) => {
+    res.json(getTripTelemetryHistory(req.params.tripId));
+  });
+
+  app.post("/api/telemetry/update", (req: Request, res: Response) => {
+    try {
+      updateVehicleTelemetry(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
     }
   });
 
