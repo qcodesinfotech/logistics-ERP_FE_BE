@@ -2769,7 +2769,7 @@ export default function DailyDispatchPage() {
         </TabsContent>
 
         {/* ===== CUSTOMER REPORT TAB ===== */}
-        <TabsContent value="customer-report" className="flex-1 overflow-auto p-4 md:p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
+        <TabsContent value="customer-report" className="flex-1 overflow-auto p-2 sm:p-4 min-h-0 bg-background print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
           <ErrorBoundary>
             <CustomerReportView />
           </ErrorBoundary>

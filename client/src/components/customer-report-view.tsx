@@ -144,91 +144,91 @@ export default function CustomerReportView() {
 
   const getStorageBadgeClass = (type: string) => {
     const t = (type || "").toLowerCase();
-    if (t.includes("frozen") || t.includes("frz")) return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300";
-    if (t.includes("chilled") || t.includes("ch")) return "bg-cyan-100 text-cyan-800 border-cyan-200 dark:bg-cyan-900/40 dark:text-cyan-300";
-    if (t.includes("dry")) return "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300";
-    if (t.includes("pack")) return "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/40 dark:text-purple-300";
-    return "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-slate-300";
+    if (t.includes("frozen") || t.includes("frz")) return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 font-medium";
+    if (t.includes("chilled") || t.includes("ch")) return "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20 font-medium";
+    if (t.includes("dry")) return "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 font-medium";
+    if (t.includes("pack")) return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20 font-medium";
+    return "bg-muted text-muted-foreground border-border font-medium";
   };
 
   const getBrandBadgeClass = (brand: string) => {
     const b = (brand || "").toLowerCase();
-    if (b.includes("kfc")) return "bg-red-100 text-red-800 border-red-200 font-semibold dark:bg-red-950 dark:text-red-300";
-    if (b.includes("hardee")) return "bg-amber-100 text-amber-900 border-amber-200 font-semibold dark:bg-amber-950 dark:text-amber-300";
-    if (b.includes("pizza")) return "bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold dark:bg-emerald-950 dark:text-emerald-300";
-    if (b.includes("tgi")) return "bg-rose-100 text-rose-800 border-rose-200 font-semibold dark:bg-rose-950 dark:text-rose-300";
-    return "bg-indigo-100 text-indigo-800 border-indigo-200 font-semibold dark:bg-indigo-950 dark:text-indigo-300";
+    if (b.includes("kfc")) return "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20 font-semibold";
+    if (b.includes("hardee")) return "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 font-semibold";
+    if (b.includes("pizza")) return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-semibold";
+    if (b.includes("tgi")) return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 font-semibold";
+    return "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20 font-semibold";
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 md:p-6 print:p-0">
+    <div className="space-y-2.5 w-full p-2.5 md:p-3.5 print:p-0">
       {/* Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 bg-background print:hidden">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-border pb-2 bg-background print:hidden">
         <div>
-          <h2 className="text-xl md:text-2xl font-bold tracking-tight flex items-center gap-2">
-            <FileSpreadsheet className="h-6 w-6 text-emerald-600" />
+          <h2 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-emerald-600 dark:text-emerald-500 shrink-0" />
             Customer Activity & Fleet Utilization Report
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Outlet-wise delivery activity, truck capacity utilization, carton occupancy %, and deviation log based on customer reporting standards.
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Outlet-wise delivery activity, truck capacity utilization, carton occupancy %, and deviation log.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           <Button 
             variant="outline" 
             size="sm" 
             onClick={() => refetch()} 
             disabled={isFetching}
-            className="gap-1.5"
+            className="h-7 text-xs gap-1.5 px-2.5 bg-background border-border"
           >
-            <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
           <Button 
             variant="outline" 
             size="sm" 
             onClick={() => window.print()}
-            className="gap-1.5"
+            className="h-7 text-xs gap-1.5 px-2.5 bg-background border-border"
           >
-            <Printer className="h-4 w-4" />
+            <Printer className="h-3.5 w-3.5" />
             Print Report
           </Button>
           <Button 
             size="sm" 
             onClick={handleExportFullExcel} 
             disabled={!activityRecords.length || isExporting}
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm transition-all"
+            className="h-7 text-xs gap-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-xs transition-all"
           >
-            {isExporting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-            {isExporting ? "Generating Styled Excel..." : "Export Customer Report (Excel)"}
+            {isExporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+            {isExporting ? "Generating..." : "Export Customer Report (Excel)"}
           </Button>
         </div>
       </div>
 
       {/* Filter Toolbar */}
-      <Card className="print:hidden border-slate-200 dark:border-slate-800 shadow-sm">
-        <CardContent className="pt-5 pb-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-            <div className="sm:col-span-2 lg:col-span-4 space-y-1">
+      <Card className="print:hidden border-border bg-card text-card-foreground shadow-xs">
+        <CardContent className="p-2 sm:px-3 sm:py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 items-end">
+            <div className="sm:col-span-2 lg:col-span-4 space-y-0.5">
               <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold text-muted-foreground">
+                <Label className="text-[11px] font-semibold text-muted-foreground">
                   {dateMode === "single" ? "Single Day Selection" : "Date Range"}
                 </Label>
-                <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded p-0.5 text-[10px]">
+                <div className="flex items-center bg-muted rounded p-0.5 text-[10px] border border-border">
                   <button
                     type="button"
                     onClick={() => {
                       setDateMode("single");
                       if (startDate) setEndDate(startDate);
                     }}
-                    className={`px-2 py-0.5 rounded font-medium transition-colors ${dateMode === "single" ? "bg-white dark:bg-slate-700 shadow-xs text-primary font-bold" : "text-muted-foreground"}`}
+                    className={`px-1.5 py-0.5 rounded font-medium transition-colors ${dateMode === "single" ? "bg-background shadow-xs text-foreground font-bold" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     Single Day
                   </button>
                   <button
                     type="button"
                     onClick={() => setDateMode("range")}
-                    className={`px-2 py-0.5 rounded font-medium transition-colors ${dateMode === "range" ? "bg-white dark:bg-slate-700 shadow-xs text-primary font-bold" : "text-muted-foreground"}`}
+                    className={`px-1.5 py-0.5 rounded font-medium transition-colors ${dateMode === "range" ? "bg-background shadow-xs text-foreground font-bold" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     Date Range
                   </button>
@@ -236,7 +236,7 @@ export default function CustomerReportView() {
               </div>
 
               {dateMode === "single" ? (
-                <div className="flex gap-1.5 items-center">
+                <div className="flex gap-1 items-center">
                   <Input 
                     type="date" 
                     value={startDate} 
@@ -244,13 +244,13 @@ export default function CustomerReportView() {
                       setStartDate(e.target.value);
                       setEndDate(e.target.value);
                     }} 
-                    className="h-8 text-xs flex-1"
+                    className="h-7 text-xs flex-1 bg-background border-border"
                   />
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 text-[11px] px-2"
+                    className="h-7 text-[11px] px-2 shrink-0 bg-background border-border"
                     onClick={() => {
                       const today = new Date().toISOString().split("T")[0];
                       setStartDate(today);
@@ -263,7 +263,7 @@ export default function CustomerReportView() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 text-[11px] px-2"
+                    className="h-7 text-[11px] px-2 shrink-0 bg-background border-border"
                     onClick={() => {
                       setStartDate("2026-09-01");
                       setEndDate("2026-09-01");
@@ -273,29 +273,29 @@ export default function CustomerReportView() {
                   </Button>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-2 gap-1">
                   <Input 
                     type="date" 
                     value={startDate} 
                     onChange={e => setStartDate(e.target.value)} 
                     placeholder="Start"
-                    className="h-8 text-xs"
+                    className="h-7 text-xs bg-background border-border"
                   />
                   <Input 
                     type="date" 
                     value={endDate} 
                     onChange={e => setEndDate(e.target.value)} 
                     placeholder="End"
-                    className="h-8 text-xs"
+                    className="h-7 text-xs bg-background border-border"
                   />
                 </div>
               )}
             </div>
 
-            <div className="sm:col-span-1 lg:col-span-2 space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground">Brand</Label>
+            <div className="sm:col-span-1 lg:col-span-2 space-y-0.5">
+              <Label className="text-[11px] font-semibold text-muted-foreground">Brand</Label>
               <Select value={selectedBrand} onValueChange={setSelectedBrand}>
-                <SelectTrigger className="h-8 text-xs">
+                <SelectTrigger className="h-7 text-xs bg-background border-border">
                   <SelectValue placeholder="All Brands" />
                 </SelectTrigger>
                 <SelectContent>
@@ -307,10 +307,10 @@ export default function CustomerReportView() {
               </Select>
             </div>
 
-            <div className="sm:col-span-1 lg:col-span-2 space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground">Type of Goods</Label>
+            <div className="sm:col-span-1 lg:col-span-2 space-y-0.5">
+              <Label className="text-[11px] font-semibold text-muted-foreground">Type of Goods</Label>
               <Select value={selectedStorageType} onValueChange={setSelectedStorageType}>
-                <SelectTrigger className="h-8 text-xs">
+                <SelectTrigger className="h-7 text-xs bg-background border-border">
                   <SelectValue placeholder="All Storage Types" />
                 </SelectTrigger>
                 <SelectContent>
@@ -322,10 +322,10 @@ export default function CustomerReportView() {
               </Select>
             </div>
 
-            <div className="sm:col-span-1 lg:col-span-2 space-y-1">
-              <Label className="text-xs font-semibold text-muted-foreground">Truck No</Label>
+            <div className="sm:col-span-1 lg:col-span-2 space-y-0.5">
+              <Label className="text-[11px] font-semibold text-muted-foreground">Truck No</Label>
               <Select value={selectedTruck} onValueChange={setSelectedTruck}>
-                <SelectTrigger className="h-8 text-xs">
+                <SelectTrigger className="h-7 text-xs bg-background border-border">
                   <SelectValue placeholder="All Trucks" />
                 </SelectTrigger>
                 <SelectContent>
@@ -337,7 +337,7 @@ export default function CustomerReportView() {
               </Select>
             </div>
 
-            <div className="sm:col-span-1 lg:col-span-2 flex gap-2">
+            <div className="sm:col-span-1 lg:col-span-2">
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -349,7 +349,7 @@ export default function CustomerReportView() {
                   setSelectedTruck("all");
                   setSearchQuery("");
                 }}
-                className="h-8 text-xs text-muted-foreground w-full"
+                className="h-7 text-xs text-muted-foreground w-full hover:bg-muted"
               >
                 Reset Filters
               </Button>
@@ -358,143 +358,168 @@ export default function CustomerReportView() {
         </CardContent>
       </Card>
 
-      {/* KPI Cards Header */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Truck className="h-3.5 w-3.5 text-blue-600" /> Total Stops
+      {/* KPI Cards Header - Compact Streamlined View */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <Truck className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+              <span className="truncate">Total Stops</span>
             </div>
-            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+            <div className="text-lg sm:text-xl font-bold text-foreground mt-0.5 leading-tight">
               {activityRecords.length.toLocaleString()}
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Outlet deliveries</div>
+            <div className="text-[10px] text-muted-foreground truncate">Outlet deliveries</div>
           </CardContent>
         </Card>
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Package className="h-3.5 w-3.5 text-emerald-600" /> Total Cases
+
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <Package className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+              <span className="truncate">Total Cases</span>
             </div>
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-              {Math.round(totalCases).toLocaleString()} <span className="text-xs font-normal text-slate-500">CS</span>
+            <div className="text-lg sm:text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 leading-tight">
+              {Math.round(totalCases).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">CS</span>
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Qty delivered</div>
+            <div className="text-[10px] text-muted-foreground truncate">Qty delivered</div>
           </CardContent>
         </Card>
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5 text-amber-600" /> Fleet Util %
+
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">Fleet Util %</span>
             </div>
-            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-amber-600 dark:text-amber-400 mt-0.5 leading-tight">
               {avgUtil}%
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Target: 100% (10h)</div>
+            <div className="text-[10px] text-muted-foreground truncate">Target: 100% (10h)</div>
           </CardContent>
         </Card>
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <TrendingUp className="h-3.5 w-3.5 text-indigo-600" /> Occupancy %
+
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <TrendingUp className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+              <span className="truncate">Occupancy %</span>
             </div>
-            <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-indigo-600 dark:text-indigo-400 mt-0.5 leading-tight">
               {avgCarton}%
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Target: 95% cap</div>
+            <div className="text-[10px] text-muted-foreground truncate">Target: 95% cap</div>
           </CardContent>
         </Card>
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Truck className="h-3.5 w-3.5 text-purple-600" /> Active Trips
+
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <Truck className="h-3.5 w-3.5 text-purple-500 shrink-0" />
+              <span className="truncate">Active Trips</span>
             </div>
-            <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-purple-600 dark:text-purple-400 mt-0.5 leading-tight">
               {utilizationRecords.length}
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Truck dispatches</div>
+            <div className="text-[10px] text-muted-foreground truncate">Truck dispatches</div>
           </CardContent>
         </Card>
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Gauge className="h-3.5 w-3.5 text-cyan-600" /> Total KM Used
+
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <Gauge className="h-3.5 w-3.5 text-cyan-500 shrink-0" />
+              <span className="truncate">Total KM Used</span>
             </div>
-            <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">
-              {(reportData?.totalKmUsed || 0).toLocaleString()} <span className="text-xs font-normal text-slate-500">KM</span>
+            <div className="text-lg sm:text-xl font-bold text-cyan-600 dark:text-cyan-400 mt-0.5 leading-tight">
+              {(reportData?.totalKmUsed || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted-foreground">KM</span>
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Fleet travel distance</div>
+            <div className="text-[10px] text-muted-foreground truncate">Fleet distance</div>
           </CardContent>
         </Card>
-        <Card className="bg-slate-50/50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800">
-          <CardContent className="pt-4 pb-3">
-            <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-rose-600" /> Deviations
+
+        <Card className="bg-card text-card-foreground border-border shadow-xs hover:border-primary/40 transition-colors">
+          <CardContent className="p-2 sm:p-2.5">
+            <div className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5 truncate">
+              <AlertTriangle className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+              <span className="truncate">Deviations</span>
             </div>
-            <div className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1">
+            <div className="text-lg sm:text-xl font-bold text-rose-600 dark:text-rose-400 mt-0.5 leading-tight">
               {deviations.length}
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Damages & discrepancies</div>
+            <div className="text-[10px] text-muted-foreground truncate">Damages & discrepancies</div>
           </CardContent>
         </Card>
       </div>
 
       {/* Main Tabs */}
-      <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
-          <TabsList className="bg-slate-100 dark:bg-slate-800 p-1">
-            <TabsTrigger value="activity" className="text-xs gap-1.5">
+      <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="space-y-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-1.5">
+          <TabsList className="bg-muted p-0.5 h-7.5 border border-border">
+            <TabsTrigger value="activity" className="text-xs py-1 px-2.5 gap-1.5">
               Activity Report (Outlet-Wise)
               <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
                 {activityRecords.length}
               </Badge>
             </TabsTrigger>
-            <TabsTrigger value="utilization" className="text-xs gap-1.5">
+            <TabsTrigger value="utilization" className="text-xs py-1 px-2.5 gap-1.5">
               Truck Utilization & KPIs
               <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0">
                 {utilizationRecords.length}
               </Badge>
             </TabsTrigger>
-            <TabsTrigger value="deviations" className="text-xs gap-1.5">
+            <TabsTrigger value="deviations" className="text-xs py-1 px-2.5 gap-1.5">
               Outbound Deviations
-              <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0 bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-300">
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0 bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                 {deviations.length}
               </Badge>
             </TabsTrigger>
-            <TabsTrigger value="masters" className="text-xs gap-1.5">
+            <TabsTrigger value="masters" className="text-xs py-1 px-2.5 gap-1.5">
               Master Data (Outlets & Fleet)
             </TabsTrigger>
           </TabsList>
 
           {activeSubTab === "activity" && (
-            <div className="relative w-full sm:w-64 print:hidden">
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <div className="relative w-full sm:w-60 print:hidden">
+              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
               <Input 
                 placeholder="Search outlet, truck, brand..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-xs bg-background"
+                className="pl-8 h-7 text-xs bg-background border-border"
               />
             </div>
           )}
         </div>
 
-        {/* ==================== TAB 1: ACTIVITY REPORT (IMAGE 1) ==================== */}
-        <TabsContent value="activity" className="space-y-4">
-          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-lg flex flex-wrap items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200">
-            <div className="font-semibold flex items-center gap-1.5">
-              <Clock className="h-4 w-4 text-amber-700" />
-              Customer Template Timestamps Legend:
+        {/* ==================== TAB 1: ACTIVITY REPORT ==================== */}
+        <TabsContent value="activity" className="space-y-2">
+          <div className="py-1 px-2.5 bg-card border border-border rounded flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-muted-foreground shadow-2xs">
+            <div className="font-semibold flex items-center gap-1.5 text-foreground">
+              <Clock className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span>Timestamps Legend:</span>
             </div>
-            <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
-              <span><strong className="text-blue-700 dark:text-blue-400">[1]</strong> Time Arrived at Warehouse</span>
-              <span><strong className="text-indigo-700 dark:text-indigo-400">[2]</strong> Time Left the Warehouse</span>
-              <span><strong className="text-emerald-700 dark:text-emerald-400">[3]</strong> Time Arrived at Restaurant</span>
-              <span><strong className="text-purple-700 dark:text-purple-400">[4]</strong> Time Left the Restaurant</span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px] font-mono">
+              <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block"></span>
+                <strong>[1]</strong> Arr Whse
+              </span>
+              <span className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block"></span>
+                <strong>[2]</strong> Left Whse
+              </span>
+              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                <strong>[3]</strong> Arr Restaurant
+              </span>
+              <span className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block"></span>
+                <strong>[4]</strong> Left Restaurant
+              </span>
             </div>
           </div>
 
-          <Card className="overflow-hidden border-slate-200 dark:border-slate-800 shadow-sm">
+          <Card className="overflow-hidden border-border bg-card text-card-foreground shadow-xs">
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="py-16 flex items-center justify-center text-muted-foreground gap-2">
@@ -508,8 +533,8 @@ export default function CustomerReportView() {
                 <>
                   <div className="overflow-x-auto max-h-[640px] overflow-y-auto relative">
                     <Table>
-                      <TableHeader className="sticky top-0 z-10 bg-slate-100/95 dark:bg-slate-800/95 backdrop-blur text-[11px] uppercase tracking-wider shadow-sm">
-                        <TableRow>
+                      <TableHeader className="sticky top-0 z-10 bg-muted/90 backdrop-blur border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground font-semibold shadow-2xs">
+                        <TableRow className="border-b border-border hover:bg-transparent">
                           <TableHead className="w-12 text-center font-bold">Trip</TableHead>
                           <TableHead className="w-12 text-center font-bold">Seq</TableHead>
                           <TableHead className="font-bold">Date</TableHead>
@@ -520,52 +545,52 @@ export default function CustomerReportView() {
                           <TableHead className="font-bold min-w-[180px]">Location / Outlet</TableHead>
                           <TableHead className="font-bold">Vehicle Type</TableHead>
                           <TableHead className="text-center font-bold">No of Rest.</TableHead>
-                          <TableHead className="text-right font-bold text-emerald-700 dark:text-emerald-400">Cases Handled</TableHead>
+                          <TableHead className="text-right font-bold text-emerald-600 dark:text-emerald-400">Cases Handled</TableHead>
                           <TableHead className="text-center font-bold">Temp</TableHead>
-                          <TableHead className="font-bold text-center bg-blue-50/50 dark:bg-blue-950/20">ReportingTime [1]</TableHead>
-                          <TableHead className="font-bold text-center bg-indigo-50/50 dark:bg-indigo-950/20">DepartTime [2]</TableHead>
-                          <TableHead className="font-bold text-center bg-emerald-50/50 dark:bg-emerald-950/20">DropStartTime [3]</TableHead>
-                          <TableHead className="font-bold text-center bg-purple-50/50 dark:bg-purple-950/20">DropEndTime [4]</TableHead>
+                          <TableHead className="font-bold text-center text-blue-600 dark:text-blue-400">ReportingTime [1]</TableHead>
+                          <TableHead className="font-bold text-center text-indigo-600 dark:text-indigo-400">DepartTime [2]</TableHead>
+                          <TableHead className="font-bold text-center text-emerald-600 dark:text-emerald-400">DropStartTime [3]</TableHead>
+                          <TableHead className="font-bold text-center text-purple-600 dark:text-purple-400">DropEndTime [4]</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody className="text-xs">
                         {paginatedActivities.map((a: any, idx: number) => (
-                          <TableRow key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/80 transition-colors">
-                            <TableCell className="text-center font-mono font-semibold text-slate-700 dark:text-slate-300">
+                          <TableRow key={idx} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
+                            <TableCell className="text-center font-mono font-semibold text-foreground">
                               {a.trip}
                             </TableCell>
-                            <TableCell className="text-center font-mono text-slate-500">
+                            <TableCell className="text-center font-mono text-muted-foreground">
                               {a.seq}
                             </TableCell>
-                            <TableCell className="font-mono whitespace-nowrap">
+                            <TableCell className="font-mono whitespace-nowrap text-foreground">
                               {a.date}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline" className="text-[10px] uppercase font-mono px-1.5 py-0">
+                              <Badge variant="outline" className="text-[10px] uppercase font-mono px-1.5 py-0 border-border">
                                 {a.week}
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${getStorageBadgeClass(a.storageType)}`}>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] ${getStorageBadgeClass(a.storageType)}`}>
                                 {a.storageType}
                               </span>
                             </TableCell>
-                            <TableCell className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                            <TableCell className="font-mono font-bold text-foreground">
                               {a.truckNo}
                             </TableCell>
                             <TableCell>
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] border ${getBrandBadgeClass(a.brand)}`}>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] ${getBrandBadgeClass(a.brand)}`}>
                                 {a.brand}
                               </span>
                             </TableCell>
-                            <TableCell className="font-medium text-slate-900 dark:text-slate-100">
+                            <TableCell className="font-medium text-foreground">
                               {a.location}
                               <div className="text-[10px] text-muted-foreground font-mono">{a.outletCode}</div>
                             </TableCell>
                             <TableCell className="text-muted-foreground whitespace-nowrap">
                               {a.vehicleType}
                             </TableCell>
-                            <TableCell className="text-center font-mono">
+                            <TableCell className="text-center font-mono text-foreground">
                               {a.noOfRestaurants}
                             </TableCell>
                             <TableCell className="text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
@@ -573,27 +598,27 @@ export default function CustomerReportView() {
                             </TableCell>
                             <TableCell className="text-center font-mono">
                               {a.temperature && a.temperature !== "-" ? (
-                                <Badge variant="outline" className="text-[11px] font-mono border-blue-200 bg-blue-50/70 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">
+                                <Badge variant="outline" className="text-[11px] font-mono border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400">
                                   <Thermometer className="h-3 w-3 mr-1" />
                                   {a.temperature}°C
                                 </Badge>
                               ) : (
-                                <span className="text-slate-400">-</span>
+                                <span className="text-muted-foreground">-</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-center font-mono text-slate-600 dark:text-slate-300 bg-blue-50/20 dark:bg-blue-950/10 whitespace-nowrap">
+                            <TableCell className="text-center font-mono text-blue-600 dark:text-blue-400 font-medium whitespace-nowrap">
                               {a.reportingTime}
                             </TableCell>
-                            <TableCell className="text-center font-mono text-slate-600 dark:text-slate-300 bg-indigo-50/20 dark:bg-indigo-950/10 whitespace-nowrap">
+                            <TableCell className="text-center font-mono text-indigo-600 dark:text-indigo-400 font-medium whitespace-nowrap">
                               <div>{a.departTime}</div>
                               {a.loadingDurationMinutes !== null && a.loadingDurationMinutes !== undefined && (
                                 <div className="text-[10px] text-muted-foreground font-sans">({a.loadingDurationMinutes}m load)</div>
                               )}
                             </TableCell>
-                            <TableCell className="text-center font-mono text-emerald-700 dark:text-emerald-300 font-medium bg-emerald-50/20 dark:bg-emerald-950/10 whitespace-nowrap">
+                            <TableCell className="text-center font-mono text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
                               {a.dropStartTime}
                             </TableCell>
-                            <TableCell className="text-center font-mono text-purple-700 dark:text-purple-300 font-medium bg-purple-50/20 dark:bg-purple-950/10 whitespace-nowrap">
+                            <TableCell className="text-center font-mono text-purple-600 dark:text-purple-400 font-medium whitespace-nowrap">
                               {a.dropEndTime}
                             </TableCell>
                           </TableRow>
@@ -603,7 +628,7 @@ export default function CustomerReportView() {
                   </div>
 
                   {/* Pagination Toolbar */}
-                  <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-slate-50/70 dark:bg-slate-900/70 print:hidden">
+                  <div className="px-4 py-2 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-card print:hidden">
                     <div className="text-muted-foreground flex items-center gap-1.5">
                       <span>Showing</span>
                       <span className="font-semibold text-foreground">
@@ -635,7 +660,7 @@ export default function CustomerReportView() {
                             setCurrentPage(1);
                           }}
                         >
-                          <SelectTrigger className="h-7 w-[72px] text-xs bg-background">
+                          <SelectTrigger className="h-7 w-[72px] text-xs bg-background border-border">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -653,7 +678,7 @@ export default function CustomerReportView() {
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-7 w-7"
+                            className="h-7 w-7 bg-background border-border"
                             onClick={() => setCurrentPage(1)}
                             disabled={currentPage <= 1}
                             title="First page"
@@ -663,7 +688,7 @@ export default function CustomerReportView() {
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-7 w-7"
+                            className="h-7 w-7 bg-background border-border"
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                             disabled={currentPage <= 1}
                             title="Previous page"
@@ -671,14 +696,14 @@ export default function CustomerReportView() {
                             <ChevronLeft className="h-3.5 w-3.5" />
                           </Button>
 
-                          <div className="px-2 text-xs font-medium text-slate-700 dark:text-slate-300">
-                            Page <strong className="text-foreground">{currentPage}</strong> of <strong className="text-foreground">{totalPages}</strong>
+                          <div className="px-2 text-xs font-medium text-foreground">
+                            Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
                           </div>
 
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-7 w-7"
+                            className="h-7 w-7 bg-background border-border"
                             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                             disabled={currentPage >= totalPages}
                             title="Next page"
@@ -688,7 +713,7 @@ export default function CustomerReportView() {
                           <Button
                             variant="outline"
                             size="icon"
-                            className="h-7 w-7"
+                            className="h-7 w-7 bg-background border-border"
                             onClick={() => setCurrentPage(totalPages)}
                             disabled={currentPage >= totalPages}
                             title="Last page"
@@ -705,14 +730,14 @@ export default function CustomerReportView() {
           </Card>
         </TabsContent>
 
-        {/* ==================== TAB 2: TRUCK UTILIZATION & WEEKLY KPIS (IMAGE 2) ==================== */}
-        <TabsContent value="utilization" className="space-y-6">
+        {/* ==================== TAB 2: TRUCK UTILIZATION & WEEKLY KPIS ==================== */}
+        <TabsContent value="utilization" className="space-y-3">
           {/* Weekly KPI Matrix */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <Card className="lg:col-span-2 border-slate-200 dark:border-slate-800 shadow-sm">
+            <Card className="lg:col-span-2 border-border bg-card text-card-foreground shadow-xs">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-indigo-600" />
+                  <TrendingUp className="h-4 w-4 text-indigo-500" />
                   Weekly Fleet Performance & KPI Matrix
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -721,31 +746,31 @@ export default function CustomerReportView() {
               </CardHeader>
               <CardContent className="p-0">
                 <Table>
-                  <TableHeader className="bg-slate-100/70 dark:bg-slate-800/70 text-xs">
-                    <TableRow>
+                  <TableHeader className="bg-muted/80 text-xs border-b border-border">
+                    <TableRow className="hover:bg-transparent">
                       <TableHead className="font-bold">KPI Metric</TableHead>
-                      <TableHead className="text-center font-bold text-blue-600">Target</TableHead>
+                      <TableHead className="text-center font-bold text-blue-600 dark:text-blue-400">Target</TableHead>
                       <TableHead className="text-center font-bold">wk1</TableHead>
                       <TableHead className="text-center font-bold">wk2</TableHead>
                       <TableHead className="text-center font-bold">wk3</TableHead>
                       <TableHead className="text-center font-bold">wk4</TableHead>
-                      <TableHead className="text-center font-bold text-emerald-600">Total Avg</TableHead>
+                      <TableHead className="text-center font-bold text-emerald-600 dark:text-emerald-400">Total Avg</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody className="text-xs font-mono">
                     {weeklyKpis.map((k: any, idx: number) => (
-                      <TableRow key={idx}>
-                        <TableCell className="font-semibold font-sans text-slate-800 dark:text-slate-200">
+                      <TableRow key={idx} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
+                        <TableCell className="font-semibold font-sans text-foreground">
                           {k.kpi}
                         </TableCell>
-                        <TableCell className="text-center font-bold text-blue-600 bg-blue-50/30 dark:bg-blue-950/20">
+                        <TableCell className="text-center font-bold text-blue-600 dark:text-blue-400">
                           {k.target}
                         </TableCell>
-                        <TableCell className="text-center">{k.wk1}</TableCell>
-                        <TableCell className="text-center">{k.wk2}</TableCell>
-                        <TableCell className="text-center">{k.wk3}</TableCell>
-                        <TableCell className="text-center">{k.wk4}</TableCell>
-                        <TableCell className="text-center font-bold text-emerald-600 bg-emerald-50/30 dark:bg-emerald-950/20">
+                        <TableCell className="text-center text-foreground">{k.wk1}</TableCell>
+                        <TableCell className="text-center text-foreground">{k.wk2}</TableCell>
+                        <TableCell className="text-center text-foreground">{k.wk3}</TableCell>
+                        <TableCell className="text-center text-foreground">{k.wk4}</TableCell>
+                        <TableCell className="text-center font-bold text-emerald-600 dark:text-emerald-400">
                           {k.total}
                         </TableCell>
                       </TableRow>
@@ -755,10 +780,10 @@ export default function CustomerReportView() {
               </CardContent>
             </Card>
 
-            <Card className="border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <Card className="border-border bg-card text-card-foreground shadow-xs flex flex-col justify-between">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-amber-600" />
+                  <Clock className="h-4 w-4 text-amber-500" />
                   Standards & Benchmarks
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -766,23 +791,23 @@ export default function CustomerReportView() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-xs">
-                <div className="p-2.5 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
-                  <div className="font-medium text-slate-800 dark:text-slate-200">Target Daily Utilization</div>
-                  <div className="text-slate-500">10.00 Hours / Day per Truck (Trip Start to Trip End)</div>
+                <div className="p-2.5 rounded bg-muted/40 border border-border space-y-1">
+                  <div className="font-medium text-foreground">Target Daily Utilization</div>
+                  <div className="text-muted-foreground">10.00 Hours / Day per Truck (Trip Start to Trip End)</div>
                 </div>
-                <div className="p-2.5 rounded bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1">
-                  <div className="font-medium text-slate-800 dark:text-slate-200">Target Carton Occupancy</div>
-                  <div className="text-slate-500">95% of Target Truck Capacity (Standard: 280-320 CS)</div>
+                <div className="p-2.5 rounded bg-muted/40 border border-border space-y-1">
+                  <div className="font-medium text-foreground">Target Carton Occupancy</div>
+                  <div className="text-muted-foreground">95% of Target Truck Capacity (Standard: 280-320 CS)</div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* Daily / Trip Utilization Table */}
-          <Card className="border-slate-200 dark:border-slate-800 shadow-sm">
+          <Card className="border-border bg-card text-card-foreground shadow-xs">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Truck className="h-4 w-4 text-blue-600" />
+                <Truck className="h-4 w-4 text-blue-500" />
                 Daily & Trip-Wise Truck Utilization Log
               </CardTitle>
               <CardDescription className="text-xs">
@@ -792,21 +817,21 @@ export default function CustomerReportView() {
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <Table>
-                  <TableHeader className="bg-slate-100/70 dark:bg-slate-800/70 text-[11px] uppercase tracking-wider">
-                    <TableRow>
+                  <TableHeader className="bg-muted/80 text-[11px] uppercase tracking-wider border-b border-border">
+                    <TableRow className="hover:bg-transparent">
                       <TableHead className="font-bold">Date</TableHead>
                       <TableHead className="font-bold">Week</TableHead>
                       <TableHead className="font-bold">Type</TableHead>
                       <TableHead className="font-bold">Truck No</TableHead>
                       <TableHead className="text-center font-bold">No of Rest.</TableHead>
                       <TableHead className="text-right font-bold">Target Cap (CS)</TableHead>
-                      <TableHead className="text-right font-bold text-emerald-600">Actual Cases (CS)</TableHead>
+                      <TableHead className="text-right font-bold text-emerald-600 dark:text-emerald-400">Actual Cases (CS)</TableHead>
                       <TableHead className="text-center font-bold">TripStart</TableHead>
                       <TableHead className="text-center font-bold">TripEnd</TableHead>
                       <TableHead className="text-right font-bold">Target (Hrs)</TableHead>
                       <TableHead className="text-right font-bold">Actual (Hrs)</TableHead>
-                      <TableHead className="text-center font-bold bg-amber-50/50 dark:bg-amber-950/20">Utilization %</TableHead>
-                      <TableHead className="text-center font-bold bg-indigo-50/50 dark:bg-indigo-950/20">Carton %</TableHead>
+                      <TableHead className="text-center font-bold">Utilization %</TableHead>
+                      <TableHead className="text-center font-bold">Carton %</TableHead>
                       <TableHead className="text-right font-bold">Opening KM</TableHead>
                       <TableHead className="text-right font-bold">Closing KM</TableHead>
                       <TableHead className="text-right font-bold text-cyan-600 dark:text-cyan-400">Distance (KM)</TableHead>
@@ -814,22 +839,22 @@ export default function CustomerReportView() {
                   </TableHeader>
                   <TableBody className="text-xs font-mono">
                     {utilizationRecords.map((u: any, idx: number) => (
-                      <TableRow key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/80 transition-colors">
-                        <TableCell className="whitespace-nowrap">{u.date}</TableCell>
+                      <TableRow key={idx} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
+                        <TableCell className="whitespace-nowrap text-foreground">{u.date}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 uppercase">
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 uppercase border-border">
                             {u.week}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border ${getStorageBadgeClass(u.type)}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${getStorageBadgeClass(u.type)}`}>
                             {u.type}
                           </span>
                         </TableCell>
-                        <TableCell className="font-bold text-slate-800 dark:text-slate-200">
+                        <TableCell className="font-bold text-foreground">
                           {u.truckNo}
                         </TableCell>
-                        <TableCell className="text-center font-bold text-slate-700 dark:text-slate-300">
+                        <TableCell className="text-center font-bold text-foreground">
                           {u.noOfRestaurants}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
@@ -838,32 +863,32 @@ export default function CustomerReportView() {
                         <TableCell className="text-right font-bold text-emerald-600 dark:text-emerald-400">
                           {u.actualCases}
                         </TableCell>
-                        <TableCell className="text-center whitespace-nowrap text-slate-600 dark:text-slate-400">
+                        <TableCell className="text-center whitespace-nowrap text-muted-foreground">
                           {u.tripStart}
                         </TableCell>
-                        <TableCell className="text-center whitespace-nowrap text-slate-600 dark:text-slate-400">
+                        <TableCell className="text-center whitespace-nowrap text-muted-foreground">
                           {u.tripEnd}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {Number(u.targetUtilization || 10).toFixed(2)}
                         </TableCell>
-                        <TableCell className="text-right font-bold text-slate-800 dark:text-slate-200">
+                        <TableCell className="text-right font-bold text-foreground">
                           {Number(u.actualUtilization || 0).toFixed(2)}
                         </TableCell>
-                        <TableCell className="text-center font-bold bg-amber-50/20 dark:bg-amber-950/10">
-                          <span className={`px-2 py-0.5 rounded text-[11px] ${u.utilizationPercent >= 85 ? 'text-emerald-700 bg-emerald-100 dark:bg-emerald-950' : 'text-amber-700 bg-amber-100 dark:bg-amber-950'}`}>
+                        <TableCell className="text-center font-bold">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] border ${u.utilizationPercent >= 85 ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'}`}>
                             {u.utilizationPercent}%
                           </span>
                         </TableCell>
-                        <TableCell className="text-center font-bold bg-indigo-50/20 dark:bg-indigo-950/10">
-                          <span className={`px-2 py-0.5 rounded text-[11px] ${u.cartonPercent >= 85 ? 'text-emerald-700 bg-emerald-100 dark:bg-emerald-950' : 'text-indigo-700 bg-indigo-100 dark:bg-indigo-950'}`}>
+                        <TableCell className="text-center font-bold">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] border ${u.cartonPercent >= 85 ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border-indigo-500/20'}`}>
                             {u.cartonPercent}%
                           </span>
                         </TableCell>
-                        <TableCell className="text-right text-slate-600 dark:text-slate-400">
+                        <TableCell className="text-right text-muted-foreground">
                           {u.openingKm && u.openingKm !== "-" ? Number(u.openingKm).toLocaleString() : "-"}
                         </TableCell>
-                        <TableCell className="text-right text-slate-600 dark:text-slate-400">
+                        <TableCell className="text-right text-muted-foreground">
                           {u.closingKm && u.closingKm !== "-" ? Number(u.closingKm).toLocaleString() : "-"}
                         </TableCell>
                         <TableCell className="text-right font-bold text-cyan-600 dark:text-cyan-400">
@@ -878,12 +903,12 @@ export default function CustomerReportView() {
           </Card>
         </TabsContent>
 
-        {/* ==================== TAB 3: OUTBOUND DEVIATIONS (IMAGE 3) ==================== */}
-        <TabsContent value="deviations" className="space-y-4">
-          <Card className="border-slate-200 dark:border-slate-800 shadow-sm">
+        {/* ==================== TAB 3: OUTBOUND DEVIATIONS ==================== */}
+        <TabsContent value="deviations" className="space-y-3">
+          <Card className="border-border bg-card text-card-foreground shadow-xs">
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-rose-600" />
+                <AlertTriangle className="h-4 w-4 text-rose-500" />
                 Outbound Deviation & Delivery Discrepancy Log
               </CardTitle>
               <CardDescription className="text-xs">
@@ -899,14 +924,14 @@ export default function CustomerReportView() {
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
-                    <TableHeader className="bg-slate-100/70 dark:bg-slate-800/70 text-[11px] uppercase tracking-wider">
-                      <TableRow>
+                    <TableHeader className="bg-muted/80 text-[11px] uppercase tracking-wider border-b border-border">
+                      <TableRow className="hover:bg-transparent">
                         <TableHead className="w-12 text-center font-bold">SN</TableHead>
                         <TableHead className="font-bold">Order Date</TableHead>
                         <TableHead className="font-bold min-w-[150px]">Outlet</TableHead>
                         <TableHead className="font-bold min-w-[220px]">Product / Item</TableHead>
                         <TableHead className="font-bold min-w-[200px]">Reason / Remark</TableHead>
-                        <TableHead className="text-center font-bold text-rose-600">Qty</TableHead>
+                        <TableHead className="text-center font-bold text-rose-600 dark:text-rose-400">Qty</TableHead>
                         <TableHead className="font-bold">GDN / TO</TableHead>
                         <TableHead className="font-bold">SKU</TableHead>
                         <TableHead className="font-bold">Completion Date</TableHead>
@@ -914,21 +939,21 @@ export default function CustomerReportView() {
                     </TableHeader>
                     <TableBody className="text-xs">
                       {deviations.map((d: any, idx: number) => (
-                        <TableRow key={idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-900/80 transition-colors">
+                        <TableRow key={idx} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
                           <TableCell className="text-center font-mono text-muted-foreground">
                             {d.sn}
                           </TableCell>
-                          <TableCell className="font-mono whitespace-nowrap">
+                          <TableCell className="font-mono whitespace-nowrap text-foreground">
                             {d.orderDate}
                           </TableCell>
-                          <TableCell className="font-bold text-slate-800 dark:text-slate-200">
+                          <TableCell className="font-bold text-foreground">
                             {d.outlet}
                           </TableCell>
-                          <TableCell className="font-medium text-slate-700 dark:text-slate-300">
+                          <TableCell className="font-medium text-foreground">
                             {d.product}
                           </TableCell>
                           <TableCell>
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-rose-50 text-rose-800 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                               {d.reason}
                             </span>
                           </TableCell>
@@ -938,7 +963,7 @@ export default function CustomerReportView() {
                           <TableCell className="font-mono text-muted-foreground">
                             {d.gdn}
                           </TableCell>
-                          <TableCell className="font-mono text-slate-600 dark:text-slate-300">
+                          <TableCell className="font-mono text-muted-foreground">
                             {d.sku}
                           </TableCell>
                           <TableCell className="font-mono text-muted-foreground whitespace-nowrap">
@@ -955,13 +980,13 @@ export default function CustomerReportView() {
         </TabsContent>
 
         {/* ==================== TAB 4: MASTERS ==================== */}
-        <TabsContent value="masters" className="space-y-6">
+        <TabsContent value="masters" className="space-y-3">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Outlets Master */}
-            <Card className="border-slate-200 dark:border-slate-800 shadow-sm">
+            <Card className="border-border bg-card text-card-foreground shadow-xs">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-emerald-600" />
+                  <Building2 className="h-4 w-4 text-emerald-500" />
                   Outlet Location Master (Customer Accounts)
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -971,28 +996,28 @@ export default function CustomerReportView() {
               <CardContent className="p-0">
                 <div className="max-h-[400px] overflow-auto">
                   <Table>
-                    <TableHeader className="bg-slate-100/70 dark:bg-slate-800/70 text-[11px] uppercase">
-                      <TableRow>
-                        <TableHead className="w-12 text-center">SN</TableHead>
-                        <TableHead>Location</TableHead>
-                        <TableHead>Brand</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead className="text-right">Target Cap</TableHead>
+                    <TableHeader className="bg-muted/80 text-[11px] uppercase border-b border-border">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-12 text-center font-bold">SN</TableHead>
+                        <TableHead className="font-bold">Location</TableHead>
+                        <TableHead className="font-bold">Brand</TableHead>
+                        <TableHead className="font-bold">Type</TableHead>
+                        <TableHead className="text-right font-bold">Target Cap</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody className="text-xs">
                       {masters.outlets.map((o: any, idx: number) => (
-                        <TableRow key={idx}>
+                        <TableRow key={idx} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
                           <TableCell className="text-center font-mono text-muted-foreground">{o.sn}</TableCell>
-                          <TableCell className="font-medium">
+                          <TableCell className="font-medium text-foreground">
                             {o.location}
                             <div className="text-[10px] text-muted-foreground font-mono">{o.deliveredTo}</div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="text-[10px] font-mono">{o.brand}</Badge>
+                            <Badge variant="outline" className="text-[10px] font-mono border-border">{o.brand}</Badge>
                           </TableCell>
                           <TableCell className="text-muted-foreground">{o.type}</TableCell>
-                          <TableCell className="text-right font-mono font-bold text-emerald-600">{o.targetTruckCapacity} CS</TableCell>
+                          <TableCell className="text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">{o.targetTruckCapacity} CS</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1002,10 +1027,10 @@ export default function CustomerReportView() {
             </Card>
 
             {/* Fleet Master */}
-            <Card className="border-slate-200 dark:border-slate-800 shadow-sm">
+            <Card className="border-border bg-card text-card-foreground shadow-xs">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Truck className="h-4 w-4 text-blue-600" />
+                  <Truck className="h-4 w-4 text-blue-500" />
                   Customer Fleet Specifications
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -1015,27 +1040,27 @@ export default function CustomerReportView() {
               <CardContent className="p-0">
                 <div className="max-h-[400px] overflow-auto">
                   <Table>
-                    <TableHeader className="bg-slate-100/70 dark:bg-slate-800/70 text-[11px] uppercase">
-                      <TableRow>
-                        <TableHead className="w-12 text-center">SL#</TableHead>
-                        <TableHead>Truck#</TableHead>
-                        <TableHead>Make</TableHead>
-                        <TableHead>GVW</TableHead>
-                        <TableHead>Payload</TableHead>
-                        <TableHead>Box Size</TableHead>
-                        <TableHead className="text-right">Carton Cap.</TableHead>
+                    <TableHeader className="bg-muted/80 text-[11px] uppercase border-b border-border">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-12 text-center font-bold">SL#</TableHead>
+                        <TableHead className="font-bold">Truck#</TableHead>
+                        <TableHead className="font-bold">Make</TableHead>
+                        <TableHead className="font-bold">GVW</TableHead>
+                        <TableHead className="font-bold">Payload</TableHead>
+                        <TableHead className="font-bold">Box Size</TableHead>
+                        <TableHead className="text-right font-bold">Carton Cap.</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody className="text-xs">
                       {masters.vehicles.map((v: any, idx: number) => (
-                        <TableRow key={idx}>
+                        <TableRow key={idx} className="border-b border-border/50 hover:bg-muted/50 transition-colors">
                           <TableCell className="text-center font-mono text-muted-foreground">{v.sl}</TableCell>
-                          <TableCell className="font-bold font-mono text-blue-600">{v.truckNo}</TableCell>
-                          <TableCell>{v.make}</TableCell>
+                          <TableCell className="font-bold font-mono text-blue-600 dark:text-blue-400">{v.truckNo}</TableCell>
+                          <TableCell className="text-foreground">{v.make}</TableCell>
                           <TableCell className="font-mono text-muted-foreground">{v.gvw}</TableCell>
                           <TableCell className="font-mono text-muted-foreground">{v.netPayload}</TableCell>
                           <TableCell className="font-mono text-muted-foreground">{v.boxMeasurement}</TableCell>
-                          <TableCell className="text-right font-mono font-bold text-indigo-600">{v.cartonCapacity}</TableCell>
+                          <TableCell className="text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">{v.cartonCapacity}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

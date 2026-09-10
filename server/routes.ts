@@ -9395,12 +9395,18 @@ export async function registerRoutes(
       const lonNum = parseFloat(longitude);
       
       const allLocations = await storage.getLocations();
+      const allBranches = await storage.getBranches();
+      const authorizedPlaces: { name: string; latitude: any; longitude: any }[] = [
+        ...(Array.isArray(allLocations) ? allLocations : []),
+        ...(Array.isArray(allBranches) ? allBranches : []),
+      ];
+
       let isWithinRange = false;
       let nearestLoc: any = null;
       let minDistance = Infinity;
 
-      if (Array.isArray(allLocations) && !isNaN(latNum) && !isNaN(lonNum)) {
-        for (const loc of allLocations) {
+      if (authorizedPlaces.length > 0 && !isNaN(latNum) && !isNaN(lonNum)) {
+        for (const loc of authorizedPlaces) {
           if (loc.latitude && loc.longitude) {
             const locLat = parseFloat(loc.latitude.toString());
             const locLon = parseFloat(loc.longitude.toString());
@@ -9420,7 +9426,7 @@ export async function registerRoutes(
       }
 
       // Restrict check-in if driver is outside authorized store/warehouse location (> 50km)
-      if (allLocations.length > 0 && minDistance > 50000 && minDistance !== Infinity) {
+      if (authorizedPlaces.some(p => p.latitude && p.longitude) && minDistance > 50000 && minDistance !== Infinity) {
         return res.status(403).json({
           error: `Check-in restricted: You are ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}. Attendance check-in is strictly permitted only within the authorized store/warehouse location.`
         });

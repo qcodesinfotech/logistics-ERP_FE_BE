@@ -113,13 +113,13 @@ export default function DriverHubPage() {
       (error) => {
         setIsLocating(false);
         toast({ 
-          title: "Failed to get location. Using default Oman HQ coordinates.", 
+          title: "Failed to get location. Using default Bahrain HQ coordinates.", 
           description: error.message,
           variant: "destructive" 
         });
-        // Default to Muscat warehouse coordinates for simulator ease
-        setLatitude(23.5859);
-        setLongitude(58.4059);
+        // Default to Bahrain Hidd warehouse coordinates for simulator ease
+        setLatitude(26.2134);
+        setLongitude(50.6604);
       },
       { enableHighAccuracy: true }
     );
