@@ -562,6 +562,7 @@ function ZoneColumn({
   initialZoneData?: ZoneGroup;
 }) {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
+  const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -745,14 +746,14 @@ function ZoneColumn({
           onClick={onSelectRoute}
           className={`p-4 rounded-t-2xl cursor-pointer hover:opacity-90 select-none ${isUnassigned ? "" : "bg-gradient-to-r from-primary/10 to-primary/5"}`}
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isUnassigned ? "bg-slate-200" : "bg-primary/20"}`}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${isUnassigned ? "bg-slate-200 dark:bg-slate-800" : "bg-primary/20"}`}>
                 <MapPin className={`h-4 w-4 ${isUnassigned ? "text-slate-500" : "text-primary"}`} />
               </div>
-              <div>
-                <h3 className="font-bold text-sm">{zone.zoneName}</h3>
-                <p className="text-xs text-muted-foreground">
+              <div className="min-w-0">
+                <h3 className="font-bold text-sm truncate" title={zone.zoneName}>{zone.zoneName}</h3>
+                <p className="text-xs text-muted-foreground truncate">
                   {zone.outlets.length === initialOutletsCount
                     ? `${initialOutletsCount} outlets · ${initialDNCount} DNs`
                     : `${zone.outlets.length}/${initialOutletsCount} outlets · ${currentDNCount}/${initialDNCount} DNs`}
@@ -763,76 +764,139 @@ function ZoneColumn({
                 </p>
               </div>
             </div>
-            <Badge className={`${initialDeliveredQty === initialTotalQty && initialTotalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
-              {formattedInitialDeliveredQty}/{formattedInitialTotalQty} ({initialCompletionPercentage}%)
-            </Badge>
-          </div>
-          {initialTotalQty > 0 && (
-            <div className="mb-3 space-y-2">
-              <div className="space-y-0.5">
-                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                  <span>Qty Completion</span>
-                  <span className="font-semibold text-primary">{initialCompletionPercentage}%</span>
-                </div>
-                <Progress value={initialCompletionPercentage} className="h-1 bg-slate-100 dark:bg-slate-800" />
-              </div>
-              <div className="space-y-0.5">
-                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                  <span>DNs Completion</span>
-                  <span className="font-semibold text-violet-600">
-                    {initialCompletedDNs}/{initialDNCount} ({initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}%)
-                  </span>
-                </div>
-                <Progress
-                  value={initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}
-                  className="h-1 bg-slate-100 dark:bg-slate-800"
-                />
-              </div>
-              <div className="space-y-0.5">
-                <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                  <span>Outlets Completion</span>
-                  <span className="font-semibold text-indigo-600">
-                    {initialCompletedOutletsCount}/{initialOutletsCount} ({initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}%)
-                  </span>
-                </div>
-                <Progress
-                  value={initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}
-                  className="h-1 bg-slate-100 dark:bg-slate-800"
-                />
-              </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Badge className={`${initialDeliveredQty === initialTotalQty && initialTotalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
+                {formattedInitialDeliveredQty}/{formattedInitialTotalQty} ({initialCompletionPercentage}%)
+              </Badge>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsDetailsExpanded(prev => !prev);
+                }}
+                className="h-7 w-7 rounded-lg hover:bg-primary/15 text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
+                title={isDetailsExpanded ? "Collapse details" : "Expand details"}
+              >
+                {isDetailsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
             </div>
-          )}
-          {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
-            !isUnassigned && <p className="text-xs text-muted-foreground mt-2 italic flex items-center gap-1"><AlertTriangle className="h-3 w-3" />No trucks or drivers assigned</p>
-          ) : (
-            <div className="flex flex-col gap-2 mt-2">
-              {zone.trucks && zone.trucks.map(t => {
-                const capacity = parseFloat(t.vehicle?.capacity || "0");
-                const used = parseFloat(t.usedCapacity || "0");
-                const isOver = used > capacity && capacity > 0;
-                return (
-                  <div key={`truck-${t.id}`} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
-                    <div className="flex items-center justify-between font-medium">
-                      <div className="flex items-center gap-1.5">
-                        <Truck className="h-3.5 w-3.5 text-primary" />
-                        <span className="truncate max-w-[100px]" title={t.vehicle?.plateNumber || t.vehicle?.name}>{t.vehicle?.plateNumber || t.vehicle?.name || 'Unknown Truck'}</span>
-                      </div>
-                      {capacity > 0 && (
-                        <span className={isOver ? "text-red-600 font-bold flex items-center gap-1" : "text-emerald-600"}>
-                          {isOver && <AlertTriangle className="h-3.5 w-3.5" />}
-                          {used.toFixed(1)} / {capacity.toFixed(0)} kg
-                        </span>
-                      )}
+          </div>
+
+          {/* Dropdown Toggle Bar for Progress & Trucks */}
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsDetailsExpanded(prev => !prev);
+            }}
+            role="button"
+            tabIndex={0}
+            className={`mt-2 flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all border select-none ${
+              isDetailsExpanded
+                ? "bg-primary/10 text-primary border-primary/25 shadow-xs"
+                : "bg-background/80 hover:bg-background text-muted-foreground hover:text-foreground border-border/70 hover:border-border shadow-xs"
+            }`}
+            title={isDetailsExpanded ? "Click to collapse details" : "Click to expand details"}
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="truncate font-semibold text-foreground">
+                {zone.trucks && zone.trucks.length > 0
+                  ? `${zone.trucks.length} ${zone.trucks.length === 1 ? "Truck" : "Trucks"}`
+                  : "No Trucks"}
+              </span>
+              <span className="text-muted-foreground/40">•</span>
+              <span className="text-[11px] truncate">
+                {initialCompletionPercentage}% completed
+              </span>
+            </div>
+            <div className="flex items-center gap-1 text-[11px] shrink-0 font-medium text-muted-foreground">
+              <span>{isDetailsExpanded ? "Hide Details" : "View Details"}</span>
+              {isDetailsExpanded ? (
+                <ChevronUp className="h-3.5 w-3.5 text-primary" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+            </div>
+          </div>
+
+          {/* Expandable Dropdown Details Content */}
+          {isDetailsExpanded && (
+            <div
+              className="mt-2.5 pt-2.5 border-t border-border/50 space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {initialTotalQty > 0 && (
+                <div className="space-y-2">
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                      <span>Qty Completion</span>
+                      <span className="font-semibold text-primary">{initialCompletionPercentage}%</span>
                     </div>
-                    {t.driver && (
-                      <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1 mt-1">
-                        <User className="h-3 w-3" />
-                        <span className="truncate">{t.driver.name}</span>
-                      </div>
-                    )}
+                    <Progress value={initialCompletionPercentage} className="h-1 bg-slate-100 dark:bg-slate-800" />
                   </div>
-                );
-              })}
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                      <span>DNs Completion</span>
+                      <span className="font-semibold text-violet-600">
+                        {initialCompletedDNs}/{initialDNCount} ({initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}%)
+                      </span>
+                    </div>
+                    <Progress
+                      value={initialDNCount > 0 ? Math.round((initialCompletedDNs / initialDNCount) * 100) : 0}
+                      className="h-1 bg-slate-100 dark:bg-slate-800"
+                    />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between items-center text-[10px] text-muted-foreground">
+                      <span>Outlets Completion</span>
+                      <span className="font-semibold text-indigo-600">
+                        {initialCompletedOutletsCount}/{initialOutletsCount} ({initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}%)
+                      </span>
+                    </div>
+                    <Progress
+                      value={initialOutletsCount > 0 ? Math.round((initialCompletedOutletsCount / initialOutletsCount) * 100) : 0}
+                      className="h-1 bg-slate-100 dark:bg-slate-800"
+                    />
+                  </div>
+                </div>
+              )}
+              {(!zone.trucks || zone.trucks.length === 0) && (!zone.drivers || zone.drivers.length === 0) ? (
+                !isUnassigned && (
+                  <p className="text-xs text-muted-foreground mt-1 italic flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />No trucks or drivers assigned
+                  </p>
+                )
+              ) : (
+                <div className="flex flex-col gap-2 mt-1">
+                  {zone.trucks && zone.trucks.map(t => {
+                    const capacity = parseFloat(t.vehicle?.capacity || "0");
+                    const used = parseFloat(t.usedCapacity || "0");
+                    const isOver = used > capacity && capacity > 0;
+                    return (
+                      <div key={`truck-${t.id}`} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
+                        <div className="flex items-center justify-between font-medium">
+                          <div className="flex items-center gap-1.5">
+                            <Truck className="h-3.5 w-3.5 text-primary" />
+                            <span className="truncate max-w-[100px]" title={t.vehicle?.plateNumber || t.vehicle?.name}>{t.vehicle?.plateNumber || t.vehicle?.name || 'Unknown Truck'}</span>
+                          </div>
+                          {capacity > 0 && (
+                            <span className={isOver ? "text-red-600 font-bold flex items-center gap-1" : "text-emerald-600"}>
+                              {isOver && <AlertTriangle className="h-3.5 w-3.5" />}
+                              {used.toFixed(1)} / {capacity.toFixed(0)} kg
+                            </span>
+                          )}
+                        </div>
+                        {t.driver && (
+                          <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1 mt-1">
+                            <User className="h-3 w-3" />
+                            <span className="truncate">{t.driver.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
