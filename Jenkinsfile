@@ -1,183 +1,332 @@
 pipeline {
  
-agent any
+    agent any
  
-triggers {
-
-    githubPush()
-
-}
- 
-environment {
-
-    SERVER = "root@213.210.36.52"
-
-    PROJECT_PATH = "/repos/logistics-ERP_FE_BE"
-
-    BRANCH = "main"
-
-    APP_NAME = "logistics-erp"
-
-}
- 
-stages {
- 
-    stage('Checkout') {
-
-        steps {
-
-            echo "Checking latest code from GitHub..."
-
-            checkout scm
-
-        }
-
+    triggers {
+        githubPush()
     }
  
-    stage('Deploy') {
-
-        steps {
-
-            echo "Deployment started..."
+    environment {
+        SERVER = "root@213.210.36.52"
+        PROJECT_PATH = "/repos/logistics-ERP_FE_BE"
+        BRANCH = "main"
+        APP_NAME = "logistics-erp"
+    }
+ 
+    stages {
+ 
+        stage('Checkout') {
+            steps {
+                echo "Checking latest code from GitHub..."
+                checkout scm
+            }
+        }
+ 
+        stage('Deploy') {
+            steps {
+ 
+                echo "Deployment started..."
+ 
+                sh """
+ssh -o StrictHostKeyChecking=no ${SERVER} 'bash -s' <<'REMOTE_SCRIPT'
+ 
+set -e
+ 
+PROJECT_PATH="/repos/logistics-ERP_FE_BE"
+BRANCH="main"
+APP_NAME="logistics-erp"
+ 
+echo "============================="
+echo " LOGISTICS ERP DEPLOY START"
+echo "============================="
+ 
+cd "\$PROJECT_PATH"
+ 
+# Validate repository
+if [ ! -d ".git" ]; then
+    echo "ERROR: Not a git repository!"
+    exit 1
+fi
+ 
+# Backup current build
+if [ -d "dist" ]; then
+    echo "Backing up existing build..."
+    rm -rf dist_backup
+    cp -r dist dist_backup
+fi
+ 
+# Clean any incomplete Git operations
+echo "Cleaning previous Git operations..."
+ 
+git rebase --abort 2>/dev/null || true
+git merge --abort 2>/dev/null || true
+ 
+# Force repository to match GitHub
+echo "Fetching latest code..."
+ 
+git fetch origin "\$BRANCH"
+ 
+echo "Syncing code with origin/\$BRANCH..."
+ 
+git reset --hard "origin/\$BRANCH"
+ 
+# Install dependencies
+echo "Installing dependencies..."
+ 
+npm ci
+ 
+# Build application
+echo "Building project..."
+ 
+npm run build
+ 
+# Reload application
+echo "Reloading application..."
+ 
+if pm2 describe "\$APP_NAME" > /dev/null 2>&1; then
+    echo "Application exists - reloading..."
+    pm2 reload "\$APP_NAME" --update-env
+else
+    echo "First deployment - starting application..."
+    pm2 start ecosystem.config.cjs --env production
+fi
+ 
+pm2 save
+ 
+echo "============================="
+echo " DEPLOYMENT SUCCESS"
+echo "============================="
+ 
+REMOTE_SCRIPT
+"""
+            }
+        }
+    }
+ 
+    post {
+ 
+        failure {
+ 
+            echo "Build failed! Starting rollback..."
  
             sh """
-
-            ssh -o StrictHostKeyChecking=no $SERVER "
+ssh -o StrictHostKeyChecking=no ${SERVER} 'bash -s' <<'REMOTE_ROLLBACK'
  
-            set -e
+PROJECT_PATH="/repos/logistics-ERP_FE_BE"
+APP_NAME="logistics-erp"
  
-            echo '============================='
-
-            echo ' LOGISTICS ERP DEPLOY START'
-
-            echo '============================='
+cd "\$PROJECT_PATH"
  
-            cd $PROJECT_PATH
+if [ -d "dist_backup" ]; then
  
-            # Validate repo
-
-            if [ ! -d '.git' ]; then
-
-                echo 'Not a git repository!'
-
-                exit 1
-
-            fi
+    echo "Restoring previous build..."
  
-            # Backup current build
-
-            if [ -d 'dist' ]; then
-
-                echo 'Backing up existing build...'
-
-                rm -rf dist_backup
-
-                cp -r dist dist_backup
-
-            fi
+    rm -rf dist
+    mv dist_backup dist
  
-            # SAFE GIT PULL (no data loss)
-
-            echo 'Pulling latest code safely...'
-
-            git stash push -m 'jenkins-auto-stash' || true
+    echo "Restarting previous version..."
  
-            git pull --rebase origin $BRANCH || {
-
-                echo 'Git pull failed (possible conflict)'
-
-                exit 1
-
-            }
+    pm2 restart "\$APP_NAME" --update-env
  
-            git stash pop || {
-
-                echo 'Stash apply had conflicts (manual fix may be needed)'
-
-            }
+    pm2 save
  
-            echo 'Installing dependencies...'
-
-            npm ci || npm install
+    echo "Rollback completed"
  
-            echo 'Building project...'
-
-            npm run build
+else
  
-            echo 'Reloading application (zero downtime)...'
+    echo "No backup available for rollback"
  
-            if pm2 describe $APP_NAME > /dev/null 2>&1; then
-
-                echo 'App exists → Reloading'
-
-                pm2 reload $APP_NAME --update-env
-
-            else
-
-                echo 'First deployment → Starting app'
-
-                pm2 start ecosystem.config.cjs --env production
-
-            fi
+fi
  
-            pm2 save
- 
-            echo 'DEPLOYMENT SUCCESS'
- 
-            "
-
-            """
-
+REMOTE_ROLLBACK
+"""
         }
-
+ 
+        success {
+            echo "Deployment completed successfully"
+        }
     }
-
 }
+// pipeline {
  
-post {
+// agent any
  
-    failure {
+// triggers {
 
-        echo "Build failed! Starting rollback..."
+//     githubPush()
+
+// }
  
-        sh """
+// environment {
 
-        ssh -o StrictHostKeyChecking=no $SERVER "
+//     SERVER = "root@213.210.36.52"
+
+//     PROJECT_PATH = "/repos/logistics-ERP_FE_BE"
+
+//     BRANCH = "main"
+
+//     APP_NAME = "logistics-erp"
+
+// }
  
-        cd $PROJECT_PATH
+// stages {
  
-        if [ -d 'dist_backup' ]; then
+//     stage('Checkout') {
 
-            echo 'Restoring previous build...'
+//         steps {
 
-            rm -rf dist
+//             echo "Checking latest code from GitHub..."
 
-            mv dist_backup dist
+//             checkout scm
+
+//         }
+
+//     }
  
-            echo 'Restarting previous version...'
+//     stage('Deploy') {
 
-            pm2 restart $APP_NAME --update-env
+//         steps {
+
+//             echo "Deployment started..."
  
-            echo 'Rollback completed'
+//             sh """
 
-        else
-
-            echo 'No backup available for rollback'
-
-        fi
+//             ssh -o StrictHostKeyChecking=no $SERVER "
  
-        "
-
-        """
-
-    }
+//             set -e
  
-    success {
+//             echo '============================='
 
-        echo "Deployment completed successfully with zero downtime"
+//             echo ' LOGISTICS ERP DEPLOY START'
 
-    }
-
-}
+//             echo '============================='
  
-}
+//             cd $PROJECT_PATH
+ 
+//             # Validate repo
+
+//             if [ ! -d '.git' ]; then
+
+//                 echo 'Not a git repository!'
+
+//                 exit 1
+
+//             fi
+ 
+//             # Backup current build
+
+//             if [ -d 'dist' ]; then
+
+//                 echo 'Backing up existing build...'
+
+//                 rm -rf dist_backup
+
+//                 cp -r dist dist_backup
+
+//             fi
+ 
+//             # SAFE GIT PULL (no data loss)
+
+//             echo 'Pulling latest code safely...'
+
+//             git stash push -m 'jenkins-auto-stash' || true
+ 
+//             git pull --rebase origin $BRANCH || {
+
+//                 echo 'Git pull failed (possible conflict)'
+
+//                 exit 1
+
+//             }
+ 
+//             git stash pop || {
+
+//                 echo 'Stash apply had conflicts (manual fix may be needed)'
+
+//             }
+ 
+//             echo 'Installing dependencies...'
+
+//             npm ci || npm install
+ 
+//             echo 'Building project...'
+
+//             npm run build
+ 
+//             echo 'Reloading application (zero downtime)...'
+ 
+//             if pm2 describe $APP_NAME > /dev/null 2>&1; then
+
+//                 echo 'App exists → Reloading'
+
+//                 pm2 reload $APP_NAME --update-env
+
+//             else
+
+//                 echo 'First deployment → Starting app'
+
+//                 pm2 start ecosystem.config.cjs --env production
+
+//             fi
+ 
+//             pm2 save
+ 
+//             echo 'DEPLOYMENT SUCCESS'
+ 
+//             "
+
+//             """
+
+//         }
+
+//     }
+
+// }
+ 
+// post {
+ 
+//     failure {
+
+//         echo "Build failed! Starting rollback..."
+ 
+//         sh """
+
+//         ssh -o StrictHostKeyChecking=no $SERVER "
+ 
+//         cd $PROJECT_PATH
+ 
+//         if [ -d 'dist_backup' ]; then
+
+//             echo 'Restoring previous build...'
+
+//             rm -rf dist
+
+//             mv dist_backup dist
+ 
+//             echo 'Restarting previous version...'
+
+//             pm2 restart $APP_NAME --update-env
+ 
+//             echo 'Rollback completed'
+
+//         else
+
+//             echo 'No backup available for rollback'
+
+//         fi
+ 
+//         "
+
+//         """
+
+//     }
+ 
+//     success {
+
+//         echo "Deployment completed successfully with zero downtime"
+
+//     }
+
+// }
+ 
+// }
