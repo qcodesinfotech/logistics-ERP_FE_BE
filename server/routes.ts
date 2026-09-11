@@ -9742,6 +9742,187 @@ export async function registerRoutes(
     }
   });
 
+  // ==================== DRIVER LEAVE MANAGEMENT ROUTES ====================
+  // Helper to resolve or ensure an employee ID for a driver user
+  async function resolveDriverEmployeeId(req: AuthRequest): Promise<string> {
+    if (req.user?.employeeId) {
+      const [existing] = await db.select().from(schema.employees).where(eq(schema.employees.id, req.user.employeeId)).limit(1);
+      if (existing) return existing.id;
+    }
+
+    if (req.user?.id) {
+      // Check if user.id matches an employee directly (e.g. employee login)
+      const [empById] = await db.select().from(schema.employees).where(eq(schema.employees.id, req.user.id)).limit(1);
+      if (empById) return empById.id;
+
+      // Check if employeeCode or phone matches username
+      if (req.user?.username) {
+        const [empByCode] = await db.select().from(schema.employees).where(
+          or(
+            eq(schema.employees.employeeCode, req.user.username),
+            eq(schema.employees.phone, req.user.username)
+          )
+        ).limit(1);
+        if (empByCode) return empByCode.id;
+      }
+
+      // Check by user name or create linked employee
+      const driverName = req.user.name || req.user.username || "Driver";
+      const [empByName] = await db.select().from(schema.employees).where(
+        and(
+          eq(schema.employees.name, driverName),
+          eq(schema.employees.position, "driver")
+        )
+      ).limit(1);
+      if (empByName) return empByName.id;
+
+      // Auto-create employee record for this driver so it joins properly on the Web ERP
+      const [newEmp] = await db.insert(schema.employees).values({
+        employeeCode: req.user.username || `DRV-${Date.now().toString().slice(-4)}`,
+        name: driverName,
+        phone: req.user.email || null,
+        position: "driver",
+        department: "Logistics",
+        status: "active",
+        companyId: req.user.companyId || null,
+        shopId: req.user.shopId || null,
+        branchId: req.user.branchId || null,
+      }).returning();
+      
+      if (newEmp) {
+        try {
+          await db.update(schema.users).set({ employeeId: newEmp.id }).where(eq(schema.users.id, req.user.id));
+        } catch (e) {}
+        return newEmp.id;
+      }
+    }
+
+    throw new Error("Could not resolve driver employee profile");
+  }
+
+  // 1. Get available leave types for drivers
+  app.get("/api/drivers/leave-types", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      let types = await storage.getLeaveTypes();
+      if (!types || types.length === 0) {
+        const defaultTypes = [
+          { name: "Annual Leave", description: "Standard paid annual leave entitlement", daysPerYear: 30, isPaid: true, carryForward: true, maxCarryForward: 10 },
+          { name: "Sick Leave", description: "Medical / health-related leave", daysPerYear: 15, isPaid: true, carryForward: false, maxCarryForward: 0 },
+          { name: "Emergency Leave", description: "Urgent personal or family matter", daysPerYear: 5, isPaid: true, carryForward: false, maxCarryForward: 0 },
+          { name: "Casual Leave", description: "Short-notice casual leave", daysPerYear: 7, isPaid: true, carryForward: false, maxCarryForward: 0 },
+          { name: "Unpaid Leave", description: "Leave without pay", daysPerYear: 0, isPaid: false, carryForward: false, maxCarryForward: 0 },
+        ];
+        for (const dt of defaultTypes) {
+          await storage.createLeaveType(dt as any);
+        }
+        types = await storage.getLeaveTypes();
+      }
+      res.json(types);
+    } catch (error: any) {
+      console.error("Get driver leave types error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch leave types" });
+    }
+  });
+
+  // 2. Get leave requests for the logged-in driver
+  app.get("/api/drivers/leave-requests", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const employeeId = await resolveDriverEmployeeId(req);
+      const requests = await storage.getLeaveRequests(employeeId);
+      const leaveTypes = await storage.getLeaveTypes();
+      const typesMap = new Map(leaveTypes.map(t => [t.id, t]));
+
+      const enriched = requests.map(r => ({
+        ...r,
+        leaveType: typesMap.get(r.leaveTypeId) || null,
+      }));
+
+      res.json(enriched);
+    } catch (error: any) {
+      console.error("Get driver leave requests error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch leave requests" });
+    }
+  });
+
+  // 3. Submit a new leave request from mobile
+  app.post("/api/drivers/leave-requests", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const employeeId = await resolveDriverEmployeeId(req);
+      const {
+        leaveTypeId,
+        startDate,
+        endDate,
+        totalDays,
+        reason,
+        isHalfDay,
+        halfDayPeriod,
+        coveringEmployeeId
+      } = req.body;
+
+      if (!leaveTypeId) {
+        return res.status(400).json({ error: "Please select a leave type" });
+      }
+      if (!startDate) {
+        return res.status(400).json({ error: "Start date is required" });
+      }
+
+      const effectiveEndDate = isHalfDay ? startDate : (endDate || startDate);
+      let calculatedDays = totalDays ? totalDays.toString() : "1";
+      if (isHalfDay) {
+        calculatedDays = "0.5";
+      } else if (!totalDays && startDate && effectiveEndDate) {
+        const s = new Date(startDate);
+        const e = new Date(effectiveEndDate);
+        const diffDays = Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        calculatedDays = diffDays.toString();
+      }
+
+      const created = await storage.createLeaveRequest({
+        employeeId,
+        leaveTypeId,
+        startDate,
+        endDate: effectiveEndDate,
+        totalDays: calculatedDays,
+        reason: reason || "",
+        status: "pending",
+        isHalfDay: !!isHalfDay,
+        halfDayPeriod: isHalfDay ? (halfDayPeriod || "morning") : null,
+        coveringEmployeeId: coveringEmployeeId || null,
+      } as any);
+
+      res.status(201).json(created);
+    } catch (error: any) {
+      console.error("Create driver leave request error:", error);
+      res.status(500).json({ error: error.message || "Failed to submit leave request" });
+    }
+  });
+
+  // 4. Cancel a pending leave request
+  app.post("/api/drivers/leave-requests/:id/cancel", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const employeeId = await resolveDriverEmployeeId(req);
+      const [existing] = await db.select().from(schema.leaveRequests).where(
+        and(
+          eq(schema.leaveRequests.id, req.params.id),
+          eq(schema.leaveRequests.employeeId, employeeId)
+        )
+      ).limit(1);
+
+      if (!existing) {
+        return res.status(404).json({ error: "Leave request not found" });
+      }
+      if (existing.status !== "pending") {
+        return res.status(400).json({ error: `Cannot cancel a leave request that is already ${existing.status}` });
+      }
+
+      const updated = await storage.updateLeaveRequest(req.params.id, { status: "cancelled" });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Cancel driver leave request error:", error);
+      res.status(500).json({ error: error.message || "Failed to cancel leave request" });
+    }
+  });
+
   // User Activity Logs API
   app.get("/api/user-activity-logs", authMiddleware, async (req: AuthRequest, res) => {
     try {

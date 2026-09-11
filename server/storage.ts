@@ -9421,24 +9421,38 @@ export class DatabaseStorage implements IStorage {
     const contract = await this.getContract(contractId);
     if (!contract) throw new Error("Contract not found");
 
-    // Fetch or default monthly usage
-    const usageConditions = [
-      eq(contractMonthlyUsage.contractId, contractId),
-      eq(contractMonthlyUsage.periodMonth, periodStart)
-    ];
-    if (outletId) {
-      usageConditions.push(eq(contractMonthlyUsage.outletId, outletId));
-    }
+    // Fetch or default monthly usage (matching either exact periodStart or matching year-month)
+    const monthKey = periodStart.slice(0, 7);
+    const allUsages = await this.getContractMonthlyUsage(contractId);
+    const usage = allUsages.find(u => {
+      const uMonth = u.periodMonth ? u.periodMonth.slice(0, 7) : "";
+      const matchesOutlet = outletId ? u.outletId === outletId : true;
+      return (u.periodMonth === periodStart || uMonth === monthKey) && matchesOutlet;
+    });
 
-    const usageRows = await db.select().from(contractMonthlyUsage).where(and(...usageConditions));
-    const usage = usageRows[0];
+    const parsedManualNum = (val: any) => {
+      if (val === undefined || val === null || val === "" || isNaN(Number(val))) return undefined;
+      return Number(val);
+    };
 
-    const otHours = parseFloat(usage?.otHours || "0");
-    const holidayDays = usage?.holidayDays || 0;
-    const extraTruckTrips = usage?.extraTruckTrips || 0;
-    const emergencyTrips = usage?.emergencyTrips || 0;
-    const redeliveryTrips = usage?.redeliveryTrips || 0;
-    const outsourcedTrips = usage?.outsourcedTrips || 0;
+    const otHours = parsedManualNum(manualCharges?.otHours) !== undefined 
+      ? parsedManualNum(manualCharges?.otHours)! 
+      : parseFloat(usage?.otHours || "0");
+    const holidayDays = parsedManualNum(manualCharges?.holidayDays) !== undefined 
+      ? Math.round(parsedManualNum(manualCharges?.holidayDays)!) 
+      : (usage?.holidayDays || 0);
+    const extraTruckTrips = parsedManualNum(manualCharges?.extraTruckTrips) !== undefined 
+      ? Math.round(parsedManualNum(manualCharges?.extraTruckTrips)!) 
+      : (usage?.extraTruckTrips || 0);
+    const emergencyTrips = parsedManualNum(manualCharges?.emergencyTrips) !== undefined 
+      ? Math.round(parsedManualNum(manualCharges?.emergencyTrips)!) 
+      : (usage?.emergencyTrips || 0);
+    const redeliveryTrips = parsedManualNum(manualCharges?.redeliveryTrips) !== undefined 
+      ? Math.round(parsedManualNum(manualCharges?.redeliveryTrips)!) 
+      : (usage?.redeliveryTrips || 0);
+    const outsourcedTrips = parsedManualNum(manualCharges?.outsourcedTrips) !== undefined 
+      ? Math.round(parsedManualNum(manualCharges?.outsourcedTrips)!) 
+      : (usage?.outsourcedTrips || 0);
 
     const otRate = parseFloat(contract.otCharges || "0");
     const holidayRate = parseFloat(contract.holidayCharges || "0");
@@ -9450,14 +9464,14 @@ export class DatabaseStorage implements IStorage {
     const baseAmount = parseFloat(contract.monthlyRate || "0") * (contract.numVehicles || 1);
     
     // Check if manual charges were provided, otherwise calculate from usage
-    const otAmount = manualCharges?.otAmount !== undefined ? parseFloat(manualCharges.otAmount) : (otHours * otRate);
-    const holidayAmount = manualCharges?.holidayAmount !== undefined ? parseFloat(manualCharges.holidayAmount) : (holidayDays * holidayRate);
-    const extraTruckAmount = manualCharges?.extraTruckAmount !== undefined ? parseFloat(manualCharges.extraTruckAmount) : (extraTruckTrips * extraTruckRate);
-    const emergencyAmount = manualCharges?.emergencyAmount !== undefined ? parseFloat(manualCharges.emergencyAmount) : (emergencyTrips * emergencyRate);
-    const redeliveryAmount = manualCharges?.redeliveryAmount !== undefined ? parseFloat(manualCharges.redeliveryAmount) : (redeliveryTrips * redeliveryRate);
-    const outsourcedAmount = manualCharges?.outsourcedAmount !== undefined ? parseFloat(manualCharges.outsourcedAmount) : (outsourcedTrips * outsourcedRate);
+    const otAmount = parsedManualNum(manualCharges?.otAmount) !== undefined ? parsedManualNum(manualCharges.otAmount)! : (otHours * otRate);
+    const holidayAmount = parsedManualNum(manualCharges?.holidayAmount) !== undefined ? parsedManualNum(manualCharges.holidayAmount)! : (holidayDays * holidayRate);
+    const extraTruckAmount = parsedManualNum(manualCharges?.extraTruckAmount) !== undefined ? parsedManualNum(manualCharges.extraTruckAmount)! : (extraTruckTrips * extraTruckRate);
+    const emergencyAmount = parsedManualNum(manualCharges?.emergencyAmount) !== undefined ? parsedManualNum(manualCharges.emergencyAmount)! : (emergencyTrips * emergencyRate);
+    const redeliveryAmount = parsedManualNum(manualCharges?.redeliveryAmount) !== undefined ? parsedManualNum(manualCharges.redeliveryAmount)! : (redeliveryTrips * redeliveryRate);
+    const outsourcedAmount = parsedManualNum(manualCharges?.outsourcedAmount) !== undefined ? parsedManualNum(manualCharges.outsourcedAmount)! : (outsourcedTrips * outsourcedRate);
 
-    const totalAmount = baseAmount + otAmount + holidayAmount + extraTruckAmount + emergencyAmount + redeliveryAmount + outsourcedAmount;
+    const totalAmount = baseAmount + (isNaN(otAmount) ? 0 : otAmount) + (isNaN(holidayAmount) ? 0 : holidayAmount) + (isNaN(extraTruckAmount) ? 0 : extraTruckAmount) + (isNaN(emergencyAmount) ? 0 : emergencyAmount) + (isNaN(redeliveryAmount) ? 0 : redeliveryAmount) + (isNaN(outsourcedAmount) ? 0 : outsourcedAmount);
 
     // Use a random suffix to prevent unique constraint violations on fast loops
     const invoiceNumber = `CINV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;

@@ -113,6 +113,7 @@ export default function LeaveManagement() {
 
   const { data: leaveRequests = [], isLoading: requestsLoading } = useQuery<LeaveRequest[]>({
     queryKey: ["/api/leave-requests"],
+    refetchInterval: 5000,
   });
 
   const { data: employees = [] } = useQuery<Employee[]>({
