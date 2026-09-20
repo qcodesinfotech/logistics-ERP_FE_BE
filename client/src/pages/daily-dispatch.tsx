@@ -45,6 +45,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
+  Layers,
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
 import { exportCompletedDeliveriesExcel } from "@/lib/customer-excel-export";
@@ -749,10 +750,85 @@ function ZoneColumn({
     setDraggedIdx(null);
   };
 
+  const [detailsTab, setDetailsTab] = useState<"outlets" | "items">("outlets");
+  const [itemDetailsSearch, setItemDetailsSearch] = useState("");
+  const [expandedRouteItemKeys, setExpandedRouteItemKeys] = useState<Record<string, boolean>>({});
+
   const parseNumber = (val: any) => {
     const num = parseFloat(val);
     return isNaN(num) ? 0 : num;
   };
+
+  const routeItemsSummary = useMemo(() => {
+    const map: Record<string, {
+      itemCode: string;
+      description: string;
+      storageType?: string;
+      uom: string;
+      totalQty: number;
+      deliveredQty: number;
+      outlets: { outletName: string; outletCode: string; qty: number; deliveredQty: number; status: string }[];
+    }> = {};
+
+    let dry = 0;
+    let chilled = 0;
+    let frozen = 0;
+
+    localOutlets.forEach(ot => {
+      ot.items.forEach(it => {
+        const qty = parseNumber((it as any).requestedQty || it.weight || 0);
+        const delQty = it.delivery?.status === "delivered" ? parseNumber(it.delivery.deliveredQty || it.requestedQty || it.weight || 0) : 0;
+        const storageType = (it.storageType || "").toUpperCase();
+
+        if (storageType.includes("CHILL")) chilled += qty;
+        else if (storageType.includes("FROZ")) frozen += qty;
+        else dry += qty;
+
+        const key = `${it.itemCode}__${it.storageType || "DEFAULT"}`;
+        if (!map[key]) {
+          map[key] = {
+            itemCode: it.itemCode,
+            description: it.description || it.itemCode,
+            storageType: it.storageType || undefined,
+            uom: (it as any).uom || "-",
+            totalQty: 0,
+            deliveredQty: 0,
+            outlets: [],
+          };
+        }
+
+        map[key].totalQty += qty;
+        map[key].deliveredQty += delQty;
+
+        const existing = map[key].outlets.find(o => o.outletCode === ot.outletCode);
+        if (existing) {
+          existing.qty += qty;
+          existing.deliveredQty += delQty;
+        } else {
+          map[key].outlets.push({
+            outletName: ot.outletName,
+            outletCode: ot.outletCode,
+            qty,
+            deliveredQty: delQty,
+            status: it.delivery?.status || "pending",
+          });
+        }
+      });
+    });
+
+    const items = Object.values(map).map(it => ({
+      ...it,
+      totalQty: Math.round(it.totalQty * 100) / 100,
+      deliveredQty: Math.round(it.deliveredQty * 100) / 100,
+    })).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+
+    return {
+      items,
+      dry: Math.round(dry * 100) / 100,
+      chilled: Math.round(chilled * 100) / 100,
+      frozen: Math.round(frozen * 100) / 100,
+    };
+  }, [localOutlets]);
 
   const totalItems = localOutlets.reduce((s, o) => s + o.items.length, 0);
   const totalQty = localOutlets.reduce((sumOutlet, o) => {
@@ -841,7 +917,7 @@ function ZoneColumn({
   };
 
   return (
-    <div className={`flex-shrink-0 flex rounded-2xl border ${isUnassigned ? "border-dashed border-slate-300 bg-slate-50/50 dark:bg-slate-900/20" : "border-border bg-card"} shadow-sm transition-all duration-300 ${isExpanded ? "w-[600px] flex-row" : "w-80 flex-col"}`}>
+    <div className={`flex-shrink-0 flex rounded-2xl border ${isUnassigned ? "border-dashed border-slate-300 bg-slate-50/50 dark:bg-slate-900/20" : "border-border bg-card"} shadow-sm transition-all duration-300 ${isExpanded ? "w-[620px] flex-row" : "w-80 flex-col"}`}>
       {/* Left Column */}
       <div className={`flex flex-col h-full ${isExpanded ? "w-80 border-r" : "w-full"}`}>
         {/* Zone Header */}
@@ -1042,16 +1118,36 @@ function ZoneColumn({
 
       {/* Right Column */}
       {isExpanded && (
-        <div className="w-[280px] flex flex-col h-full bg-slate-100/90 dark:bg-card/95 rounded-r-2xl border-l border-border animate-in fade-in slide-in-from-left-5 duration-250">
+        <div className="w-[300px] flex flex-col h-full bg-slate-100/90 dark:bg-card/95 rounded-r-2xl border-l border-border animate-in fade-in slide-in-from-left-5 duration-250">
           <div className="p-3 border-b border-border flex items-center justify-between bg-slate-100 dark:bg-card rounded-tr-2xl">
             <div>
-              <h4 className="font-bold text-xs text-foreground truncate max-w-[190px]" title={zone.zoneName}>
+              <h4 className="font-bold text-xs text-foreground truncate max-w-[200px]" title={zone.zoneName}>
                 Route: {zone.zoneName}
               </h4>
               <p className="text-[9px] text-muted-foreground">Route Details Structure</p>
             </div>
             <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-accent" onClick={onCloseDetails}>
               <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* Tab Switcher: Outlets vs Item Summary */}
+          <div className="px-3 py-1.5 border-b border-border flex gap-1 bg-slate-200/50 dark:bg-card/50">
+            <Button
+              size="sm"
+              variant={detailsTab === "outlets" ? "default" : "ghost"}
+              className="h-6 text-[10px] px-2 flex-1 font-medium"
+              onClick={() => setDetailsTab("outlets")}
+            >
+              <Store className="h-3 w-3 mr-1" /> Outlets ({localOutlets.length})
+            </Button>
+            <Button
+              size="sm"
+              variant={detailsTab === "items" ? "default" : "ghost"}
+              className="h-6 text-[10px] px-2 flex-1 font-medium"
+              onClick={() => setDetailsTab("items")}
+            >
+              <Package className="h-3 w-3 mr-1" /> Item Summary ({routeItemsSummary.items.length})
             </Button>
           </div>
 
@@ -1068,6 +1164,130 @@ function ZoneColumn({
                   </Button>
                 </div>
                 {renderOutletItems(selectedOutletForDetails.items || [])}
+              </div>
+            ) : detailsTab === "items" ? (
+              <div className="space-y-2.5">
+                {/* Route Item Summary Header Stats */}
+                <div className="bg-card p-2 rounded-lg border border-border space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-foreground">
+                    <span className="flex items-center gap-1">
+                      <Package className="h-3.5 w-3.5 text-primary" />
+                      <span>Total Qty: {formattedTotalQty}</span>
+                    </span>
+                    <span className="text-muted-foreground font-normal text-[10px]">
+                      {routeItemsSummary.items.length} Unique Items
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap text-[9px]">
+                    {routeItemsSummary.dry > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                        Dry: {routeItemsSummary.dry}
+                      </span>
+                    )}
+                    {routeItemsSummary.chilled > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border border-sky-200 dark:border-sky-800">
+                        Chilled: {routeItemsSummary.chilled}
+                      </span>
+                    )}
+                    {routeItemsSummary.frozen > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                        Frozen: {routeItemsSummary.frozen}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Filter Search Input */}
+                <div className="relative">
+                  <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
+                  <Input
+                    placeholder="Filter route items..."
+                    value={itemDetailsSearch}
+                    onChange={e => setItemDetailsSearch(e.target.value)}
+                    className="h-7 pl-6 text-xs bg-card"
+                  />
+                </div>
+
+                {/* List of Aggregated Items on this route */}
+                <div className="space-y-1.5">
+                  {routeItemsSummary.items
+                    .filter(it => {
+                      if (!itemDetailsSearch.trim()) return true;
+                      const q = itemDetailsSearch.toLowerCase().trim();
+                      return (
+                        it.itemCode.toLowerCase().includes(q) ||
+                        it.description.toLowerCase().includes(q) ||
+                        (it.storageType && it.storageType.toLowerCase().includes(q)) ||
+                        it.outlets.some(o => o.outletName.toLowerCase().includes(q) || o.outletCode.toLowerCase().includes(q))
+                      );
+                    })
+                    .map(item => {
+                      const itemKey = `${zone.zoneId}-${item.itemCode}-${item.storageType || ""}`;
+                      const isItemExpanded = !!expandedRouteItemKeys[itemKey];
+
+                      return (
+                        <div key={itemKey} className="bg-card rounded-lg border border-border p-2 shadow-2xs space-y-1.5">
+                          <div
+                            className="flex items-start justify-between gap-1.5 cursor-pointer"
+                            onClick={() => setExpandedRouteItemKeys(prev => ({ ...prev, [itemKey]: !isItemExpanded }))}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-semibold text-xs text-foreground truncate">
+                                  {item.itemCode}
+                                </span>
+                                {item.storageType && (
+                                  <span className={`text-[8px] px-1 py-0.2 rounded font-bold uppercase border ${
+                                    item.storageType.toUpperCase().includes("FROZ")
+                                      ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border-indigo-200"
+                                      : item.storageType.toUpperCase().includes("CHILL")
+                                      ? "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border-sky-200"
+                                      : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200"
+                                  }`}>
+                                    {item.storageType}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-muted-foreground truncate" title={item.description}>
+                                {item.description}
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="text-xs font-bold text-foreground">
+                                {item.totalQty} <span className="text-[9px] font-normal text-muted-foreground">{item.uom}</span>
+                              </div>
+                              <div className="flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
+                                <span>{item.outlets.length} {item.outlets.length === 1 ? "outlet" : "outlets"}</span>
+                                {isItemExpanded ? <ChevronUp className="h-3 w-3 text-primary" /> : <ChevronDown className="h-3 w-3" />}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Collapsible outlet breakdown */}
+                          {isItemExpanded && (
+                            <div className="pt-1.5 border-t border-border/60 text-[10px] space-y-1">
+                              <p className="font-semibold text-muted-foreground text-[9px]">Outlets on this route:</p>
+                              <div className="divide-y divide-border/40">
+                                {item.outlets.map(o => (
+                                  <div key={o.outletCode} className="flex items-center justify-between py-0.5">
+                                    <span className="truncate pr-1 text-foreground" title={o.outletName}>
+                                      {o.outletName}
+                                    </span>
+                                    <span className="font-mono font-semibold text-foreground shrink-0">
+                                      {o.qty} {item.uom}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  {routeItemsSummary.items.length === 0 && (
+                    <p className="text-xs text-muted-foreground italic text-center py-4">No items on this route</p>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -3701,11 +3921,86 @@ export default function DailyDispatchPage() {
 function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; searchQuery?: string }) {
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
+  const [expandedSummaryItems, setExpandedSummaryItems] = useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = useState<"items" | "outlets" | "both">("items");
+  const [routeViewModes, setRouteViewModes] = useState<Record<string, "items" | "outlets" | "both">>({});
 
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
   const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggleSummaryItem = (key: string) => setExpandedSummaryItems(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const setRouteMode = (zoneId: string, mode: "items" | "outlets" | "both", e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRouteViewModes(prev => ({ ...prev, [zoneId]: mode }));
+    setExpandedRoutes(prev => ({ ...prev, [zoneId]: true }));
+  };
 
   const query = (searchQuery || "").toLowerCase().trim();
+
+  // Helper to aggregate items for a route
+  const getRouteItemSummary = useCallback((zone: ZoneGroup) => {
+    const itemMap: Record<string, {
+      itemCode: string;
+      description: string;
+      uom: string;
+      storageType?: string;
+      totalQty: number;
+      outlets: { outletCode: string; outletName: string; qty: number }[];
+    }> = {};
+
+    let dryQty = 0;
+    let chilledQty = 0;
+    let frozenQty = 0;
+
+    zone.outlets.forEach(outlet => {
+      outlet.items.forEach(item => {
+        const storageType = (item.storageType || "").toUpperCase();
+        const qty = Number((item as any).requestedQty || item.weight || 0);
+
+        if (storageType.includes("CHILL")) chilledQty += qty;
+        else if (storageType.includes("FROZ")) frozenQty += qty;
+        else dryQty += qty;
+
+        const key = `${item.itemCode}__${item.storageType || "DEFAULT"}`;
+        if (!itemMap[key]) {
+          itemMap[key] = {
+            itemCode: item.itemCode,
+            description: item.description || "",
+            uom: (item as any).uom || "-",
+            storageType: item.storageType || undefined,
+            totalQty: 0,
+            outlets: [],
+          };
+        }
+
+        itemMap[key].totalQty += qty;
+
+        const existingOutlet = itemMap[key].outlets.find(o => o.outletCode === outlet.outletCode);
+        if (existingOutlet) {
+          existingOutlet.qty += qty;
+        } else {
+          itemMap[key].outlets.push({
+            outletCode: outlet.outletCode,
+            outletName: outlet.outletName,
+            qty,
+          });
+        }
+      });
+    });
+
+    const items = Object.values(itemMap).map(it => ({
+      ...it,
+      totalQty: Math.round(it.totalQty * 100) / 100,
+      outlets: it.outlets.map(o => ({ ...o, qty: Math.round(o.qty * 100) / 100 })),
+    })).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+
+    return {
+      items,
+      dryQty: Math.round(dryQty * 100) / 100,
+      chilledQty: Math.round(chilledQty * 100) / 100,
+      frozenQty: Math.round(frozenQty * 100) / 100,
+    };
+  }, []);
 
   const filteredZones = useMemo(() => {
     if (!query) return boardData.zones;
@@ -3730,7 +4025,8 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
 
             const matchingItems = outlet.items.filter(item =>
               item.itemCode.toLowerCase().includes(query) ||
-              (item.description && item.description.toLowerCase().includes(query))
+              (item.description && item.description.toLowerCase().includes(query)) ||
+              (item.storageType && item.storageType.toLowerCase().includes(query))
             );
 
             if (matchingItems.length > 0) {
@@ -3756,17 +4052,128 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
       .filter(Boolean) as typeof boardData.zones;
   }, [boardData.zones, query]);
 
+  // Export CSV
+  const handleExportCSV = () => {
+    const rows: any[] = [];
+
+    filteredZones.forEach(zone => {
+      const mode = routeViewModes[zone.zoneId] || viewMode;
+      const { items } = getRouteItemSummary(zone);
+
+      if (mode === "items" || mode === "both") {
+        items.forEach(item => {
+          rows.push({
+            "ROUTE": zone.zoneName,
+            "VIEW": "ITEM_SUMMARY",
+            "OUTLETS_COUNT": item.outlets.length,
+            "ITEM_NUMBER": item.itemCode,
+            "DESCRIPTION": item.description,
+            "STORAGE_TYPE": item.storageType || "DRY",
+            "UOM": item.uom,
+            "TOTAL_QTY": item.totalQty,
+            "OUTLETS_BREAKDOWN": item.outlets.map(o => `${o.outletName} (${o.qty})`).join("; ")
+          });
+        });
+      }
+
+      if (mode === "outlets" || mode === "both") {
+        zone.outlets.forEach(outlet => {
+          outlet.items.forEach(item => {
+            rows.push({
+              "ROUTE": zone.zoneName,
+              "VIEW": "OUTLET_HIERARCHY",
+              "OUTLET_CODE": outlet.outletCode,
+              "OUTLET_NAME": outlet.outletName,
+              "ITEM_NUMBER": item.itemCode,
+              "DESCRIPTION": item.description,
+              "STORAGE_TYPE": item.storageType || "DRY",
+              "UOM": (item as any).uom || "-",
+              "TOTAL_QTY": Number((item as any).requestedQty || item.weight || 0),
+            });
+          });
+        });
+      }
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Route Summary");
+    XLSX.writeFile(workbook, `Route_Item_Summary_${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
+
+  const allRoutesExpanded = filteredZones.length > 0 && filteredZones.every(z => expandedRoutes[z.zoneId] !== false);
+  const toggleAllRoutes = () => {
+    const nextState = !allRoutesExpanded;
+    const update: Record<string, boolean> = {};
+    filteredZones.forEach(z => {
+      update[z.zoneId] = nextState;
+    });
+    setExpandedRoutes(update);
+  };
+
   return (
     <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
+      {/* Controls toolbar */}
+      <div className="flex items-center justify-between pb-3 flex-wrap gap-2 print:hidden">
+        <div className="flex items-center gap-1.5 bg-slate-200/80 dark:bg-muted p-1 rounded-lg">
+          <button
+            onClick={() => setViewMode("items")}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+              viewMode === "items" ? "bg-white dark:bg-card text-primary shadow-xs" : "text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground"
+            }`}
+          >
+            <Package className="h-3.5 w-3.5 text-primary" />
+            <span>Route Items Summary</span>
+          </button>
+          <button
+            onClick={() => setViewMode("outlets")}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+              viewMode === "outlets" ? "bg-white dark:bg-card text-primary shadow-xs" : "text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground"
+            }`}
+          >
+            <Store className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+            <span>Outlets Hierarchy</span>
+          </button>
+          <button
+            onClick={() => setViewMode("both")}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+              viewMode === "both" ? "bg-white dark:bg-card text-primary shadow-xs" : "text-slate-600 dark:text-muted-foreground hover:text-slate-900 dark:hover:text-foreground"
+            }`}
+          >
+            <Layers className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+            <span>Combined View</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1 bg-white hover:bg-slate-50"
+            onClick={toggleAllRoutes}
+          >
+            {allRoutesExpanded ? "Collapse All Routes" : "Expand All Routes"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1 bg-white hover:bg-slate-50"
+            onClick={handleExportCSV}
+          >
+            <Download className="h-3.5 w-3.5" /> Export Excel
+          </Button>
+        </div>
+      </div>
+
       <div className="bg-white border rounded-xl shadow-sm overflow-hidden text-sm">
         <table className="w-full text-left border-collapse">
           <thead className="bg-slate-100/80 border-b">
             <tr>
-              <th className="py-2 px-3 font-semibold text-slate-700 border-r">ROUTE</th>
-              <th className="py-2 px-3 font-semibold text-slate-700 border-r">TO_SUB_DESC</th>
-              <th className="py-2 px-3 font-semibold text-slate-700 border-r">ITEM_NUMBER</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r w-56">ROUTE</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r w-48">TO_SUB_DESC / OUTLETS</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r w-36">ITEM_NUMBER</th>
               <th className="py-2 px-3 font-semibold text-slate-700 border-r">DESCRIPTION</th>
-              <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20">UOM</th>
+              <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20 text-center">UOM</th>
               <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Total</th>
             </tr>
           </thead>
@@ -3775,56 +4182,219 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
               if (zone.outlets.length === 0) return null;
               const routeTotal = zone.outlets.reduce((s, o) => s + o.items.reduce((ss, i) => ss + Number((i as any).requestedQty || i.weight || 0), 0), 0);
               const isRouteExpanded = expandedRoutes[zone.zoneId] !== false; // Default true
+              const currentMode = routeViewModes[zone.zoneId] || viewMode;
+              const summary = getRouteItemSummary(zone);
 
               return (
                 <React.Fragment key={zone.zoneId}>
-                  <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneId)}>
-                    <td className="py-1.5 px-3 border-r flex items-center gap-1.5">
-                      {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
-                      {zone.zoneName}
+                  {/* Route Header Row */}
+                  <tr className="bg-slate-100/80 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800 transition-colors" onClick={() => toggleRoute(zone.zoneId)}>
+                    <td className="py-2 px-3 border-r flex items-center gap-1.5">
+                      {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
+                      <span className="font-bold text-slate-900">{zone.zoneName}</span>
                     </td>
-                    <td className="py-1.5 px-3 border-r"></td>
-                    <td className="py-1.5 px-3 border-r"></td>
-                    <td className="py-1.5 px-3 border-r"></td>
-                    <td className="py-1.5 px-3 border-r"></td>
-                    <td className="py-1.5 px-3 text-right">{routeTotal}</td>
+                    <td className="py-2 px-3 border-r text-xs">
+                      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                        <span className="text-slate-500 font-normal">{zone.outlets.length} Outlets · {summary.items.length} Items</span>
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 border-r text-xs" colSpan={3} onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                          {summary.dryQty > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-normal">
+                              Dry: {summary.dryQty}
+                            </span>
+                          )}
+                          {summary.chilledQty > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 font-normal">
+                              Chilled: {summary.chilledQty}
+                            </span>
+                          )}
+                          {summary.frozenQty > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-normal">
+                              Frozen: {summary.frozenQty}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant={currentMode === "items" ? "default" : "outline"}
+                            className="h-6 text-[10px] px-2 py-0 bg-white dark:bg-card text-foreground"
+                            onClick={(e) => setRouteMode(zone.zoneId, "items", e)}
+                          >
+                            Item Summary
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={currentMode === "outlets" ? "default" : "outline"}
+                            className="h-6 text-[10px] px-2 py-0 bg-white dark:bg-card text-foreground"
+                            onClick={(e) => setRouteMode(zone.zoneId, "outlets", e)}
+                          >
+                            Outlets
+                          </Button>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 text-right font-bold text-slate-900">{routeTotal}</td>
                   </tr>
 
-                  {isRouteExpanded && zone.outlets.map(outlet => {
-                    const outletTotal = outlet.items.reduce((s, i) => s + Number((i as any).requestedQty || i.weight || 0), 0);
-                    const outletId = `${zone.zoneId}-${outlet.outletCode}`;
-                    const isOutletExpanded = query
-                      ? expandedOutlets[outletId] !== false
-                      : !!expandedOutlets[outletId]; // Default true if search query is active
-
-                    return (
-                      <React.Fragment key={outletId}>
-                        <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
-                          <td className="py-1.5 px-3 border-r"></td>
-                          <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6">
-                            {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
-                            <span>{outlet.outletName}</span>
-                            <span className="text-xs text-slate-400 font-normal ml-1">({outlet.outletCode})</span>
+                  {/* Route Items Summary Section */}
+                  {isRouteExpanded && (currentMode === "items" || currentMode === "both") && (
+                    <>
+                      {currentMode === "both" && (
+                        <tr className="bg-slate-50 dark:bg-muted/40 border-b">
+                          <td colSpan={6} className="py-1 px-4 text-xs font-semibold text-slate-600 dark:text-muted-foreground">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="h-3.5 w-3.5 text-primary" />
+                              <span>Item-Level Summary for {zone.zoneName} ({summary.items.length} items)</span>
+                            </div>
                           </td>
-                          <td className="py-1.5 px-3 border-r"></td>
-                          <td className="py-1.5 px-3 border-r"></td>
-                          <td className="py-1.5 px-3 border-r"></td>
-                          <td className="py-1.5 px-3 text-right font-semibold">{outletTotal}</td>
                         </tr>
+                      )}
+                      {summary.items.map(item => {
+                        const itemKey = `${zone.zoneId}-${item.itemCode}-${item.storageType || ""}`;
+                        const isItemExpanded = !!expandedSummaryItems[itemKey];
 
-                        {isOutletExpanded && outlet.items.map(item => (
-                          <tr key={item.id} className="hover:bg-slate-50 text-slate-600 bg-white">
-                            <td className="py-1.5 px-3 border-r"></td>
-                            <td className="py-1.5 px-3 border-r"></td>
-                            <td className="py-1.5 px-3 border-r pl-6 font-medium text-xs">{item.itemCode}</td>
-                            <td className="py-1.5 px-3 border-r text-xs">{item.description}</td>
-                            <td className="py-1.5 px-3 border-r text-center text-xs">{(item as any).uom || '-'}</td>
-                            <td className="py-1.5 px-3 text-right font-medium">{Number((item as any).requestedQty || item.weight || 0)}</td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
+                        return (
+                          <React.Fragment key={itemKey}>
+                            <tr
+                              className="hover:bg-slate-50/80 cursor-pointer text-slate-700 bg-white transition-colors"
+                              onClick={() => toggleSummaryItem(itemKey)}
+                            >
+                              <td className="py-1.5 px-3 border-r text-slate-400 pl-6 flex items-center gap-1.5">
+                                {isItemExpanded ? <ChevronDown className="h-3.5 w-3.5 text-primary" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                                <Package className="h-3.5 w-3.5 text-slate-400" />
+                                <span className="text-[10px] font-mono text-slate-400">ITEM</span>
+                              </td>
+                              <td className="py-1.5 px-3 border-r">
+                                <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                                  {item.outlets.length} {item.outlets.length === 1 ? "outlet" : "outlets"}
+                                </span>
+                              </td>
+                              <td className="py-1.5 px-3 border-r font-mono text-xs font-semibold text-slate-900">
+                                {item.itemCode}
+                              </td>
+                              <td className="py-1.5 px-3 border-r text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-slate-800 font-medium">{item.description}</span>
+                                  {item.storageType && (
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold uppercase border ${
+                                      item.storageType.toUpperCase().includes("FROZ")
+                                        ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                        : item.storageType.toUpperCase().includes("CHILL")
+                                        ? "bg-sky-50 text-sky-700 border-sky-200"
+                                        : "bg-amber-50 text-amber-700 border-amber-200"
+                                    }`}>
+                                      {item.storageType}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-1.5 px-3 border-r text-center text-xs text-slate-600 font-mono">
+                                {item.uom}
+                              </td>
+                              <td className="py-1.5 px-3 text-right font-bold text-slate-900">
+                                {item.totalQty}
+                              </td>
+                            </tr>
+
+                            {/* Expanded outlet-level breakdown for this item on this route */}
+                            {isItemExpanded && (
+                              <tr className="bg-slate-50/70">
+                                <td colSpan={6} className="py-2 px-8 border-b">
+                                  <div className="bg-white border border-slate-200 rounded-lg p-2.5 max-w-xl shadow-xs space-y-1.5">
+                                    <div className="font-semibold text-xs text-slate-700 pb-1 border-b border-slate-100 flex justify-between items-center">
+                                      <span className="flex items-center gap-1.5">
+                                        <Store className="h-3.5 w-3.5 text-blue-600" />
+                                        Outlets requesting {item.itemCode} on {zone.zoneName}
+                                      </span>
+                                      <span className="text-[11px] text-slate-500 font-normal">
+                                        Total: <strong className="text-slate-900">{item.totalQty}</strong> {item.uom}
+                                      </span>
+                                    </div>
+                                    <div className="divide-y divide-slate-100 text-xs">
+                                      {item.outlets.map((o, oIdx) => (
+                                        <div key={oIdx} className="flex justify-between py-1 text-slate-700">
+                                          <span className="font-medium text-slate-800">
+                                            {o.outletName} <span className="text-slate-400 font-mono text-[11px]">({o.outletCode})</span>
+                                          </span>
+                                          <span className="font-semibold text-slate-900 font-mono">
+                                            {o.qty} {item.uom}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {/* Outlets Hierarchy Section */}
+                  {isRouteExpanded && (currentMode === "outlets" || currentMode === "both") && (
+                    <>
+                      {currentMode === "both" && (
+                        <tr className="bg-slate-50 dark:bg-muted/40 border-b">
+                          <td colSpan={6} className="py-1 px-4 text-xs font-semibold text-slate-600 dark:text-muted-foreground">
+                            <div className="flex items-center gap-1.5">
+                              <Store className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                              <span>Outlets Breakdown for {zone.zoneName} ({zone.outlets.length} outlets)</span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {zone.outlets.map(outlet => {
+                        const outletTotal = outlet.items.reduce((s, i) => s + Number((i as any).requestedQty || i.weight || 0), 0);
+                        const outletId = `${zone.zoneId}-${outlet.outletCode}`;
+                        const isOutletExpanded = query
+                          ? expandedOutlets[outletId] !== false
+                          : !!expandedOutlets[outletId];
+
+                        return (
+                          <React.Fragment key={outletId}>
+                            <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
+                              <td className="py-1.5 px-3 border-r"></td>
+                              <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6">
+                                {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                                <span>{outlet.outletName}</span>
+                                <span className="text-xs text-slate-400 font-normal ml-1">({outlet.outletCode})</span>
+                              </td>
+                              <td className="py-1.5 px-3 border-r"></td>
+                              <td className="py-1.5 px-3 border-r"></td>
+                              <td className="py-1.5 px-3 border-r"></td>
+                              <td className="py-1.5 px-3 text-right font-semibold">{outletTotal}</td>
+                            </tr>
+
+                            {isOutletExpanded && outlet.items.map(item => (
+                              <tr key={item.id} className="hover:bg-slate-50 text-slate-600 bg-white">
+                                <td className="py-1.5 px-3 border-r"></td>
+                                <td className="py-1.5 px-3 border-r"></td>
+                                <td className="py-1.5 px-3 border-r pl-6 font-medium text-xs font-mono">{item.itemCode}</td>
+                                <td className="py-1.5 px-3 border-r text-xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{item.description}</span>
+                                    {item.storageType && (
+                                      <span className="text-[9px] px-1 rounded font-semibold uppercase border bg-slate-50 text-slate-600 border-slate-200">
+                                        {item.storageType}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-1.5 px-3 border-r text-center text-xs">{(item as any).uom || "-"}</td>
+                                <td className="py-1.5 px-3 text-right font-medium">{Number((item as any).requestedQty || item.weight || 0)}</td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        );
+                      })}
+                    </>
+                  )}
                 </React.Fragment>
               );
             })}
