@@ -82,18 +82,11 @@ function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length < 2) return [];
   const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
-  const hasItemSpecificDesc = rawHeaders.some(h => {
-    return (h.includes("item") || h.includes("product")) &&
-      (h.includes("desc") || h.includes("name"));
-  });
   // Normalize common header variants
   const normalize = (h: string) => {
     if (h.includes("outlet") && h.includes("code")) return "outlet_code";
     if (h.includes("item") && h.includes("code")) return "item_code";
-    if (h.includes("sub_desc") || h.includes("outlet_desc") || h.includes("customer_desc") || h.includes("outlet_name") || h.includes("customer_name")) {
-      return "to_sub_desc";
-    }
-    if (hasItemSpecificDesc && (h === "description" || h === "desc")) {
+    if (h.includes("sub_desc") || h.includes("outlet_desc") || h.includes("customer_desc") || h.includes("outlet_name") || h.includes("customer_name") || (h.includes("to") && h.includes("desc"))) {
       return "to_sub_desc";
     }
     if (h.includes("desc")) return "description";
@@ -2282,19 +2275,11 @@ export default function DailyDispatchPage() {
 
           if (rawJson.length > 0) {
             const rawHeaders = Object.keys(rawJson[0]);
-            const hasItemSpecificDesc = rawHeaders.some(h => {
-              const lower = h.toLowerCase().replace(/\s+/g, "_");
-              return (lower.includes("item") || lower.includes("product")) &&
-                (lower.includes("desc") || lower.includes("name"));
-            });
             const normalize = (h: string) => {
               const lower = h.toLowerCase().replace(/\s+/g, "_");
               if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
               if (lower.includes("item") && lower.includes("code")) return "item_code";
-              if (lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") || lower.includes("outlet_name") || lower.includes("customer_name")) {
-                return "to_sub_desc";
-              }
-              if (hasItemSpecificDesc && (lower === "description" || lower === "desc")) {
+              if (lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") || lower.includes("outlet_name") || lower.includes("customer_name") || (lower.includes("to") && lower.includes("desc"))) {
                 return "to_sub_desc";
               }
               if (lower.includes("desc")) return "description";

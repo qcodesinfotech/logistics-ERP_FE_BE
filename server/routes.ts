@@ -7531,9 +7531,13 @@ export async function registerRoutes(
       };
 
       const outletCodeMap = new Map();
+      const outletNameMap = new Map();
       allOutlets.forEach(o => {
         if (o.code) {
           outletCodeMap.set(normalizeOutletCode(o.code), o);
+        }
+        if (o.name) {
+          outletNameMap.set(o.name.trim().toLowerCase(), o);
         }
       });
 
@@ -7547,14 +7551,43 @@ export async function registerRoutes(
       const normalizeItemCode = (c: string) => (c || "").trim().toLowerCase();
       
       const outletNamesSet = new Set(allOutlets.map(o => o.name.toLowerCase().trim()));
+      const outletNamesAlphaSet = new Set(allOutlets.map(o => o.name.toLowerCase().replace(/[^a-z0-9]/g, "")));
       const outletCodesSet = new Set(allOutlets.map(o => (o.code || "").toLowerCase().trim()).filter(Boolean));
+
+      const isClearlyOutletName = (desc: string): boolean => {
+        const d = desc.toLowerCase().trim();
+        if (!d) return false;
+
+        // If it has packaging or product indicators, it is NEVER an outlet name
+        if (/\b(sauce|dips|oil|bun|buns|patty|patties|fillet|fillets|strips|cheese|mayo|seasoning|powder|mix|marinade|salt|sugar|syrup|cup|cups|bag|bags|box|boxes|pkt|pkg|packet|ct|cs|carton|kg|gm|gram|ltr|liter|bib|pcs|roll|foil|napkin|glove|fork|spoon|straw)\b/i.test(d)) {
+          return false;
+        }
+        if (/[0-9]+\s*(?:kg|gm|g|l|ltr|pkt|cup|pcs|ct|cs)\b/i.test(d) || d.includes("*") || d.includes("=")) {
+          return false;
+        }
+
+        // Direct match against known outlet names or codes
+        if (outletNamesSet.has(d) || outletCodesSet.has(d)) return true;
+        const alpha = d.replace(/[^a-z0-9]/g, "");
+        if (outletNamesAlphaSet.has(alpha)) return true;
+
+        // Common spelling variations (e.g. twon -> town)
+        const fixedTown = d.replace(/\btwon\b/g, "town");
+        if (outletNamesSet.has(fixedTown) || outletNamesAlphaSet.has(fixedTown.replace(/[^a-z0-9]/g, ""))) return true;
+
+        // Brand + location pattern (e.g. "KFC Hamad Town", "Pizza Hut City Centre", "Hardees Seef") without product words
+        if (/^(kfc|ph|pizza hut|hardees|costa|krispy kreme)\s+[a-z\s]+$/i.test(d)) {
+          return true;
+        }
+
+        return false;
+      };
 
       const isValidProductName = (desc: string | null | undefined): boolean => {
         if (!desc) return false;
-        const d = desc.toLowerCase().trim();
-        if (outletNamesSet.has(d) || outletCodesSet.has(d)) return false;
-        if (d.startsWith("pizza hut") && !d.startsWith("ph ")) return false;
-        if (d.startsWith("kfc") && d.includes("-")) return false;
+        const d = desc.trim();
+        if (!d || d.length < 2) return false;
+        if (isClearlyOutletName(d)) return false;
         return true;
       };
 
@@ -7567,7 +7600,8 @@ export async function registerRoutes(
       const resolvedItems = items
         .map((row: any) => {
           const rowCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
-          const outlet = outletCodeMap.get(normalizeOutletCode(rowCode));
+          const outletDesc = (row.to_sub_desc || row.outlet_desc || row.outlet_name || "").trim().toLowerCase();
+          const outlet = outletCodeMap.get(normalizeOutletCode(rowCode)) || (outletDesc ? outletNameMap.get(outletDesc) : null);
           const itemCode = String(row.item_number || row.item_code || row.itemCode || "");
           
           let description = row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || null;
@@ -7576,8 +7610,11 @@ export async function registerRoutes(
             const correctDesc = productDescMap.get(normalizeItemCode(itemCode));
             if (correctDesc) {
               description = correctDesc;
+            } else if (isValidProductName(description)) {
+              // Keep original description
             } else {
-              description = description || row.to_sub_desc || null;
+              // Never fallback to outlet name (row.to_sub_desc) as product description
+              description = null;
             }
           }
 
