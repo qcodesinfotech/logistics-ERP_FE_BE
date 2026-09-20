@@ -3504,7 +3504,24 @@ export class DatabaseStorage implements IStorage {
 
     // Get overrides for sheet
     const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));
-    const overrideMap = new Map(overrides.map(o => [o.outletId, o]));
+    
+    // Support specific storageType overrides as well as general outlet overrides
+    const specificOverrideMap = new Map<string, any>();
+    const generalOverrideMap = new Map<string, any>();
+    for (const ov of overrides) {
+      if (ov.storageType) {
+        specificOverrideMap.set(`${ov.outletId}:${ov.storageType.trim().toLowerCase()}`, ov);
+      } else {
+        generalOverrideMap.set(ov.outletId, ov);
+      }
+    }
+    const getOverrideForItem = (outletId: string, storageType?: string | null) => {
+      if (storageType) {
+        const specific = specificOverrideMap.get(`${outletId}:${storageType.trim().toLowerCase()}`);
+        if (specific) return specific;
+      }
+      return generalOverrideMap.get(outletId) || null;
+    };
 
     // Get all outlets and build lookup maps
     const allOutlets = await db.select().from(outlets);
@@ -3517,13 +3534,16 @@ export class DatabaseStorage implements IStorage {
     for (const outlet of allOutlets) {
       if (outlet.routeId) outletToZone.set(outlet.id, outlet.routeId);
     }
-    for (const [outletId, ov] of Array.from(overrideMap.entries())) {
-      if (ov?.overrideZoneId) outletToZone.set(outletId, ov.overrideZoneId);
+    for (const ov of overrides) {
+      if (ov.overrideZoneId && !ov.storageType) {
+        outletToZone.set(ov.outletId, ov.overrideZoneId);
+      }
     }
 
-    // Get all zone IDs we need (including from item.routeId)
+    // Get all zone IDs we need (including from item.routeId and all overrideZoneIds)
     const allItemRouteIds = items.map(i => i.routeId).filter(Boolean) as string[];
-    const zoneIds = Array.from(new Set([...Array.from(outletToZone.values()), ...allItemRouteIds])) as string[];
+    const allOverrideZoneIds = overrides.map(o => o.overrideZoneId).filter(Boolean) as string[];
+    const zoneIds = Array.from(new Set([...Array.from(outletToZone.values()), ...allItemRouteIds, ...allOverrideZoneIds])) as string[];
     const allZones = zoneIds.length > 0 ? await db.select().from(routes).where(inArray(routes.id, zoneIds)) : [];
     const zoneMap = new Map(allZones.map(z => [z.id, z]));
 
@@ -3582,12 +3602,10 @@ export class DatabaseStorage implements IStorage {
     board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], trucks: [], outlets: {} };
 
     for (const item of items) {
+      const ov = item.outletId ? getOverrideForItem(item.outletId, item.storageType) : null;
       let tAssignId = (item.outletId ? outletToTruck.get(item.outletId) : null) || outletToTruck.get(item.outletCode) || null;
-      if (item.outletId && overrideMap.has(item.outletId)) {
-         const ov = overrideMap.get(item.outletId);
-         if (ov?.overrideTruckId) {
-           tAssignId = ov.overrideTruckId;
-         }
+      if (ov?.overrideTruckId) {
+        tAssignId = ov.overrideTruckId;
       }
 
       let effectiveZoneId = "unassigned";
@@ -3597,14 +3615,14 @@ export class DatabaseStorage implements IStorage {
         effectiveZoneId = assignedTruck.zoneId;
       } else if (item.overrideRouteId) {
         effectiveZoneId = item.overrideRouteId;
-      } else if (item.outletId && overrideMap.has(item.outletId)) {
-        effectiveZoneId = overrideMap.get(item.outletId)!.overrideZoneId;
+      } else if (ov) {
+        effectiveZoneId = ov.overrideZoneId;
       } else if (item.outletId && outletToZone.has(item.outletId)) {
         effectiveZoneId = outletToZone.get(item.outletId)!;
       } else if (item.routeId) {
         effectiveZoneId = item.routeId;
       }
-      const isOverridden = (item.outletId ? overrideMap.has(item.outletId) : false) || !!item.overrideRouteId || (assignedTruck && assignedTruck.zoneId !== item.routeId);
+      const isOverridden = !!ov || !!item.overrideRouteId || (assignedTruck && assignedTruck.zoneId !== item.routeId);
 
       if (!board[effectiveZoneId]) {
         const zone = zoneMap.get(effectiveZoneId);
@@ -3633,10 +3651,15 @@ export class DatabaseStorage implements IStorage {
           outletCode: item.outletCode,
           outletName: resolvedName,
           isOverridden,
-          overrideZoneId: isOverridden ? (item.overrideRouteId || (item.outletId ? overrideMap.get(item.outletId)?.overrideZoneId : null) || null) : null,
+          overrideZoneId: isOverridden ? (ov?.overrideZoneId || item.overrideRouteId || null) : null,
           truckAssignmentId: tAssignId,
           items: [],
         };
+      } else {
+        if (isOverridden) {
+          board[effectiveZoneId].outlets[outletKey].isOverridden = true;
+          board[effectiveZoneId].outlets[outletKey].overrideZoneId = ov?.overrideZoneId || item.overrideRouteId || board[effectiveZoneId].outlets[outletKey].overrideZoneId;
+        }
       }
 
       board[effectiveZoneId].outlets[outletKey].items.push({
@@ -3726,11 +3749,47 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async createDispatchOverride(data: { sheetId: string; outletId: string; overrideZoneId: string; overrideTruckId?: string; reason?: string; createdBy?: string }): Promise<any> {
-    // Remove existing override for same outlet+sheet
-    await db.delete(dispatchOutletZoneOverrides)
-      .where(and(eq(dispatchOutletZoneOverrides.sheetId, data.sheetId), eq(dispatchOutletZoneOverrides.outletId, data.outletId)));
-    const [row] = await db.insert(dispatchOutletZoneOverrides).values(data).returning();
+  async createDispatchOverride(data: { sheetId: string; outletId: string; storageType?: string | null; overrideZoneId: string; overrideTruckId?: string; reason?: string; createdBy?: string }): Promise<any> {
+    const storageType = (data.storageType && data.storageType !== "all") ? data.storageType.trim() : null;
+
+    if (storageType) {
+      // Remove existing override for same outlet+sheet+storageType
+      await db.delete(dispatchOutletZoneOverrides)
+        .where(and(
+          eq(dispatchOutletZoneOverrides.sheetId, data.sheetId),
+          eq(dispatchOutletZoneOverrides.outletId, data.outletId),
+          sql`LOWER(${dispatchOutletZoneOverrides.storageType}) = LOWER(${storageType})`
+        ));
+      // Also clear any item-level override for this sheet, outlet and storageType
+      await db.update(dispatchItems)
+        .set({ overrideRouteId: null })
+        .where(and(
+          eq(dispatchItems.sheetId, data.sheetId),
+          eq(dispatchItems.outletId, data.outletId),
+          sql`LOWER(${dispatchItems.storageType}) = LOWER(${storageType})`
+        ));
+    } else {
+      // If moving all types, remove all overrides for this outlet+sheet
+      await db.delete(dispatchOutletZoneOverrides)
+        .where(and(eq(dispatchOutletZoneOverrides.sheetId, data.sheetId), eq(dispatchOutletZoneOverrides.outletId, data.outletId)));
+      // Also clear item-level overrides for this sheet and outlet
+      await db.update(dispatchItems)
+        .set({ overrideRouteId: null })
+        .where(and(
+          eq(dispatchItems.sheetId, data.sheetId),
+          eq(dispatchItems.outletId, data.outletId)
+        ));
+    }
+
+    const [row] = await db.insert(dispatchOutletZoneOverrides).values({
+      sheetId: data.sheetId,
+      outletId: data.outletId,
+      storageType: storageType,
+      overrideZoneId: data.overrideZoneId,
+      overrideTruckId: data.overrideTruckId,
+      reason: data.reason,
+      createdBy: data.createdBy,
+    }).returning();
     return row;
   }
 
@@ -8375,7 +8434,8 @@ export class DatabaseStorage implements IStorage {
       if (!sheetOverridesMap.has(ov.sheetId)) {
         sheetOverridesMap.set(ov.sheetId, new Map());
       }
-      sheetOverridesMap.get(ov.sheetId)!.set(ov.outletId, ov);
+      const key = ov.storageType ? `${ov.outletId}:${ov.storageType.trim().toLowerCase()}` : ov.outletId;
+      sheetOverridesMap.get(ov.sheetId)!.set(key, ov);
     }
 
     for (const ta of truckAssigns) {
@@ -8407,12 +8467,13 @@ export class DatabaseStorage implements IStorage {
       const sheetTruckAssigns = sheetTruckAssignsMap.get(sId) || [];
       const outletToTruck = sheetOutletTruckMap.get(sId) || new Map();
 
+      const ov = (outletId && item.storageType)
+        ? (overrideMap.get(`${outletId}:${item.storageType.trim().toLowerCase()}`) || overrideMap.get(outletId))
+        : (outletId ? overrideMap.get(outletId) : null);
+
       let tAssignId = (outletId ? outletToTruck.get(outletId) : null) || outletToTruck.get(outletCode) || null;
-      if (outletId && overrideMap.has(outletId)) {
-        const ov = overrideMap.get(outletId);
-        if (ov?.overrideTruckId) {
-          tAssignId = ov.overrideTruckId;
-        }
+      if (ov?.overrideTruckId) {
+        tAssignId = ov.overrideTruckId;
       }
 
       let effectiveZoneId: string | null = item.routeId;
@@ -8422,8 +8483,8 @@ export class DatabaseStorage implements IStorage {
         effectiveZoneId = assignedTruck.zoneId;
       } else if (item.overrideRouteId) {
         effectiveZoneId = item.overrideRouteId;
-      } else if (outletId && overrideMap.has(outletId)) {
-        effectiveZoneId = overrideMap.get(outletId)!.overrideZoneId;
+      } else if (ov) {
+        effectiveZoneId = ov.overrideZoneId;
       } else if (outletId) {
         const outlet = outletMap.get(outletId);
         if (outlet && outlet.routeId) {

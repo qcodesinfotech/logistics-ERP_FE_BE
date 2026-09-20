@@ -2324,6 +2324,7 @@ export const dispatchOutletZoneOverrides = pgTable("dispatch_outlet_zone_overrid
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sheetId: varchar("sheet_id").notNull(),
   outletId: varchar("outlet_id").notNull(),
+  storageType: varchar("storage_type"),
   overrideZoneId: varchar("override_zone_id").notNull(),
   overrideTruckId: varchar("override_truck_id"),
   reason: text("reason"),

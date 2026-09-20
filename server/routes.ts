@@ -7775,9 +7775,22 @@ export async function registerRoutes(
   // Supervisor override: move outlet to different zone for this sheet
   app.post("/api/dispatch/overrides", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { sheetId, outletId, overrideZoneId, overrideTruckId, reason } = req.body;
-      const result = await storage.createDispatchOverride({ sheetId, outletId, overrideZoneId, overrideTruckId, reason, createdBy: req.user?.id });
-      res.status(201).json(result);
+      const { sheetId, outletId, storageTypes, storageType, overrideZoneId, overrideTruckId, reason } = req.body;
+      if (Array.isArray(storageTypes) && storageTypes.length > 0) {
+        const results = [];
+        for (const st of storageTypes) {
+          const result = await storage.createDispatchOverride({
+            sheetId, outletId, storageType: st, overrideZoneId, overrideTruckId, reason, createdBy: req.user?.id
+          });
+          results.push(result);
+        }
+        res.status(201).json(results);
+      } else {
+        const result = await storage.createDispatchOverride({
+          sheetId, outletId, storageType: storageType || null, overrideZoneId, overrideTruckId, reason, createdBy: req.user?.id
+        });
+        res.status(201).json(result);
+      }
     } catch (e) {
       console.error("Create override error:", e);
       res.status(500).json({ error: "Failed to create zone override" });
@@ -9780,7 +9793,7 @@ export async function registerRoutes(
       const [newEmp] = await db.insert(schema.employees).values({
         employeeCode: req.user.username || `DRV-${Date.now().toString().slice(-4)}`,
         name: driverName,
-        phone: req.user.email || null,
+        phone: (req.user as any)?.email || null,
         position: "driver",
         department: "Logistics",
         status: "active",

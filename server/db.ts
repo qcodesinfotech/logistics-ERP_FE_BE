@@ -159,6 +159,7 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "type_capacities" jsonb DEFAULT '{}'::jsonb;
 
       ALTER TABLE "dispatch_outlet_zone_overrides" ADD COLUMN IF NOT EXISTS "override_truck_id" varchar;
+      ALTER TABLE "dispatch_outlet_zone_overrides" ADD COLUMN IF NOT EXISTS "storage_type" varchar;
 
       CREATE TABLE IF NOT EXISTS "dispatch_truck_assignments" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),

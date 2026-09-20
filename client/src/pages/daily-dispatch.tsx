@@ -24,6 +24,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import {
@@ -211,18 +212,50 @@ function DeliveryDialog({
 
 // ===== Zone Override Dialog =====
 function MoveOverrideDialog({
-  title, targetName, zones, boardZones, onClose, onSave,
-}: { title: string; targetName: string; zones: Zone[]; boardZones?: ZoneGroup[]; onClose: () => void; onSave: (zoneId: string, truckId: string | null, reason: string) => void }) {
+  title, targetName, zones, boardZones, items = [], onClose, onSave,
+}: {
+  title: string;
+  targetName: string;
+  zones: Zone[];
+  boardZones?: ZoneGroup[];
+  items?: DispatchItem[];
+  onClose: () => void;
+  onSave: (zoneId: string, truckId: string | null, reason: string, storageTypes?: string[]) => void;
+}) {
   const [zoneId, setZoneId] = useState("");
   const [truckId, setTruckId] = useState("");
   const [reason, setReason] = useState("");
 
+  // Extract distinct storage types present in these items
+  const availableTypes = useMemo(() => {
+    if (!items || items.length === 0) return [];
+    const set = new Set<string>();
+    items.forEach(i => {
+      const st = (i.storageType || "").trim();
+      if (st) set.add(st);
+    });
+    return Array.from(set);
+  }, [items]);
+
+  const hasMultipleTypes = availableTypes.length > 1;
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(availableTypes);
+
   const selectedZoneData = boardZones?.find(z => z.zoneId === zoneId);
   const availableTrucks = selectedZoneData?.trucks || [];
 
+  const handleConfirm = () => {
+    if (!zoneId) return;
+    if (hasMultipleTypes && selectedTypes.length === 0) return;
+
+    // If multiple types were present and user selected a subset, pass selectedTypes.
+    // If all types were selected or only 1 type was present, pass undefined to move all types.
+    const isSubset = hasMultipleTypes && selectedTypes.length < availableTypes.length;
+    onSave(zoneId, truckId || null, reason, isSubset ? selectedTypes : undefined);
+  };
+
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowRight className="h-5 w-5 text-amber-500" />
@@ -230,11 +263,75 @@ function MoveOverrideDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">Temporarily reassign this to a different zone for this dispatch sheet.</p>
+          <p className="text-sm text-muted-foreground">Temporarily reassign this to a different route for this dispatch sheet.</p>
+
+          {/* Storage Types Selection (only shown if multiple types exist) */}
+          {hasMultipleTypes && (
+            <div className="space-y-2 border rounded-lg p-3 bg-slate-50/70 dark:bg-slate-900/50">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Select Type to Move <span className="text-destructive">*</span>
+                </Label>
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-amber-600 hover:text-amber-700 hover:underline"
+                  onClick={() => {
+                    if (selectedTypes.length === availableTypes.length) {
+                      setSelectedTypes([]);
+                    } else {
+                      setSelectedTypes([...availableTypes]);
+                    }
+                  }}
+                >
+                  {selectedTypes.length === availableTypes.length ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+              <div className="space-y-1.5 pt-1">
+                {availableTypes.map(type => {
+                  const typeItems = items.filter(i => (i.storageType || "").trim().toLowerCase() === type.toLowerCase());
+                  const count = typeItems.length;
+                  const qty = typeItems.reduce((sum, i) => sum + parseFloat(i.requestedQty || i.weight || "0"), 0);
+                  const isChecked = selectedTypes.includes(type);
+
+                  return (
+                    <label
+                      key={type}
+                      className={`flex items-center justify-between p-2 rounded-md border text-xs cursor-pointer transition-colors ${
+                        isChecked
+                          ? "bg-amber-50/80 border-amber-300 dark:bg-amber-950/30 dark:border-amber-700 text-slate-900 dark:text-slate-100 font-medium"
+                          : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100/50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedTypes(prev => [...prev, type]);
+                            } else {
+                              setSelectedTypes(prev => prev.filter(t => t !== type));
+                            }
+                          }}
+                        />
+                        <span>{type}</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground font-normal">
+                        {count} {count === 1 ? "item" : "items"} · Qty: {qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(1)}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {selectedTypes.length === 0 && (
+                <p className="text-[11px] text-destructive pt-1">Please select at least one type to move.</p>
+              )}
+            </div>
+          )}
+
           <div className="space-y-2">
-            <Label>Target Zone</Label>
+            <Label>Target Route</Label>
             <Select value={zoneId} onValueChange={(v) => { setZoneId(v); setTruckId(""); }}>
-              <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Select route..." /></SelectTrigger>
               <SelectContent>
                 {zones.map(z => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
               </SelectContent>
@@ -261,7 +358,13 @@ function MoveOverrideDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={!zoneId} onClick={() => onSave(zoneId, truckId || null, reason)} className="bg-amber-500 hover:bg-amber-600 text-white">Confirm Move</Button>
+          <Button
+            disabled={!zoneId || (hasMultipleTypes && selectedTypes.length === 0)}
+            onClick={handleConfirm}
+            className="bg-amber-500 hover:bg-amber-600 text-white"
+          >
+            Confirm Move
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -3146,15 +3249,22 @@ export default function DailyDispatchPage() {
       )}
 
       {/* Override Dialog */}
-      {overrideDialog && overrideDialog.outletId && (
+      {overrideDialog && (overrideDialog.outletId || overrideDialog.outletCode) && (
         <MoveOverrideDialog
           title="Move Outlet"
           targetName={overrideDialog.outletName || overrideDialog.outletCode}
           zones={zones}
           boardZones={boardData?.zones || []}
+          items={overrideDialog.items}
           onClose={() => setOverrideDialog(null)}
-          onSave={(zoneId, truckId, reason) => overrideMutation.mutate({
-            sheetId: boardSheetId, outletId: overrideDialog.outletId, overrideZoneId: zoneId, overrideTruckId: truckId, reason,
+          onSave={(zoneId, truckId, reason, storageTypes) => overrideMutation.mutate({
+            sheetId: boardSheetId,
+            outletId: overrideDialog.outletId,
+            outletCode: overrideDialog.outletCode,
+            storageTypes: storageTypes && storageTypes.length > 0 ? storageTypes : undefined,
+            overrideZoneId: zoneId,
+            overrideTruckId: truckId,
+            reason,
           })}
         />
       )}
@@ -3165,6 +3275,7 @@ export default function DailyDispatchPage() {
           targetName={itemOverrideDialog.itemCode}
           zones={zones}
           boardZones={boardData?.zones || []}
+          items={[itemOverrideDialog]}
           onClose={() => setItemOverrideDialog(null)}
           onSave={(zoneId, truckId) => itemOverrideMutation.mutate({
             itemId: itemOverrideDialog.id, overrideRouteId: zoneId // Item level override Truck might need its own API field if needed, but not requested here

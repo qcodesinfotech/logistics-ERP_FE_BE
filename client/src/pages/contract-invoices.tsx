@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Receipt, Plus, FileText, Check, Send, Clock, AlertCircle, Banknote, ChevronDown, ChevronUp, Printer, Edit2, FileUp, CreditCard, Share2, Search, MoreHorizontal, Calculator, Sparkles, HelpCircle, Filter, X, RotateCcw } from "lucide-react";
+import { Receipt, Plus, FileText, Check, Send, Clock, AlertCircle, Banknote, ChevronDown, ChevronUp, Printer, Edit2, FileUp, CreditCard, Share2, Search, MoreHorizontal, Calculator, Sparkles, HelpCircle, Filter, X, RotateCcw, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -385,15 +385,15 @@ export default function ContractInvoicesPage() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="p-4 bg-muted/20 border-b space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {/* Search */}
-              <div className="relative">
+              <div className="relative flex-1 min-w-[200px] w-full sm:w-auto">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search invoice, client, contract..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 pr-8 bg-background h-9 text-xs"
+                  className="pl-9 pr-8 bg-background h-9 text-xs w-full"
                 />
                 {searchTerm && (
                   <button
@@ -406,89 +406,96 @@ export default function ContractInvoicesPage() {
               </div>
 
               {/* Status Filter */}
-              <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="h-9 bg-background text-xs">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-muted-foreground">Status:</span>
-                    <SelectValue placeholder="All Statuses" />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses ({statusCounts.all})</SelectItem>
-                  <SelectItem value="draft">Draft ({statusCounts.draft})</SelectItem>
-                  <SelectItem value="approved">Approved ({statusCounts.approved})</SelectItem>
-                  <SelectItem value="sent">Sent ({statusCounts.sent})</SelectItem>
-                  <SelectItem value="paid">Paid ({statusCounts.paid})</SelectItem>
-                  <SelectItem value="partially_paid">Partially Paid ({statusCounts.partially_paid})</SelectItem>
-                  <SelectItem value="overdue">Overdue ({statusCounts.overdue})</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="w-full sm:w-[160px]">
+                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                  <SelectTrigger className="h-9 bg-background text-xs w-full">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-muted-foreground">Status:</span>
+                      <SelectValue placeholder="All Statuses" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses ({statusCounts.all})</SelectItem>
+                    <SelectItem value="draft">Draft ({statusCounts.draft})</SelectItem>
+                    <SelectItem value="approved">Approved ({statusCounts.approved})</SelectItem>
+                    <SelectItem value="sent">Sent ({statusCounts.sent})</SelectItem>
+                    <SelectItem value="paid">Paid ({statusCounts.paid})</SelectItem>
+                    <SelectItem value="partially_paid">Partially Paid ({statusCounts.partially_paid})</SelectItem>
+                    <SelectItem value="overdue">Overdue ({statusCounts.overdue})</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
               {/* Customer Filter */}
-              <Select
-                value={filterCustomerId}
-                onValueChange={(val) => {
-                  setFilterCustomerId(val);
-                  setFilterContractId("all");
-                }}
-              >
-                <SelectTrigger className="h-9 bg-background text-xs">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-muted-foreground">Customer:</span>
-                    <SelectValue placeholder="All Customers" />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Customers ({clients.length})</SelectItem>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="w-full sm:w-[165px]">
+                <Select
+                  value={filterCustomerId}
+                  onValueChange={(val) => {
+                    setFilterCustomerId(val);
+                    setFilterContractId("all");
+                  }}
+                >
+                  <SelectTrigger className="h-9 bg-background text-xs w-full">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-muted-foreground">Customer:</span>
+                      <SelectValue placeholder="All Customers" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Customers ({clients.length})</SelectItem>
+                    {clients.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               {/* Contract Filter */}
-              <Select value={filterContractId} onValueChange={setFilterContractId}>
-                <SelectTrigger className="h-9 bg-background text-xs">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-muted-foreground">Contract:</span>
-                    <SelectValue placeholder="All Contracts" />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Contracts ({availableContracts.length})</SelectItem>
-                  {availableContracts.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name || (c as any).contractNumber || c.id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="w-full sm:w-[165px]">
+                <Select value={filterContractId} onValueChange={setFilterContractId}>
+                  <SelectTrigger className="h-9 bg-background text-xs w-full">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-muted-foreground">Contract:</span>
+                      <SelectValue placeholder="All Contracts" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Contracts ({availableContracts.length})</SelectItem>
+                    {availableContracts.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name || (c as any).contractNumber || c.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-              {/* Date Range */}
-              <div className="flex items-center gap-1.5">
+              {/* Date Range: Dedicated pill that wraps cleanly and fits comfortably */}
+              <div className="flex items-center gap-1 bg-background border rounded-md px-2.5 h-9 shrink-0 shadow-sm w-full sm:w-auto">
+                <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 <Input
                   type="date"
                   value={filterStartDate}
                   onChange={(e) => setFilterStartDate(e.target.value)}
-                  className="bg-background h-9 text-xs px-2 w-full"
+                  className="h-7 w-[120px] text-xs px-1 border-0 bg-transparent focus-visible:ring-0 shadow-none cursor-pointer"
                   title="Period Start From"
                 />
-                <span className="text-muted-foreground text-xs">to</span>
+                <span className="text-muted-foreground text-xs select-none px-0.5">to</span>
                 <Input
                   type="date"
                   value={filterEndDate}
                   onChange={(e) => setFilterEndDate(e.target.value)}
-                  className="bg-background h-9 text-xs px-2 w-full"
+                  className="h-7 w-[120px] text-xs px-1 border-0 bg-transparent focus-visible:ring-0 shadow-none cursor-pointer"
                   title="Period End To"
                 />
                 {(filterStartDate || filterEndDate) && (
                   <button
                     type="button"
                     onClick={() => { setFilterStartDate(""); setFilterEndDate(""); }}
-                    className="text-muted-foreground hover:text-foreground p-1"
+                    className="text-muted-foreground hover:text-foreground p-0.5 rounded-full hover:bg-muted ml-0.5"
                     title="Clear date range"
                   >
                     <X className="h-3.5 w-3.5" />
