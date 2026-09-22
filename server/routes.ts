@@ -10782,16 +10782,34 @@ export async function registerRoutes(
 
       // Draw table rows
       for (const del of deliveriesList) {
+        const outletText = `${del.outletName} (${del.outletCode})`;
+        doc.font("Helvetica").fontSize(9);
+        const outletHeight = doc.heightOfString(outletText, { width: 150 });
+        const rowHeight = Math.max(outletHeight, 14);
+
         y = doc.y;
-        doc.fillColor("#1F2937").fontSize(9).text(`${del.outletName} (${del.outletCode})`, 40, y, { width: 150 });
-        doc.text(del.storageType, 200, y);
-        doc.text(`${del.deliveryTime || "Recorded"}`, 320, y);
+        if (y + rowHeight > 730) {
+          doc.addPage();
+          y = doc.y;
+          doc.fillColor("#374151").fontSize(9).text("Outlet", 40, y);
+          doc.text("Storage Type", 200, y);
+          doc.text("Delivered At", 320, y);
+          doc.text("Items Status", 440, y);
+          y += 14;
+          doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+          y += 6;
+        }
+
+        doc.fillColor("#1F2937").fontSize(9).text(outletText, 40, y, { width: 150 });
+        doc.text(del.storageType, 200, y, { width: 110 });
+        doc.text(`${del.deliveryTime || "Recorded"}`, 320, y, { width: 110 });
         
         const allCompleted = del.items.every((it: any) => it.status === "delivered");
         const statusLabel = allCompleted ? "COMPLETED" : "FAILED / PARTIAL";
-        doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 440, y);
+        doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 440, y, { width: 100 });
 
-        doc.moveDown(1.2);
+        y += rowHeight + 6;
+        doc.y = y;
       }
 
       // Process details and images on new pages
@@ -10837,35 +10855,50 @@ export async function registerRoutes(
           let totalOrdered = 0;
           let totalDelivered = 0;
           for (const it of items) {
-            y = doc.y;
-            if (y > 730) {
-              doc.addPage();
-              y = doc.y;
-            }
             const reqQty = parseFloat(it.requestedQty || it.weight || "0");
             const delQty = parseFloat(it.deliveredQty || "0");
             totalOrdered += reqQty;
             totalDelivered += delQty;
 
-            doc.fillColor("#1F2937").text(it.itemCode, 40, y);
-            doc.text(it.description || "N/A", 120, y, { width: 220 });
-            doc.text(reqQty.toFixed(1), 350, y);
-            doc.text(delQty.toFixed(1), 450, y);
-            doc.moveDown(1.2);
+            const desc = it.description || "N/A";
+            doc.font("Helvetica").fontSize(9);
+            const descHeight = doc.heightOfString(desc, { width: 220 });
+            const rowHeight = Math.max(descHeight, 14);
+
+            y = doc.y;
+            if (y + rowHeight > 730) {
+              doc.addPage();
+              y = doc.y;
+              doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
+              doc.text("Description", 120, y);
+              doc.text("Ordered Qty", 350, y);
+              doc.text("Delivered Qty", 450, y);
+              y += 14;
+              doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+              y += 6;
+            }
+
+            doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y, { width: 75 });
+            doc.text(desc, 120, y, { width: 220 });
+            doc.text(reqQty.toFixed(1), 350, y, { width: 80 });
+            doc.text(delQty.toFixed(1), 450, y, { width: 80 });
+
+            y += rowHeight + 6;
+            doc.y = y;
           }
           
           y = doc.y;
-          if (y > 750) {
+          if (y + 25 > 750) {
             doc.addPage();
             y = doc.y;
           }
           doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-          y += 5;
-          doc.font("Helvetica-Bold").fillColor("#1F2937").text("Total", 120, y);
-          doc.text(totalOrdered.toFixed(1), 350, y);
-          doc.text(totalDelivered.toFixed(1), 450, y);
+          y += 6;
+          doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F2937").text("Total", 120, y);
+          doc.text(totalOrdered.toFixed(1), 350, y, { width: 80 });
+          doc.text(totalDelivered.toFixed(1), 450, y, { width: 80 });
           doc.font("Helvetica");
-          y += 12;
+          y += 16;
           doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
           doc.y = y + 10;
           doc.moveDown(1.5);
@@ -11112,35 +11145,51 @@ export async function registerRoutes(
         let totalOrdered = 0;
         let totalDelivered = 0;
         for (const it of items) {
-          y = doc.y;
-          if (y > 730) {
-            doc.addPage();
-            y = doc.y;
-          }
           const reqQty = parseFloat(it.requestedQty || it.weight || "0");
           const delQty = parseFloat(it.deliveredQty || "0");
           totalOrdered += reqQty;
           totalDelivered += delQty;
 
-          doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y);
-          doc.text(it.description || "N/A", 120, y, { width: 220 });
-          doc.text(reqQty.toFixed(1), 350, y);
-          doc.text(delQty.toFixed(1), 450, y);
-          doc.moveDown(1.2);
+          const desc = it.description || "N/A";
+          doc.font("Helvetica").fontSize(9);
+          const descHeight = doc.heightOfString(desc, { width: 220 });
+          const rowHeight = Math.max(descHeight, 14);
+
+          y = doc.y;
+          if (y + rowHeight > 730) {
+            doc.addPage();
+            y = doc.y;
+            // Redraw table header on new page
+            doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
+            doc.text("Description", 120, y);
+            doc.text("Ordered Qty", 350, y);
+            doc.text("Delivered Qty", 450, y);
+            y += 14;
+            doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
+            y += 6;
+          }
+
+          doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y, { width: 75 });
+          doc.text(desc, 120, y, { width: 220 });
+          doc.text(reqQty.toFixed(1), 350, y, { width: 80 });
+          doc.text(delQty.toFixed(1), 450, y, { width: 80 });
+
+          y += rowHeight + 6;
+          doc.y = y;
         }
 
         y = doc.y;
-        if (y > 750) {
+        if (y + 25 > 750) {
           doc.addPage();
           y = doc.y;
         }
         doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-        y += 5;
-        doc.font("Helvetica-Bold").fillColor("#1F2937").text("Total", 120, y);
-        doc.text(totalOrdered.toFixed(1), 350, y);
-        doc.text(totalDelivered.toFixed(1), 450, y);
+        y += 6;
+        doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F2937").text("Total", 120, y);
+        doc.text(totalOrdered.toFixed(1), 350, y, { width: 80 });
+        doc.text(totalDelivered.toFixed(1), 450, y, { width: 80 });
         doc.font("Helvetica");
-        y += 12;
+        y += 16;
         doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
         doc.y = y + 10;
         doc.moveDown(1.5);

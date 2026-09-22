@@ -1699,7 +1699,9 @@ function SearchableSelect({
   options,
   placeholder,
   emptyText = "No results found.",
-  width = "w-[160px]"
+  width = "w-[160px]",
+  popoverWidth,
+  searchPlaceholder = "Search..."
 }: {
   value: string;
   onValueChange: (val: string) => void;
@@ -1707,6 +1709,8 @@ function SearchableSelect({
   placeholder: string;
   emptyText?: string;
   width?: string;
+  popoverWidth?: string;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const selectedOption = options.find((opt) => opt.value === value);
@@ -1726,16 +1730,16 @@ function SearchableSelect({
           <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className={`p-0 ${width}`} align="start">
+      <PopoverContent className={`p-0 ${popoverWidth || width}`} align="start">
         <Command>
-          <CommandInput placeholder="Search..." className="h-8 text-xs" />
-          <CommandList className="max-h-[220px]">
+          <CommandInput placeholder={searchPlaceholder} className="h-8 text-xs" />
+          <CommandList className="max-h-[240px]">
             <CommandEmpty className="py-2 text-center text-xs text-muted-foreground">{emptyText}</CommandEmpty>
             <CommandGroup>
               {options.map((opt) => (
                 <CommandItem
                   key={opt.value}
-                  value={opt.label}
+                  value={`${opt.label} ${opt.value}`}
                   onSelect={() => {
                     onValueChange(opt.value);
                     setOpen(false);
@@ -5646,6 +5650,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
+  const [searchOutletText, setSearchOutletText] = useState("");
 
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
   const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
@@ -5671,6 +5676,29 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
     }
   });
 
+  const outletOptions = useMemo(() => {
+    const opts = [{ value: "all", label: "All Outlets" }];
+    const seen = new Set<string>();
+    const sorted = [...outlets].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    sorted.forEach((o: any) => {
+      seen.add(o.id);
+      opts.push({
+        value: o.id,
+        label: o.code ? `${o.name} (${o.code})` : o.name
+      });
+    });
+    pendingDeliveries.forEach((it: any) => {
+      if (it.outletId && !seen.has(it.outletId)) {
+        seen.add(it.outletId);
+        opts.push({
+          value: it.outletId,
+          label: it.outletCode ? `${it.outletName || "Outlet"} (${it.outletCode})` : (it.outletName || "Outlet")
+        });
+      }
+    });
+    return opts;
+  }, [outlets, pendingDeliveries]);
+
   const allStorageTypes = new Set<string>();
   const groupedData: { zoneName: string; outlets: any[] }[] = [];
 
@@ -5678,6 +5706,13 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
   const routeMap = new Map<string, any>();
 
   pendingDeliveries.forEach((item: any) => {
+    if (searchOutletText.trim()) {
+      const q = searchOutletText.toLowerCase().trim();
+      const nameMatch = (item.outletName || "").toLowerCase().includes(q);
+      const codeMatch = (item.outletCode || "").toLowerCase().includes(q);
+      if (!nameMatch && !codeMatch) return;
+    }
+
     if (item.storageType) allStorageTypes.add(item.storageType);
 
     if (!routeMap.has(item.zoneName)) {
@@ -5748,13 +5783,15 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Outlet</Label>
-              <Select value={outletFilter} onValueChange={setOutletFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Outlets" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  {outlets.map(o => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={outletFilter}
+                onValueChange={setOutletFilter}
+                options={outletOptions}
+                placeholder="All Outlets"
+                searchPlaceholder="Search outlet name or code..."
+                width="w-full"
+                popoverWidth="w-[320px]"
+              />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Driver</Label>
@@ -5776,6 +5813,32 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3 mt-3 pt-3 border-t">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Quick search outlet by name or code..."
+                value={searchOutletText}
+                onChange={e => setSearchOutletText(e.target.value)}
+                className="h-8 pl-8 pr-7 text-xs"
+              />
+              {searchOutletText && (
+                <button
+                  type="button"
+                  onClick={() => setSearchOutletText("")}
+                  className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {searchOutletText && (
+              <span className="text-xs text-muted-foreground">
+                Filtering by: <span className="font-semibold text-foreground">"{searchOutletText}"</span>
+              </span>
+            )}
           </div>
         </CardHeader>
 
@@ -5947,6 +6010,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   const [routeFilter, setRouteFilter] = useState("all");
   const [outletFilter, setOutletFilter] = useState("all");
   const [driverFilter, setDriverFilter] = useState("all");
+  const [searchOutletText, setSearchOutletText] = useState("");
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const [viewPodsModal, setViewPodsModal] = useState<{ isOpen: boolean; title: string; pods: { url: string, date: string }[] }>({ isOpen: false, title: "", pods: [] });
@@ -6020,12 +6084,25 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
     if (d.driverId && d.driverName && !allDrivers.has(d.driverId)) allDrivers.set(d.driverId, d.driverName);
   });
 
+  const outletOptions = [
+    { value: "all", label: "All Outlets" },
+    ...Array.from(allOutlets.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, name]) => ({ value: id, label: name }))
+  ];
+
   // Apply filters
   const filteredDeliveries = (deliveries || []).filter(d => {
     if (storageTypeFilter !== "all" && d.storageType !== storageTypeFilter) return false;
     if (routeFilter !== "all" && d.routeId !== routeFilter) return false;
     if (outletFilter !== "all" && d.outletId !== outletFilter) return false;
     if (driverFilter !== "all" && d.driverId !== driverFilter) return false;
+    if (searchOutletText.trim()) {
+      const q = searchOutletText.toLowerCase().trim();
+      const nameMatch = (d.outletName || "").toLowerCase().includes(q);
+      const codeMatch = (d.outletCode || "").toLowerCase().includes(q);
+      if (!nameMatch && !codeMatch) return false;
+    }
     return true;
   });
 
@@ -6163,13 +6240,15 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Outlet</Label>
-              <Select value={outletFilter} onValueChange={setOutletFilter}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  {Array.from(allOutlets.entries()).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={outletFilter}
+                onValueChange={setOutletFilter}
+                options={outletOptions}
+                placeholder="All Outlets"
+                searchPlaceholder="Search outlet name or code..."
+                width="w-full"
+                popoverWidth="w-[320px]"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Driver</Label>
@@ -6181,6 +6260,32 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Quick search outlet by name or code..."
+                value={searchOutletText}
+                onChange={e => setSearchOutletText(e.target.value)}
+                className="h-8 pl-8 pr-7 text-xs"
+              />
+              {searchOutletText && (
+                <button
+                  type="button"
+                  onClick={() => setSearchOutletText("")}
+                  className="absolute right-2 top-2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {searchOutletText && (
+              <span className="text-xs text-muted-foreground">
+                Filtering by: <span className="font-semibold text-foreground">"{searchOutletText}"</span>
+              </span>
+            )}
           </div>
         </div>
 
