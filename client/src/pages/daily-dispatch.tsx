@@ -70,7 +70,18 @@ interface OutletGroup {
 interface ZoneGroup {
   zoneId: string; zoneName: string;
   drivers: { id: string; name: string }[];
-  trucks?: { id: string; usedCapacity: string; vehicle: any; driver: any }[];
+  trucks?: {
+    id: string;
+    usedCapacity: string;
+    vehicle: any;
+    driver: any;
+    reportingTime?: string | null;
+    departTime?: string | null;
+    loadingStartTime?: string | null;
+    loadingEndTime?: string | null;
+    loadingStatus?: string | null;
+    supervisorNotes?: string | null;
+  }[];
   outlets: OutletGroup[];
 }
 interface BoardData { zones: ZoneGroup[]; overrides: any[]; }
@@ -660,8 +671,82 @@ function ZoneColumn({
 }) {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [isTimingDialogOpen, setIsTimingDialogOpen] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const primaryTruck = zone.trucks?.[0];
+
+  const [timingForm, setTimingForm] = useState({
+    loadingStartTime: primaryTruck?.loadingStartTime || "",
+    loadingEndTime: primaryTruck?.loadingEndTime || "",
+    departTime: primaryTruck?.departTime || "",
+    reportingTime: primaryTruck?.reportingTime || "",
+    loadingStatus: primaryTruck?.loadingStatus || "pending",
+    supervisorNotes: primaryTruck?.supervisorNotes || "",
+  });
+
+  useEffect(() => {
+    if (primaryTruck) {
+      setTimingForm({
+        loadingStartTime: primaryTruck.loadingStartTime || "",
+        loadingEndTime: primaryTruck.loadingEndTime || "",
+        departTime: primaryTruck.departTime || "",
+        reportingTime: primaryTruck.reportingTime || "",
+        loadingStatus: primaryTruck.loadingStatus || "pending",
+        supervisorNotes: primaryTruck.supervisorNotes || "",
+      });
+    }
+  }, [primaryTruck]);
+
+  const updateTimingMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await apiRequest("POST", `/api/dispatch/sheets/${sheetId}/routes/${zone.zoneId}/timing`, payload);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/trucks`] });
+      toast({ title: "Route timings updated successfully!" });
+      setIsTimingDialogOpen(false);
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to update timings", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const getNowFormatted = () => {
+    return format(new Date(), "hh:mm a");
+  };
+
+  const handleQuickAction = (action: "start_loading" | "finish_loading" | "dispatch") => {
+    const now = getNowFormatted();
+    if (action === "start_loading") {
+      const payload = {
+        ...timingForm,
+        loadingStartTime: timingForm.loadingStartTime || now,
+        loadingStatus: "loading",
+      };
+      setTimingForm(payload);
+      updateTimingMutation.mutate(payload);
+    } else if (action === "finish_loading") {
+      const payload = {
+        ...timingForm,
+        loadingEndTime: now,
+        loadingStatus: "loaded",
+      };
+      setTimingForm(payload);
+      updateTimingMutation.mutate(payload);
+    } else if (action === "dispatch") {
+      const payload = {
+        ...timingForm,
+        departTime: now,
+        loadingStatus: "dispatched",
+      };
+      setTimingForm(payload);
+      updateTimingMutation.mutate(payload);
+    }
+  };
 
   const [localOutlets, setLocalOutlets] = useState(zone.outlets);
 
@@ -934,6 +1019,43 @@ function ZoneColumn({
                     ? formattedTotalQty
                     : `${formattedTotalQty}/${formattedInitialTotalQty}`}
                 </p>
+                {/* Timing Badge */}
+                <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                  {primaryTruck?.loadingStatus === "dispatched" ? (
+                    <Badge 
+                      className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5"
+                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit timings"
+                    >
+                      <Truck className="h-3 w-3" /> Dispatched {primaryTruck.departTime ? `@ ${primaryTruck.departTime}` : ""}
+                    </Badge>
+                  ) : primaryTruck?.loadingStatus === "loaded" ? (
+                    <Badge 
+                      className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5"
+                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit timings"
+                    >
+                      <CheckCircle2 className="h-3 w-3" /> Loaded {primaryTruck.loadingEndTime ? `@ ${primaryTruck.loadingEndTime}` : ""}
+                    </Badge>
+                  ) : primaryTruck?.loadingStatus === "loading" ? (
+                    <Badge 
+                      className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5 animate-pulse"
+                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit timings"
+                    >
+                      <RefreshCw className="h-3 w-3 animate-spin" /> Loading {primaryTruck.loadingStartTime ? `@ ${primaryTruck.loadingStartTime}` : ""}
+                    </Badge>
+                  ) : (
+                    <Badge 
+                      variant="outline"
+                      className="text-muted-foreground hover:bg-muted/80 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5 border-dashed"
+                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
+                      title="Click to record loading/dispatch timing"
+                    >
+                      <Clock className="h-3 w-3" /> Record Timings
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -1069,6 +1191,70 @@ function ZoneColumn({
                   })}
                 </div>
               )}
+
+              {/* Loading & Dispatch Timing Box inside details */}
+              <div className="bg-background rounded-md p-2.5 text-xs border space-y-2 shadow-xs mt-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
+                    <Clock className="h-3.5 w-3.5 text-primary" /> Loading & Dispatch
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px] px-2 gap-1"
+                    onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
+                  >
+                    <Edit2 className="h-2.5 w-2.5" /> Edit
+                  </Button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[11px] text-muted-foreground bg-muted/40 p-2 rounded">
+                  <div>
+                    <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Start</span>
+                    <span className="font-medium text-foreground">{primaryTruck?.loadingStartTime || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Completed</span>
+                    <span className="font-medium text-foreground">{primaryTruck?.loadingEndTime || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Dispatched</span>
+                    <span className="font-medium text-foreground">{primaryTruck?.departTime || "—"}</span>
+                  </div>
+                </div>
+                {/* Quick Action Buttons for Warehouse Supervisor */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  {(!primaryTruck?.loadingStatus || primaryTruck?.loadingStatus === "pending") && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="h-6 text-[10px] flex-1 bg-amber-600 hover:bg-amber-700 text-white gap-1"
+                      onClick={(e) => { e.stopPropagation(); handleQuickAction("start_loading"); }}
+                    >
+                      <Clock className="h-3 w-3" /> Start Loading Now
+                    </Button>
+                  )}
+                  {primaryTruck?.loadingStatus === "loading" && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="h-6 text-[10px] flex-1 bg-blue-600 hover:bg-blue-700 text-white gap-1"
+                      onClick={(e) => { e.stopPropagation(); handleQuickAction("finish_loading"); }}
+                    >
+                      <CheckCircle2 className="h-3 w-3" /> Complete Loading
+                    </Button>
+                  )}
+                  {primaryTruck?.loadingStatus === "loaded" && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="h-6 text-[10px] flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                      onClick={(e) => { e.stopPropagation(); handleQuickAction("dispatch"); }}
+                    >
+                      <Truck className="h-3 w-3" /> Dispatch Route
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1366,6 +1552,143 @@ function ZoneColumn({
           </div>
         </div>
       )}
+
+      {/* Loading & Dispatch Timings Dialog */}
+      {isTimingDialogOpen && (
+        <Dialog open={isTimingDialogOpen} onOpenChange={setIsTimingDialogOpen}>
+          <DialogContent className="sm:max-w-[460px]" onClick={(e) => e.stopPropagation()}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-primary" />
+                Loading & Dispatch Timings
+              </DialogTitle>
+              <DialogDescription>
+                Route: <strong className="text-foreground">{zone.zoneName}</strong>
+                {primaryTruck?.vehicle && (
+                  <span> · Truck: <strong className="text-foreground">{primaryTruck.vehicle.plateNumber || primaryTruck.vehicle.name}</strong></span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3.5 py-2">
+              {/* Status Selector */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Loading & Dispatch Status</Label>
+                <Select
+                  value={timingForm.loadingStatus || "pending"}
+                  onValueChange={(val) => setTimingForm(prev => ({ ...prev, loadingStatus: val }))}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending / Not Started</SelectItem>
+                    <SelectItem value="loading">Loading in Progress</SelectItem>
+                    <SelectItem value="loaded">Loading Completed</SelectItem>
+                    <SelectItem value="dispatched">Dispatched / En Route</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Loading Start Time */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Loading Start Time</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={timingForm.loadingStartTime}
+                    onChange={(e) => setTimingForm(prev => ({ ...prev, loadingStartTime: e.target.value }))}
+                    placeholder="e.g. 08:30 AM"
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => setTimingForm(prev => ({ ...prev, loadingStartTime: getNowFormatted(), loadingStatus: prev.loadingStatus === "pending" ? "loading" : prev.loadingStatus }))}
+                  >
+                    Set Now
+                  </Button>
+                </div>
+              </div>
+
+              {/* Loading End Time */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Loading Completed Time</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={timingForm.loadingEndTime}
+                    onChange={(e) => setTimingForm(prev => ({ ...prev, loadingEndTime: e.target.value }))}
+                    placeholder="e.g. 09:15 AM"
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => setTimingForm(prev => ({ ...prev, loadingEndTime: getNowFormatted(), loadingStatus: "loaded" }))}
+                  >
+                    Set Now
+                  </Button>
+                </div>
+              </div>
+
+              {/* Dispatch Time */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Dispatching (Departure) Time</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={timingForm.departTime}
+                    onChange={(e) => setTimingForm(prev => ({ ...prev, departTime: e.target.value }))}
+                    placeholder="e.g. 09:30 AM"
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => setTimingForm(prev => ({ ...prev, departTime: getNowFormatted(), loadingStatus: "dispatched" }))}
+                  >
+                    Set Now
+                  </Button>
+                </div>
+              </div>
+
+              {/* Supervisor Notes */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Supervisor Notes / Remarks</Label>
+                <Textarea
+                  value={timingForm.supervisorNotes}
+                  onChange={(e) => setTimingForm(prev => ({ ...prev, supervisorNotes: e.target.value }))}
+                  placeholder="Optional notes regarding loading, pallet condition, delay reason..."
+                  className="text-xs resize-none h-16"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsTimingDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={updateTimingMutation.isPending}
+                onClick={() => updateTimingMutation.mutate(timingForm)}
+              >
+                {updateTimingMutation.isPending ? "Saving..." : "Save Timings"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -1636,6 +1959,11 @@ function TruckHistoryTab({ vehicles }: { vehicles: any[] }) {
 
 // ===== Main Page =====
 export default function DailyDispatchPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  const isSupervisor = user?.role === "supervisor" || (!isAdmin && user?.role?.toLowerCase().includes("supervisor"));
+  const canSupervise = isSupervisor || isAdmin;
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2445,8 +2773,6 @@ export default function DailyDispatchPage() {
   const driverMap = new Map(drivers.map(d => [d.id, d]));
   const zoneMap = new Map(zones.map(z => [z.id, z]));
 
-  const isSupervisor = true; // TODO: link to user role
-
   const handleExportCSV = () => {
     if (!reportData) return;
     let csv = "ITEM_NUMBER,DESCRIPTION,UOM,FROM_ORG,STORAGE_TYPE,QTY\n";
@@ -2576,6 +2902,21 @@ export default function DailyDispatchPage() {
               </Badge>
             )}
           </div>
+
+          {/* Supervisor Assigned Mode Banner */}
+          {isSupervisor && !isAdmin && (
+            <div className="mx-6 mt-3 px-4 py-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-blue-600 text-white hover:bg-blue-600 text-xs">Supervisor Assigned Mode</Badge>
+                <span className="text-xs text-blue-900 dark:text-blue-200">
+                  Monitoring assigned routes: <strong className="font-semibold">{zones.map((z: any) => z.name).join(", ") || "None assigned"}</strong>
+                </span>
+              </div>
+              <span className="text-[11px] text-blue-700 dark:text-blue-300 font-medium hidden sm:inline">
+                Record loading and dispatching times directly on route cards.
+              </span>
+            </div>
+          )}
 
           {boardData && (
             <>
@@ -2834,7 +3175,7 @@ export default function DailyDispatchPage() {
                       .filter(z => z.outlets.length > 0)
                       .map(zone => (
                         <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId!}
-                          zones={zones} isSupervisor={isSupervisor}
+                          zones={zones} isSupervisor={canSupervise}
                           onDeliveryUpdate={item => setDeliveryDialog(item)}
                           onOverride={outlet => setOverrideDialog(outlet)}
                           onOverrideItem={item => setItemOverrideDialog(item)}

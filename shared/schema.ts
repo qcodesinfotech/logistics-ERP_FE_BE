@@ -2385,6 +2385,10 @@ export const dispatchTruckAssignments = pgTable("dispatch_truck_assignments", {
   tripNumber: integer("trip_number").notNull().default(1),
   reportingTime: text("reporting_time"),
   departTime: text("depart_time"),
+  loadingStartTime: text("loading_start_time"),
+  loadingEndTime: text("loading_end_time"),
+  loadingStatus: text("loading_status").default("pending"),
+  supervisorNotes: text("supervisor_notes"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

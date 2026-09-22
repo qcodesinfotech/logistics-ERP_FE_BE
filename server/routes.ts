@@ -7100,6 +7100,13 @@ export async function registerRoutes(
     try {
       const scope = getOptionalScope(req);
       const zonesList = await storage.getZones(scope);
+      const isAdmin = req.user?.role === "admin" || req.user?.role === "super_admin";
+      const isSupervisor = !isAdmin && (req.user?.role === "supervisor" || req.user?.role?.toLowerCase().includes("supervisor"));
+      if (isSupervisor && req.user?.id) {
+        const assigned = await storage.getSupervisorZones(req.user.id);
+        const assignedIds = new Set(assigned.map(sz => sz.zoneId));
+        return res.json(zonesList.filter(z => assignedIds.has(z.id)));
+      }
       res.json(zonesList);
     } catch (error) {
       console.error("Get zones error:", error);
@@ -7324,6 +7331,13 @@ export async function registerRoutes(
   app.get("/api/routes", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
     try {
       const routes = await storage.getRoutes();
+      const isAdmin = req.user?.role === "admin" || req.user?.role === "super_admin";
+      const isSupervisor = !isAdmin && (req.user?.role === "supervisor" || req.user?.role?.toLowerCase().includes("supervisor"));
+      if (isSupervisor && req.user?.id) {
+        const assigned = await storage.getSupervisorZones(req.user.id);
+        const assignedIds = new Set(assigned.map(sz => sz.zoneId));
+        return res.json(routes.filter(r => assignedIds.has(r.id)));
+      }
       res.json(routes);
     } catch (error) {
       console.error("Error fetching routes:", error);
@@ -7702,6 +7716,18 @@ export async function registerRoutes(
   app.get("/api/dispatch/sheets/:id/board", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const board = await storage.getDispatchBoard(req.params.id);
+      const isAdmin = req.user?.role === "admin" || req.user?.role === "super_admin";
+      const isSupervisor = !isAdmin && (req.user?.role === "supervisor" || req.user?.role?.toLowerCase().includes("supervisor"));
+      
+      if (isSupervisor && req.user?.id) {
+        const assigned = await storage.getSupervisorZones(req.user.id);
+        const assignedIds = new Set(assigned.map(sz => sz.zoneId));
+        // Restrict board zones strictly to supervisor assigned zones
+        board.zones = (board.zones || []).filter((z: any) => assignedIds.has(z.zoneId));
+        // Clear unassigned bucket so supervisor cannot access unassigned outlets outside their scope
+        board.unassigned = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], trucks: [], outlets: [] };
+      }
+
       res.json(board);
     } catch (e: any) {
       console.error("Get dispatch board error:", e?.stack || e);
@@ -7712,9 +7738,17 @@ export async function registerRoutes(
   // Get dispatch report for a specific sheet (grouped by Route -> Outlet -> Items)
   app.get("/api/dispatch/sheets/:id/report", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const items = await storage.getDispatchItemsForSheet(req.params.id);
+      let items = await storage.getDispatchItemsForSheet(req.params.id);
       const routes = await storage.getRoutes();
       const routeMap = new Map(routes.map(r => [r.id, r.name]));
+
+      const isAdmin = req.user?.role === "admin" || req.user?.role === "super_admin";
+      const isSupervisor = !isAdmin && (req.user?.role === "supervisor" || req.user?.role?.toLowerCase().includes("supervisor"));
+      if (isSupervisor && req.user?.id) {
+        const assigned = await storage.getSupervisorZones(req.user.id);
+        const assignedIds = new Set(assigned.map(sz => sz.zoneId));
+        items = items.filter((it: any) => it.routeId && assignedIds.has(it.routeId));
+      }
 
       res.json({ items, routeMap: Object.fromEntries(routeMap) });
     } catch (e) {
@@ -10003,8 +10037,19 @@ export async function registerRoutes(
   app.get("/api/dispatch/sheets/:sheetId/trucks", authMiddleware, async (req: AuthRequest, res) => {
     try {
       await storage.autoAssignZoneTrucksToSheet(req.params.sheetId);
-      const trucks = await storage.getDispatchTruckAssignments(req.params.sheetId);
-      const outletAssignments = await storage.getDispatchOutletTruckAssignmentsBySheet(req.params.sheetId);
+      let trucks = await storage.getDispatchTruckAssignments(req.params.sheetId);
+      let outletAssignments = await storage.getDispatchOutletTruckAssignmentsBySheet(req.params.sheetId);
+
+      const isAdmin = req.user?.role === "admin" || req.user?.role === "super_admin";
+      const isSupervisor = !isAdmin && (req.user?.role === "supervisor" || req.user?.role?.toLowerCase().includes("supervisor"));
+      if (isSupervisor && req.user?.id) {
+        const assigned = await storage.getSupervisorZones(req.user.id);
+        const assignedIds = new Set(assigned.map(sz => sz.zoneId));
+        trucks = trucks.filter((t: any) => assignedIds.has(t.zoneId));
+        const truckIds = new Set(trucks.map((t: any) => t.id));
+        outletAssignments = outletAssignments.filter((oa: any) => truckIds.has(oa.truckAssignmentId));
+      }
+
       res.json({ trucks, outletAssignments });
     } catch (error) {
       console.error("Get truck assignments error:", error);
@@ -10040,6 +10085,71 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Update truck assignment error:", error);
       res.status(500).json({ error: "Failed to update truck assignment" });
+    }
+  });
+
+  // Dedicated route timing update endpoint (used by supervisor for loading time & dispatching time)
+  app.patch("/api/dispatch/trucks/:id/timing", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes } = req.body;
+      const updateData: any = {};
+      if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
+      if (loadingEndTime !== undefined) updateData.loadingEndTime = loadingEndTime;
+      if (departTime !== undefined) updateData.departTime = departTime;
+      if (reportingTime !== undefined) updateData.reportingTime = reportingTime;
+      if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
+      if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
+
+      const updated = await storage.updateDispatchTruckAssignment(req.params.id, updateData);
+      if (!updated) return res.status(404).json({ error: "Truck assignment not found" });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Update truck timing error:", error);
+      res.status(500).json({ error: "Failed to update timing: " + error.message });
+    }
+  });
+
+  // Route-level loading and dispatch time endpoint (updates existing or assigns timing for route)
+  app.post("/api/dispatch/sheets/:sheetId/routes/:routeId/timing", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { sheetId, routeId } = req.params;
+      const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes, truckId } = req.body;
+
+      const existingTrucks = await storage.getDispatchTruckAssignments(sheetId);
+      const matched = existingTrucks.find((t: any) => t.zoneId === routeId);
+
+      if (matched) {
+        const updateData: any = {};
+        if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
+        if (loadingEndTime !== undefined) updateData.loadingEndTime = loadingEndTime;
+        if (departTime !== undefined) updateData.departTime = departTime;
+        if (reportingTime !== undefined) updateData.reportingTime = reportingTime;
+        if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
+        if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
+        if (truckId) updateData.truckId = truckId;
+
+        const updated = await storage.updateDispatchTruckAssignment(matched.id, updateData);
+        return res.json(updated);
+      } else {
+        const vehicles = await storage.getVehicles();
+        const fallbackTruckId = truckId || vehicles[0]?.id || "unassigned";
+        const newAssignment = await storage.createDispatchTruckAssignment({
+          sheetId,
+          zoneId: routeId,
+          truckId: fallbackTruckId,
+          tripNumber: 1,
+          loadingStartTime: loadingStartTime || null,
+          loadingEndTime: loadingEndTime || null,
+          departTime: departTime || null,
+          reportingTime: reportingTime || null,
+          loadingStatus: loadingStatus || "pending",
+          supervisorNotes: supervisorNotes || null,
+        } as any);
+        return res.json(newAssignment);
+      }
+    } catch (error: any) {
+      console.error("Set route timing error:", error);
+      res.status(500).json({ error: "Failed to set route timing: " + error.message });
     }
   });
 
