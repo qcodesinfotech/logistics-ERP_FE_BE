@@ -635,6 +635,7 @@ export interface IStorage {
   autoCarryForwardPendingDeliveries(sheetId: string): Promise<number>;
   autoAssignZoneTrucksToSheet(sheetId: string): Promise<void>;
   autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }>;
+  hasSheetDeliveryStarted(sheetId: string): Promise<boolean>;
 
   // ====================== FMCG DELIVERY INVOICES ======================
   getFmcgInvoices(): Promise<(FmcgInvoice & { items: FmcgInvoiceItem[] })[]>;
@@ -3381,8 +3382,115 @@ export class DatabaseStorage implements IStorage {
     await db.delete(driverZones).where(eq(driverZones.id, id));
   }
 
+  async hasSheetDeliveryStarted(sheetId: string): Promise<boolean> {
+    if (!sheetId) return false;
+
+    // 1. Check if any dispatchDelivery for items on this sheet has started or progressed
+    const startedDeliveries = await db
+      .select({ id: dispatchDeliveries.id })
+      .from(dispatchDeliveries)
+      .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+      .where(
+        and(
+          eq(dispatchItems.sheetId, sheetId),
+          or(
+            ne(dispatchDeliveries.status, "pending"),
+            sql`COALESCE(CAST(${dispatchDeliveries.deliveredQty} AS NUMERIC), 0) > 0`,
+            isNotNull(dispatchDeliveries.deliveryStartTime),
+            isNotNull(dispatchDeliveries.deliveredAt),
+            isNotNull(dispatchDeliveries.podUrl),
+            isNotNull(dispatchDeliveries.potUrl)
+          )
+        )
+      )
+      .limit(1);
+
+    if (startedDeliveries.length > 0) return true;
+
+    // 2. Check if any dispatchItem has recorded delivered quantities
+    const startedItems = await db
+      .select({ id: dispatchItems.id })
+      .from(dispatchItems)
+      .where(
+        and(
+          eq(dispatchItems.sheetId, sheetId),
+          sql`COALESCE(CAST(${dispatchItems.totalDelivered} AS NUMERIC), 0) > 0`
+        )
+      )
+      .limit(1);
+
+    if (startedItems.length > 0) return true;
+
+    // 3. Check if any truck assignment has departed or completed loading
+    const startedTrucks = await db
+      .select({ id: dispatchTruckAssignments.id })
+      .from(dispatchTruckAssignments)
+      .where(
+        and(
+          eq(dispatchTruckAssignments.sheetId, sheetId),
+          or(
+            and(
+              isNotNull(dispatchTruckAssignments.departTime),
+              ne(dispatchTruckAssignments.departTime, "")
+            ),
+            inArray(dispatchTruckAssignments.loadingStatus, ["departed", "in_transit", "completed"])
+          )
+        )
+      )
+      .limit(1);
+
+    if (startedTrucks.length > 0) return true;
+
+    return false;
+  }
+
   async getDispatchSheets(): Promise<any[]> {
-    return db.select().from(dispatchSheets).orderBy(desc(dispatchSheets.date));
+    const sheets = await db.select().from(dispatchSheets).orderBy(desc(dispatchSheets.date));
+    if (sheets.length === 0) return [];
+
+    // Find all sheetIds that have started deliveries
+    const startedDeliverySheetIds = await db
+      .selectDistinct({ sheetId: dispatchItems.sheetId })
+      .from(dispatchDeliveries)
+      .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+      .where(
+        or(
+          ne(dispatchDeliveries.status, "pending"),
+          sql`COALESCE(CAST(${dispatchDeliveries.deliveredQty} AS NUMERIC), 0) > 0`,
+          isNotNull(dispatchDeliveries.deliveryStartTime),
+          isNotNull(dispatchDeliveries.deliveredAt),
+          isNotNull(dispatchDeliveries.podUrl),
+          isNotNull(dispatchDeliveries.potUrl)
+        )
+      );
+
+    const startedItemSheetIds = await db
+      .selectDistinct({ sheetId: dispatchItems.sheetId })
+      .from(dispatchItems)
+      .where(sql`COALESCE(CAST(${dispatchItems.totalDelivered} AS NUMERIC), 0) > 0`);
+
+    const startedTruckSheetIds = await db
+      .selectDistinct({ sheetId: dispatchTruckAssignments.sheetId })
+      .from(dispatchTruckAssignments)
+      .where(
+        or(
+          and(
+            isNotNull(dispatchTruckAssignments.departTime),
+            ne(dispatchTruckAssignments.departTime, "")
+          ),
+          inArray(dispatchTruckAssignments.loadingStatus, ["departed", "in_transit", "completed"])
+        )
+      );
+
+    const activeSheetIdSet = new Set<string>();
+    startedDeliverySheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
+    startedItemSheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
+    startedTruckSheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
+
+    return sheets.map(sheet => ({
+      ...sheet,
+      hasDeliveryStarted: activeSheetIdSet.has(sheet.id),
+    }));
   }
 
   async getDispatchSheet(id: string): Promise<any> {
@@ -3404,6 +3512,10 @@ export class DatabaseStorage implements IStorage {
   async createDispatchSheet(data: { date: string; uploadedBy?: string; fileName?: string; clientId?: string | null }, mergeStrategy?: "skip" | "replace" | "overwrite"): Promise<any> {
     const existing = await this.getDispatchSheetByDateAndClient(data.date, data.clientId);
     if (existing) {
+      const started = await this.hasSheetDeliveryStarted(existing.id);
+      if (started) {
+        throw new Error("Cannot replace or overwrite this dispatch sheet because delivery has already started for this day.");
+      }
       if (mergeStrategy === "overwrite" || !mergeStrategy) {
         await this.deleteDispatchSheet(existing.id);
         const [sheet] = await db.insert(dispatchSheets).values(data).returning();
@@ -3422,6 +3534,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteDispatchSheet(id: string): Promise<void> {
+    const started = await this.hasSheetDeliveryStarted(id);
+    if (started) {
+      throw new Error("Cannot delete dispatch sheet: Delivery has already started for the day.");
+    }
+
     const existingItems = await db.select({ id: dispatchItems.id })
       .from(dispatchItems)
       .where(eq(dispatchItems.sheetId, id));

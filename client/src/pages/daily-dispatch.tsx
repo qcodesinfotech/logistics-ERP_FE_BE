@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
+import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/contexts/auth-context";
@@ -51,7 +52,7 @@ import CustomerReportView from "@/components/customer-report-view";
 import { exportCompletedDeliveriesExcel, exportPendingDeliveriesExcel } from "@/lib/customer-excel-export";
 
 // ===== Types =====
-interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; }
+interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; hasDeliveryStarted?: boolean; }
 interface DispatchItem {
   id: string; sheetId: string; outletCode: string; outletId: string | null;
   outletName?: string; itemCode: string; description: string | null;
@@ -2877,6 +2878,14 @@ export default function DailyDispatchPage() {
 
     const existingSheet = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
     if (existingSheet) {
+      if (existingSheet.hasDeliveryStarted) {
+        toast({
+          title: "Cannot Replace Sheet",
+          description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
+          variant: "destructive",
+        });
+        return;
+      }
       setMergeConfirmOpen(true);
       return;
     }
@@ -3652,19 +3661,34 @@ export default function DailyDispatchPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          {s.hasDeliveryStarted && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 font-medium">
+                              Delivery Started
+                            </Badge>
+                          )}
                           <Badge variant="outline" className={s.status === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""}>
                             {s.status}
                           </Badge>
                           <Button size="sm" variant="outline" onClick={() => { setSelectedDate(s.date); setBoardSheetId(s.id); setActiveTab("board"); }}>
                             <Eye className="h-3.5 w-3.5 mr-1" />View
                           </Button>
-                          <Button size="icon" variant="outline" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          <Button size="icon" variant="outline"
+                            className={cn("h-8 w-8", s.hasDeliveryStarted ? "opacity-50 cursor-not-allowed text-muted-foreground" : "text-destructive hover:bg-destructive/10 hover:text-destructive")}
+                            title={s.hasDeliveryStarted ? "Delivery has started for this day. Sheet cannot be removed." : "Delete sheet"}
                             onClick={() => {
+                              if (s.hasDeliveryStarted) {
+                                toast({
+                                  title: "Cannot Delete Sheet",
+                                  description: "Delivery has already started for this day. This sheet cannot be removed from the system.",
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
                               if (confirm("Are you sure you want to delete this sheet? All associated items and delivery logs will be lost.")) {
                                 deleteSheetMutation.mutate(s.id);
                               }
                             }}
-                            disabled={deleteSheetMutation.isPending}>
+                            disabled={deleteSheetMutation.isPending || s.hasDeliveryStarted}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -3899,6 +3923,16 @@ export default function DailyDispatchPage() {
           </DialogHeader>
           <div className="flex flex-col gap-3 mt-2">
             <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
+              const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
+              if (currentExisting?.hasDeliveryStarted) {
+                toast({
+                  title: "Cannot Replace Sheet",
+                  description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
+                  variant: "destructive",
+                });
+                setMergeConfirmOpen(false);
+                return;
+              }
               uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
@@ -3906,6 +3940,16 @@ export default function DailyDispatchPage() {
               <p className="text-xs text-muted-foreground mt-0.5">Ignore items that are already in the system. Only add new items.</p>
             </div>
             <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
+              const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
+              if (currentExisting?.hasDeliveryStarted) {
+                toast({
+                  title: "Cannot Replace Sheet",
+                  description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
+                  variant: "destructive",
+                });
+                setMergeConfirmOpen(false);
+                return;
+              }
               uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>
@@ -3913,6 +3957,16 @@ export default function DailyDispatchPage() {
               <p className="text-xs text-muted-foreground mt-0.5">Update quantities for existing items, and add new items.</p>
             </div>
             <div className="border rounded-lg p-3 cursor-pointer hover:border-destructive hover:bg-destructive/10 transition-colors" onClick={() => {
+              const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
+              if (currentExisting?.hasDeliveryStarted) {
+                toast({
+                  title: "Cannot Replace Sheet",
+                  description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
+                  variant: "destructive",
+                });
+                setMergeConfirmOpen(false);
+                return;
+              }
               uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite", clientId: uploadClientId });
               setMergeConfirmOpen(false);
             }}>

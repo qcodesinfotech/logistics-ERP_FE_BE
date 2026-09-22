@@ -7519,11 +7519,15 @@ export async function registerRoutes(
   // Delete dispatch sheet
   app.delete("/api/dispatch/sheets/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const hasStarted = await storage.hasSheetDeliveryStarted(req.params.id);
+      if (hasStarted) {
+        return res.status(400).json({ error: "Cannot delete dispatch sheet: Delivery has already started for the day." });
+      }
       await storage.deleteDispatchSheet(req.params.id);
       res.sendStatus(200);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Delete dispatch sheet error:", e);
-      res.status(500).json({ error: "Failed to delete dispatch sheet" });
+      res.status(400).json({ error: e.message || "Failed to delete dispatch sheet" });
     }
   });
 
@@ -7532,6 +7536,14 @@ export async function registerRoutes(
     try {
       const { date, fileName, items, mergeStrategy, clientId } = req.body; // mergeStrategy: "skip" | "replace" | "overwrite"
       const uploadedBy = req.user?.id;
+
+      const existingSheet = await storage.getDispatchSheetByDateAndClient(date, clientId || null);
+      if (existingSheet) {
+        const hasStarted = await storage.hasSheetDeliveryStarted(existingSheet.id);
+        if (hasStarted) {
+          return res.status(400).json({ error: "Cannot replace or overwrite this dispatch sheet because delivery has already started for this day." });
+        }
+      }
 
       // Note: createDispatchSheet now takes mergeStrategy. It deletes the sheet if "overwrite" or if not provided.
       const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName, clientId: clientId || null }, mergeStrategy);
