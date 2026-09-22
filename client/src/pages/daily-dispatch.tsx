@@ -48,7 +48,7 @@ import {
   Layers,
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
-import { exportCompletedDeliveriesExcel } from "@/lib/customer-excel-export";
+import { exportCompletedDeliveriesExcel, exportPendingDeliveriesExcel } from "@/lib/customer-excel-export";
 
 // ===== Types =====
 interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; }
@@ -60,6 +60,8 @@ interface DispatchItem {
   remark: string | null; grnNumber: string | null;
   storageType?: string | null;
   toNo?: string | null;
+  carriedFromItemId?: string | null;
+  carriedToItemId?: string | null;
   delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; damagedQty?: string | null; damageReason?: string | null; } | null;
 }
 interface OutletGroup {
@@ -532,6 +534,11 @@ function OutletCard({
                       <span className="text-[9px] font-mono text-muted-foreground/80 bg-slate-100 dark:bg-slate-850 px-1 py-0.5 rounded">
                         GRN:{item.grnNumber}
                       </span>
+                    )}
+                    {(item.carriedFromItemId || item.remark?.toLowerCase().includes("carried forward")) && (
+                      <Badge variant="outline" className="text-[9px] h-4 px-1.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 font-medium">
+                        Carried Forward
+                      </Badge>
                     )}
                   </div>
                   <div className="flex-shrink-0">
@@ -5800,6 +5807,15 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => exportPendingDeliveriesExcel(pendingDeliveries, `Pending_Deliveries_${startDate || 'all'}_to_${endDate || 'all'}`)}
+                className="gap-2 text-emerald-700 border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-400 dark:border-emerald-700"
+                disabled={!pendingDeliveries || pendingDeliveries.length === 0}
+              >
+                <Download className="h-4 w-4" /> Export Excel
+              </Button>
               <Button size="sm" variant="outline" onClick={() => window.print()} className="gap-2">
                 <Printer className="h-4 w-4" /> Print
               </Button>
@@ -5966,6 +5982,11 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                                   <tr key={p.id} className="hover:bg-slate-50 text-slate-600 bg-white">
                                     <td className="py-1.5 px-3 border-r pl-12 text-xs text-muted-foreground">
                                       {p.storageType && <Badge variant="outline" className="text-[9px] h-4 px-1 mr-1">{p.storageType}</Badge>}
+                                      {(p.isCarriedForward || p.carriedFromItemId) && (
+                                        <Badge variant="outline" className="text-[9px] h-4 px-1 bg-amber-50 text-amber-700 border-amber-300 font-medium">
+                                          Carried Forward
+                                        </Badge>
+                                      )}
                                     </td>
                                     <td className="py-1.5 px-3 border-r text-xs whitespace-nowrap">
                                       {format(new Date(p.date), "dd MMM yy")}

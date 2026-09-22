@@ -10388,6 +10388,16 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/dispatch/sheets/:sheetId/carry-forward", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const count = await storage.autoCarryForwardPendingDeliveries(req.params.sheetId);
+      res.json({ success: true, count });
+    } catch (error: any) {
+      console.error("Manual carry forward error:", error);
+      res.status(500).json({ error: "Failed to carry forward pending deliveries: " + error.message });
+    }
+  });
+
   app.get("/api/dispatch/completed-deliveries", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { startDate, endDate } = req.query as any;

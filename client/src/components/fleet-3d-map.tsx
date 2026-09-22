@@ -233,12 +233,11 @@ export default function Fleet3DMap({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: getMapStyle(mapTheme),
+      style: getMapStyle(mapTheme) as any,
       center: [50.5876, 26.2235], // Bahrain default center
       zoom: 13,
       pitch: cameraPitch, // 3D Tilt perspective
       bearing: 15,
-      antialias: true,
     });
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
@@ -256,7 +255,7 @@ export default function Fleet3DMap({
   // Update map style when theme changes
   useEffect(() => {
     if (!mapInstanceRef.current) return;
-    mapInstanceRef.current.setStyle(getMapStyle(mapTheme));
+    mapInstanceRef.current.setStyle(getMapStyle(mapTheme) as any);
   }, [mapTheme]);
 
   // Create or Update 3D Truck Markers

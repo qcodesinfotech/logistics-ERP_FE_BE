@@ -18,6 +18,7 @@ const PALETTE = {
   peach: "FDEBD0",           // Dry/Chilled tag
   iceBlue: "D4E6F1",         // Frozen tag
   lightPink: "FADBD8",       // Packaging tag
+  paleLavender: "E9EEF4",    // Soft light slate/lavender
   textDark: "1A1A1A",
 };
 
@@ -739,4 +740,215 @@ export async function exportCompletedDeliveriesExcel(deliveries: any[], filename
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
 }
+
+/**
+ * Styled export for Pending Deliveries on the Daily Dispatch board
+ */
+export async function exportPendingDeliveriesExcel(deliveries: any[], filenamePrefix: string = "Pending_Deliveries") {
+  if (!deliveries || !deliveries.length) return;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Americana Logistics ERP";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Pending_Deliveries", {
+    views: [{ showGridLines: true }]
+  });
+
+  // Title Banner
+  ws.mergeCells("A1:P1");
+  const titleCell = ws.getCell("A1");
+  titleCell.value = "AMERICANA LOGISTICS - ADVANCED PENDING DELIVERIES REPORT";
+  titleCell.font = { name: "Calibri", size: 14, bold: true, color: { argb: `FF${PALETTE.white}` } };
+  titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.navyHeader}` } };
+  titleCell.alignment = { vertical: "middle", horizontal: "center" };
+  ws.getRow(1).height = 32;
+
+  // Subtitle / Info Banner
+  ws.mergeCells("A2:P2");
+  const subCell = ws.getCell("A2");
+  const todayStr = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  subCell.value = `Exported on: ${todayStr}  |  Total Pending Records: ${deliveries.length} Items`;
+  subCell.font = { name: "Calibri", size: 10, italic: true, color: { argb: `FF${PALETTE.textDark}` } };
+  subCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.paleLavender}` } };
+  subCell.alignment = { vertical: "middle", horizontal: "center" };
+  ws.getRow(2).height = 20;
+
+  // Spacer row
+  ws.getRow(3).height = 10;
+
+  // Table Columns Setup
+  const headerRowIndex = 4;
+  const columns = [
+    { header: "SN", key: "sn", width: 7 },
+    { header: "Date", key: "date", width: 14 },
+    { header: "Route", key: "route", width: 18 },
+    { header: "Outlet Code", key: "outletCode", width: 14 },
+    { header: "Outlet Name", key: "outletName", width: 30 },
+    { header: "TO / GDN", key: "toNo", width: 16 },
+    { header: "Storage Type", key: "storageType", width: 14 },
+    { header: "Item Code", key: "itemCode", width: 16 },
+    { header: "Description", key: "description", width: 32 },
+    { header: "Assigned Driver", key: "driver", width: 20 },
+    { header: "Assigned Truck", key: "truck", width: 16 },
+    { header: "Req Qty", key: "reqQty", width: 12 },
+    { header: "Del Qty", key: "delQty", width: 12 },
+    { header: "Remaining Qty", key: "remQty", width: 15 },
+    { header: "Status", key: "status", width: 14 },
+    { header: "Remark / Notes", key: "remark", width: 30 },
+  ];
+
+  const headerRow = ws.getRow(headerRowIndex);
+  headerRow.height = 28;
+
+  columns.forEach((col, idx) => {
+    ws.getColumn(idx + 1).width = col.width;
+    const cell = headerRow.getCell(idx + 1);
+    cell.value = col.header;
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: `FF${PALETTE.navyHeader}` }
+    };
+    cell.font = { name: "Calibri", size: 10.5, bold: true, color: { argb: `FF${PALETTE.white}` } };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.border = getThinBorder(PALETTE.borderMedium);
+  });
+
+  let totalReq = 0;
+  let totalDel = 0;
+  let totalRem = 0;
+
+  deliveries.forEach((d: any, idx: number) => {
+    const rNum = headerRowIndex + 1 + idx;
+    const isOdd = idx % 2 === 1;
+    const row = ws.getRow(rNum);
+    row.height = 22;
+
+    const req = parseFloat(d.requestedQty || d.weight || "0");
+    const del = parseFloat(d.deliveredQty || d.totalDelivered || "0");
+    let rem = parseFloat(d.remainingQty || d.remaining || "0");
+    if (rem === 0 && !d.remainingQty && !d.remaining) rem = Math.max(0, req - del);
+
+    totalReq += req;
+    totalDel += del;
+    totalRem += rem;
+
+    let dateVal = d.date || d.requestedDeliveryDate || "";
+    if (dateVal && dateVal.includes("T")) {
+      dateVal = dateVal.split("T")[0];
+    }
+
+    const rowValues = [
+      idx + 1,
+      dateVal,
+      d.zoneName || "Unassigned Route",
+      d.outletCode || "",
+      d.outletName || "Unknown Outlet",
+      d.toNo || "-",
+      d.storageType || "Dry",
+      d.itemCode || "",
+      d.description || "-",
+      d.assignedDriverName || "Unassigned",
+      d.assignedTruckPlate || "Unassigned",
+      req,
+      del,
+      rem,
+      (d.status || "pending").toUpperCase(),
+      d.remark || (d.isCarriedForward ? "Carried Forward" : "-")
+    ];
+
+    row.values = rowValues;
+
+    for (let c = 1; c <= 16; c++) {
+      const cell = row.getCell(c);
+      cell.border = getThinBorder(PALETTE.borderLight);
+      cell.font = { name: "Calibri", size: 10, color: { argb: `FF${PALETTE.textDark}` } };
+      cell.alignment = { vertical: "middle" };
+
+      if (isOdd) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.zebraOdd}` } };
+      }
+
+      // Center alignments
+      if ([1, 2, 4, 6, 7, 8, 15].includes(c)) {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+      }
+
+      // Numeric columns (Req Qty, Del Qty, Remaining Qty)
+      if (c === 12 || c === 13 || c === 14) {
+        cell.alignment = { vertical: "middle", horizontal: "right" };
+        cell.numFmt = "#,##0.00";
+      }
+
+      // Remaining Qty styling (Bold Amber)
+      if (c === 14) {
+        cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FFD97706" } };
+      }
+
+      // Status styling
+      if (c === 15) {
+        const st = String(d.status || "pending").toLowerCase();
+        if (st === "partial") {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDE68A" } }; // Amber light
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF92400E" } };
+        } else if (st === "pending") {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE2E2" } }; // Soft red/rose
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF991B1B" } };
+        }
+      }
+
+      // Storage Type coloring
+      if (c === 7) {
+        const stType = String(d.storageType || "").toUpperCase();
+        if (stType.includes("FROZEN") || stType.includes("FRZ")) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.iceBlue}` } };
+        } else if (stType.includes("CHILL")) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.peach}` } };
+        }
+      }
+    }
+  });
+
+  // Summary / Total Row
+  const summaryRowIndex = headerRowIndex + 1 + deliveries.length;
+  const sumRow = ws.getRow(summaryRowIndex);
+  sumRow.height = 24;
+
+  sumRow.getCell(5).value = "TOTAL PENDING:";
+  sumRow.getCell(12).value = totalReq;
+  sumRow.getCell(13).value = totalDel;
+  sumRow.getCell(14).value = totalRem;
+
+  for (let c = 1; c <= 16; c++) {
+    const cell = sumRow.getCell(c);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+    cell.border = {
+      top: { style: "thin", color: { argb: `FF${PALETTE.navyHeader}` } },
+      bottom: { style: "double", color: { argb: `FF${PALETTE.navyHeader}` } },
+      left: { style: "thin", color: { argb: `FF${PALETTE.borderLight}` } },
+      right: { style: "thin", color: { argb: `FF${PALETTE.borderLight}` } },
+    };
+    cell.font = { name: "Calibri", size: 10.5, bold: true, color: { argb: `FF${PALETTE.navyHeader}` } };
+    if ([12, 13, 14].includes(c)) {
+      cell.alignment = { vertical: "middle", horizontal: "right" };
+      cell.numFmt = "#,##0.00";
+    }
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filenamePrefix}_${new Date().toISOString().split("T")[0]}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
 

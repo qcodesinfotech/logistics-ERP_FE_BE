@@ -2317,6 +2317,8 @@ export const dispatchItems = pgTable("dispatch_items", {
   remark: text("remark"),
   grnNumber: text("grn_number"),
   overrideRouteId: varchar("override_route_id"),
+  carriedFromItemId: varchar("carried_from_item_id"),
+  carriedToItemId: varchar("carried_to_item_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

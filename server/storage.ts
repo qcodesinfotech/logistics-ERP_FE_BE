@@ -53,7 +53,7 @@ import {
 } from "@shared/schema";
 import { db, pool, ensureDriverTablesSchema } from "./db";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq, desc, and, sql, asc, or, ne, gt, gte, lte, ilike, count, isNull, inArray, type SQL } from "drizzle-orm";
+import { eq, desc, and, sql, asc, or, ne, gt, gte, lt, lte, ilike, count, isNull, isNotNull, inArray, type SQL } from "drizzle-orm";
 import * as schema from "@shared/schema";
 import { sendLeaveRequestNotification } from "./lib/email";
 import { type ScopeParams } from "./auth";
@@ -632,6 +632,7 @@ export interface IStorage {
   createUserActivityLog(data: InsertUserActivityLog): Promise<UserActivityLog>;
 
   // Dispatch Engine Automation
+  autoCarryForwardPendingDeliveries(sheetId: string): Promise<number>;
   autoAssignZoneTrucksToSheet(sheetId: string): Promise<void>;
   autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }>;
 
@@ -3431,6 +3432,13 @@ export class DatabaseStorage implements IStorage {
       .where(eq(dispatchTruckAssignments.sheetId, id));
     const truckAssignmentIds = existingTruckAssignments.map(ta => ta.id);
 
+    // If any items on this sheet were carried forward from previous sheets, reset the previous items' carriedToItemId
+    if (itemIds.length > 0) {
+      await db.update(dispatchItems)
+        .set({ carriedToItemId: null })
+        .where(inArray(dispatchItems.carriedToItemId, itemIds));
+    }
+
     // Delete dispatch deliveries
     if (itemIds.length > 0) {
       await db.delete(dispatchDeliveries)
@@ -3496,6 +3504,8 @@ export class DatabaseStorage implements IStorage {
 
   async getDispatchBoard(sheetId: string): Promise<any> {
     await ensureDriverTablesSchema();
+    // Auto-carry forward any pending deliveries from previous sheets to this sheet
+    await this.autoCarryForwardPendingDeliveries(sheetId);
     // Auto-sync any trucks assigned in Zonal Config to this sheet
     await this.autoAssignZoneTrucksToSheet(sheetId);
 
@@ -9059,6 +9069,158 @@ export class DatabaseStorage implements IStorage {
       .where(eq(dispatchOutletTruckAssignments.outletCode, outletCode));
   }
 
+  async autoCarryForwardPendingDeliveries(sheetId: string): Promise<number> {
+    try {
+      const [currentSheet] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.id, sheetId)).limit(1);
+      if (!currentSheet || !currentSheet.date) return 0;
+
+      // 1. Find previous active dispatch sheets before current sheet date
+      const sheetConditions = [lt(dispatchSheets.date, currentSheet.date)];
+      if (currentSheet.clientId) {
+        sheetConditions.push(eq(dispatchSheets.clientId, currentSheet.clientId));
+      }
+
+      const previousSheets = await db.select()
+        .from(dispatchSheets)
+        .where(and(...sheetConditions))
+        .orderBy(desc(dispatchSheets.date));
+
+      if (previousSheets.length === 0) return 0;
+      const prevSheetIds = previousSheets.map(s => s.id);
+      const prevSheetMap = new Map(previousSheets.map(s => [s.id, s]));
+
+      // 2. Fetch items from previous sheets that have not been carried forward yet
+      const prevItems = await db.select({
+        item: dispatchItems,
+        delivery: dispatchDeliveries,
+      })
+      .from(dispatchItems)
+      .leftJoin(dispatchDeliveries, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
+      .where(
+        and(
+          inArray(dispatchItems.sheetId, prevSheetIds),
+          isNull(dispatchItems.carriedToItemId)
+        )
+      );
+
+      if (prevItems.length === 0) return 0;
+
+      // 3. Find items already carried forward to current sheet to prevent duplicate insertion
+      const existingOnCurrent = await db.select({ carriedFromItemId: dispatchItems.carriedFromItemId })
+        .from(dispatchItems)
+        .where(
+          and(
+            eq(dispatchItems.sheetId, currentSheet.id),
+            isNotNull(dispatchItems.carriedFromItemId)
+          )
+        );
+      const alreadyCarriedSet = new Set(existingOnCurrent.map(i => i.carriedFromItemId).filter(Boolean));
+
+      // 4. Outlets mapping for resolving route and outlet IDs
+      const allOutlets = await db.select().from(outlets);
+      const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+      const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+      const outletCodeMap = new Map(allOutlets.map(o => [normalizeCode(o.code || ""), o]));
+
+      const itemsToInsert: any[] = [];
+
+      for (const row of prevItems) {
+        const item = row.item;
+        const delivery = row.delivery;
+
+        if (alreadyCarriedSet.has(item.id)) {
+          continue;
+        }
+
+        const reqQty = parseFloat(item.requestedQty || item.weight || "0");
+        if (reqQty <= 0) continue;
+
+        let remainingQty = reqQty;
+        let isPending = false;
+
+        if (!delivery) {
+          // Full outlet / full item pending - never touched
+          isPending = true;
+          remainingQty = reqQty;
+        } else if (delivery.status === "delivered") {
+          const delRem = parseFloat(delivery.remainingQty || "0");
+          if (delRem > 0) {
+            isPending = true;
+            remainingQty = delRem;
+          } else {
+            isPending = false;
+          }
+        } else if (["partial", "pending", "failed", "partially_delivered", "damaged"].includes(delivery.status)) {
+          isPending = true;
+          if (delivery.remainingQty && parseFloat(delivery.remainingQty) > 0) {
+            remainingQty = parseFloat(delivery.remainingQty);
+          } else if (delivery.deliveredQty && parseFloat(delivery.deliveredQty) > 0) {
+            remainingQty = Math.max(0, reqQty - parseFloat(delivery.deliveredQty));
+          } else {
+            remainingQty = reqQty;
+          }
+        }
+
+        if (isPending && remainingQty > 0) {
+          const outlet = (item.outletId ? outletMap.get(item.outletId) : null) || outletCodeMap.get(normalizeCode(item.outletCode));
+          const resolvedOutletId = outlet?.id || item.outletId || null;
+          const resolvedRouteId = outlet?.routeId || item.overrideRouteId || item.routeId || null;
+
+          let proportionateWeight: string | null = null;
+          if (item.weight && reqQty > 0) {
+            const origWeight = parseFloat(item.weight);
+            proportionateWeight = (origWeight * (remainingQty / reqQty)).toFixed(3);
+          }
+
+          const prevSheet = prevSheetMap.get(item.sheetId);
+          const dateStr = prevSheet ? prevSheet.date : "previous sheet";
+          const remark = `Carried forward from ${dateStr}${item.remark ? ` - ${item.remark}` : ""}`;
+
+          itemsToInsert.push({
+            sheetId: currentSheet.id,
+            outletCode: item.outletCode,
+            outletId: resolvedOutletId,
+            routeId: resolvedRouteId,
+            itemCode: item.itemCode,
+            description: item.description,
+            toNo: item.toNo,
+            lineNumber: item.lineNumber,
+            requestedDeliveryDate: item.requestedDeliveryDate,
+            storageType: item.storageType,
+            uom: item.uom,
+            fromOrg: item.fromOrg,
+            requestedQty: String(remainingQty),
+            weight: proportionateWeight,
+            totalDelivered: "0",
+            remaining: String(remainingQty),
+            remark,
+            grnNumber: item.grnNumber,
+            overrideRouteId: item.overrideRouteId,
+            carriedFromItemId: item.id,
+          });
+        }
+      }
+
+      if (itemsToInsert.length === 0) return 0;
+
+      const inserted = await db.insert(dispatchItems).values(itemsToInsert).returning();
+
+      // Link previous items with their downstream carried item ID
+      for (const ins of inserted) {
+        if (ins.carriedFromItemId) {
+          await db.update(dispatchItems)
+            .set({ carriedToItemId: ins.id })
+            .where(eq(dispatchItems.id, ins.carriedFromItemId));
+        }
+      }
+
+      return inserted.length;
+    } catch (error) {
+      console.error("autoCarryForwardPendingDeliveries error:", error);
+      return 0;
+    }
+  }
+
   async autoAssignZoneTrucksToSheet(sheetId: string): Promise<void> {
     try {
       // 1. Get all dispatch items for this sheet
@@ -9240,7 +9402,38 @@ export class DatabaseStorage implements IStorage {
     const vehicles = await db.select().from(schema.vehicles);
     const users = await db.select().from(schema.users);
     
-    const mapped = results.map(r => {
+    // Check if any carried-forward downstream items have already been completed
+    const downstreamIds = results.map(r => r.item.carriedToItemId).filter(Boolean) as string[];
+    let downstreamDeliveredSet = new Set<string>();
+    if (downstreamIds.length > 0) {
+      const downstreamDeliveries = await db.select({
+        dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
+        status: schema.dispatchDeliveries.status,
+        remainingQty: schema.dispatchDeliveries.remainingQty
+      })
+      .from(schema.dispatchDeliveries)
+      .where(
+        and(
+          inArray(schema.dispatchDeliveries.dispatchItemId, downstreamIds),
+          eq(schema.dispatchDeliveries.status, "delivered")
+        )
+      );
+      downstreamDeliveredSet = new Set(
+        downstreamDeliveries
+          .filter(d => parseFloat(d.remainingQty || "0") === 0)
+          .map(d => d.dispatchItemId)
+      );
+    }
+
+    const filteredResults = results.filter(r => {
+      // If carried forward and downstream item is delivered, this past item is fulfilled!
+      if (r.item.carriedToItemId && downstreamDeliveredSet.has(r.item.carriedToItemId)) {
+        return false;
+      }
+      return true;
+    });
+
+    const mapped = filteredResults.map(r => {
       const outletCode = r.outlet?.code || r.item.outletCode;
       const sheetId = r.sheet.id;
       const st = r.item.storageType;
@@ -9266,14 +9459,22 @@ export class DatabaseStorage implements IStorage {
         ...r.delivery,
         id: r.delivery?.id || r.item.id,
         dispatchItemId: r.item.id,
+        toNo: r.item.toNo || null,
         date: r.sheet.date,
         sheetId: r.sheet.id,
         itemCode: r.item.itemCode,
         description: r.item.description,
         requestedQty: r.item.requestedQty,
+        deliveredQty: r.delivery?.deliveredQty || r.item.totalDelivered || "0",
+        remainingQty: r.delivery?.remainingQty || r.item.remaining || null,
         weight: r.item.weight,
         storageType: r.item.storageType,
         uom: r.item.uom,
+        status: r.delivery?.status || "pending",
+        remark: r.delivery?.remark || r.item.remark || null,
+        carriedFromItemId: r.item.carriedFromItemId || null,
+        carriedToItemId: r.item.carriedToItemId || null,
+        isCarriedForward: !!r.item.carriedFromItemId,
         zoneName: r.route?.name || "Unassigned Route",
         outletName: r.outlet?.name || "Unknown Outlet",
         outletCode: r.outlet?.code || r.item.outletCode || "Unknown",
