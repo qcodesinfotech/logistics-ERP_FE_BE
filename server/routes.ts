@@ -10655,10 +10655,10 @@ export async function registerRoutes(
       const [sheetRow] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, sheetId));
       const sheetDate = sheetRow?.date ? formatToDDMMYYYY(sheetRow.date) : "Today";
 
-      // 3. Fetch completed deliveries matching this sheet and route
-      const deliveriesQuery = await db.select({
+      // 3. Fetch deliveries matching this sheet and route
+      const allItemsQuery = await db.select({
         id: schema.dispatchDeliveries.id,
-        dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
+        dispatchItemId: schema.dispatchItems.id,
         driverId: schema.dispatchDeliveries.driverId,
         outletId: schema.dispatchItems.outletId,
         deliveredQty: schema.dispatchDeliveries.deliveredQty,
@@ -10676,8 +10676,8 @@ export async function registerRoutes(
         uom: schema.dispatchItems.uom,
         toNo: schema.dispatchItems.toNo,
       })
-      .from(schema.dispatchDeliveries)
-      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+      .from(schema.dispatchItems)
+      .leftJoin(schema.dispatchDeliveries, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
       .where(
         and(
           eq(schema.dispatchItems.sheetId, sheetId),
@@ -10688,9 +10688,17 @@ export async function registerRoutes(
         )
       );
 
-      if (deliveriesQuery.length === 0) {
-        return res.status(404).json({ error: "No completed deliveries found for this route." });
+      // Find items that have delivery activity
+      const deliveredItems = allItemsQuery.filter(r => r.id && r.status !== "pending" && (parseFloat(r.deliveredQty || "0") > 0 || !!r.podUrl || r.status === "delivered" || r.status === "partial"));
+      if (deliveredItems.length === 0) {
+        return res.status(404).json({ error: "No completed or partial deliveries found for this route." });
       }
+
+      const activeOutletIds = new Set(deliveredItems.map(r => r.outletId).filter(Boolean) as string[]);
+      const activeToNos = new Set(deliveredItems.map(r => r.toNo || "N/A"));
+
+      // Include all items belonging to active TOs / outlets
+      const deliveriesQuery = allItemsQuery.filter(r => r.outletId && activeOutletIds.has(r.outletId) && activeToNos.has(r.toNo || "N/A"));
 
       // Group deliveries by Outlet + Storage Type
       const grouped: Record<string, any> = {};
@@ -10698,7 +10706,7 @@ export async function registerRoutes(
 
       for (const row of deliveriesQuery) {
         const outletId = row.outletId || "unknown";
-        if (row.outletId && row.status !== "pending") {
+        if (row.outletId) {
           outletIds.add(row.outletId);
         }
         
@@ -10716,10 +10724,24 @@ export async function registerRoutes(
             items: [],
           };
         }
+        if (row.deliveredAt && !grouped[groupKey].deliveredAt) {
+          grouped[groupKey].deliveredAt = row.deliveredAt;
+          grouped[groupKey].deliveryTime = row.deliveryTime;
+        }
+        if (row.remark && !grouped[groupKey].remark) {
+          grouped[groupKey].remark = row.remark;
+        }
+        if (row.podUrl) {
+          row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach((url: string) => {
+            if (!grouped[groupKey].podUrls.includes(url)) {
+              grouped[groupKey].podUrls.push(url);
+            }
+          });
+        }
         grouped[groupKey].items.push(row);
       }
 
-      // Filter out groups that have no visited items (meaning they are completely pending)
+      // Filter out groups that have no visited items
       for (const key of Object.keys(grouped)) {
         if (!outletIds.has(grouped[key].outletId)) {
           delete grouped[key];
@@ -10804,7 +10826,7 @@ export async function registerRoutes(
         doc.text(del.storageType, 200, y, { width: 110 });
         doc.text(`${del.deliveryTime || "Recorded"}`, 320, y, { width: 110 });
         
-        const allCompleted = del.items.every((it: any) => it.status === "delivered");
+        const allCompleted = del.items.length > 0 && del.items.every((it: any) => it.status === "delivered" && parseFloat(it.deliveredQty || "0") >= parseFloat(it.requestedQty || it.weight || "0") && parseFloat(it.remainingQty || "0") === 0);
         const statusLabel = allCompleted ? "COMPLETED" : "FAILED / PARTIAL";
         doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 440, y, { width: 100 });
 
@@ -10992,10 +11014,10 @@ export async function registerRoutes(
         }
       }
 
-      // Fetch completed deliveries matching this outlet and storageType
-      const deliveriesQuery = await db.select({
+      // Fetch all items matching this outlet and storageType, left joined with deliveries
+      const allItemsQuery = await db.select({
         id: schema.dispatchDeliveries.id,
-        dispatchItemId: schema.dispatchDeliveries.dispatchItemId,
+        dispatchItemId: schema.dispatchItems.id,
         driverId: schema.dispatchDeliveries.driverId,
         outletId: schema.dispatchItems.outletId,
         deliveredQty: schema.dispatchDeliveries.deliveredQty,
@@ -11020,22 +11042,29 @@ export async function registerRoutes(
         overrideRouteId: schema.dispatchItems.overrideRouteId,
         toNo: schema.dispatchItems.toNo,
       })
-      .from(schema.dispatchDeliveries)
-      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+      .from(schema.dispatchItems)
+      .leftJoin(schema.dispatchDeliveries, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
       .where(and(...conditions));
 
-      if (deliveriesQuery.length === 0) {
-        return res.status(404).json({ error: "No completed delivery items found." });
+      const deliveredItems = allItemsQuery.filter(it => it.id && it.status !== "pending" && (parseFloat(it.deliveredQty || "0") > 0 || !!it.podUrl || it.status === "delivered" || it.status === "partial"));
+
+      if (deliveredItems.length === 0 && allItemsQuery.every(it => !it.id || it.status === "pending")) {
+        return res.status(404).json({ error: "No completed or partial delivery items found." });
       }
 
-      const activeRouteId = deliveriesQuery[0].overrideRouteId || deliveriesQuery[0].routeId;
+      // Group by TO Number. Include TOs that have delivery activity (or all items for the outlet if any delivery exists)
+      const activeToNos = new Set(deliveredItems.map(it => it.toNo || "N/A"));
+      const itemsToReport = activeToNos.size > 0 
+        ? allItemsQuery.filter(it => activeToNos.has(it.toNo || "N/A"))
+        : allItemsQuery;
+
+      const firstRow = deliveredItems[0] || itemsToReport[0];
+      const activeRouteId = firstRow.overrideRouteId || firstRow.routeId;
       let routeName = "N/A";
       if (activeRouteId) {
         const [routeRow] = await db.select().from(schema.routes).where(eq(schema.routes.id, activeRouteId));
         routeName = routeRow?.name || "Route Assignment";
       }
-
-      const firstRow = deliveriesQuery[0];
       
       // Fetch all completed deliveries matching this outlet and sheet (regardless of storageType) to get ALL attachments
       const allDeliveriesQuery = await db.select({
@@ -11071,8 +11100,8 @@ export async function registerRoutes(
       const includeAttachments = req.query.includeAttachments !== 'false';
 
       // Group items by TO Number
-      const groupedByTo: Record<string, typeof deliveriesQuery> = {};
-      for (const it of deliveriesQuery) {
+      const groupedByTo: Record<string, typeof itemsToReport> = {};
+      for (const it of itemsToReport) {
         const toNo = it.toNo || "N/A";
         if (!groupedByTo[toNo]) {
           groupedByTo[toNo] = [];
@@ -11096,6 +11125,16 @@ export async function registerRoutes(
           ["frozen", "chilled", "assorted"].includes(st.trim().toLowerCase())
         );
 
+        let toTotalOrdered = 0;
+        let toTotalDelivered = 0;
+        for (const it of items) {
+          toTotalOrdered += parseFloat(it.requestedQty || it.weight || "0");
+          toTotalDelivered += parseFloat(it.deliveredQty || "0");
+        }
+
+        const toDeliveredRows = items.filter((it: any) => it.deliveredAt);
+        const toFirstRow = toDeliveredRows[0] || firstRow;
+
         doc.fillColor("#1F2937").fontSize(10);
         let currentY = doc.y;
         doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, currentY);
@@ -11103,22 +11142,26 @@ export async function registerRoutes(
         
         currentY += 15;
         doc.text(`Route: ${routeName}`, 40, currentY);
-        doc.text(`Delivery Date: ${firstRow.deliveredAt ? formatToDDMMYYYY(firstRow.deliveredAt) : "Today"}`, 300, currentY);
+        doc.text(`Delivery Date: ${toFirstRow?.deliveredAt ? formatToDDMMYYYY(toFirstRow.deliveredAt) : (firstRow?.deliveredAt ? formatToDDMMYYYY(firstRow.deliveredAt) : "Today")}`, 300, currentY);
         
         currentY += 15;
-        doc.text(`Delivery Time: ${firstRow.deliveryTime || "N/A"}`, 40, currentY);
+        doc.text(`Delivery Time: ${toFirstRow?.deliveryTime || firstRow?.deliveryTime || "N/A"}`, 40, currentY);
         if (requiresTemp) {
-          doc.text(`Temperature: ${firstRow.temperature || "N/A"}`, 300, currentY);
+          doc.text(`Temperature: ${toFirstRow?.temperature || firstRow?.temperature || "N/A"}`, 300, currentY);
           
           currentY += 15;
-          const startTimeStr = firstRow.deliveryStartTime ? new Date(firstRow.deliveryStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
-          const endTimeStr = firstRow.deliveryEndTime ? new Date(firstRow.deliveryEndTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
+          const rawStartTime = toFirstRow?.deliveryStartTime || firstRow?.deliveryStartTime;
+          const rawEndTime = toFirstRow?.deliveryEndTime || firstRow?.deliveryEndTime;
+          const startTimeStr = rawStartTime ? new Date(rawStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
+          const endTimeStr = rawEndTime ? new Date(rawEndTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
           doc.text(`Delivery Start Time: ${startTimeStr}`, 40, currentY);
           doc.text(`Delivery End Time: ${endTimeStr}`, 300, currentY);
         }
         
         currentY += 15;
-        doc.text(`Remarks: ${firstRow.remark || "None"}`, 40, currentY);
+        const defaultRemark = toTotalDelivered < toTotalOrdered ? "Partially Delivered" : "Delivered successfully";
+        const remarkText = toFirstRow?.remark || firstRow?.remark || defaultRemark;
+        doc.text(`Remarks: ${remarkText}`, 40, currentY);
         
         doc.y = currentY + 15;
         doc.moveDown(1);

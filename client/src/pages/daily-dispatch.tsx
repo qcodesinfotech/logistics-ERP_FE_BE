@@ -397,11 +397,14 @@ function OutletCard({
   const isToday = selectedDate === format(new Date(), "yyyy-MM-dd");
   const isFuture = selectedDate > format(new Date(), "yyyy-MM-dd");
   const [expanded, setExpanded] = useState(false);
-  const delivered = outlet.items.filter((i: DispatchItem) => i.delivery?.status === "delivered").length;
+  const delivered = outlet.items.filter((i: DispatchItem) => i.delivery?.status === "delivered" && parseFloat(i.delivery?.remainingQty || "0") === 0).length;
   const total = outlet.items.length;
   const allDone = delivered === total && total > 0;
-  const anyPartial = outlet.items.some((i: DispatchItem) => i.delivery?.status === "partial" || i.delivery?.status === "partially_delivered" || i.delivery?.status === "damaged");
-  const isOutletComplete = total > 0 && outlet.items.every((i: DispatchItem) => (i.delivery?.status || "pending") !== "pending");
+  const hasSomeDelivered = outlet.items.some((i: DispatchItem) => i.delivery?.status === "delivered" || parseFloat(i.delivery?.deliveredQty || "0") > 0);
+  const hasSomePending = outlet.items.some((i: DispatchItem) => (i.delivery?.status || "pending") === "pending" || parseFloat(i.delivery?.remainingQty || "0") > 0);
+  const anyItemPartial = outlet.items.some((i: DispatchItem) => i.delivery?.status === "partial" || i.delivery?.status === "partially_delivered" || i.delivery?.status === "damaged");
+  const isOutletPartial = anyItemPartial || (hasSomeDelivered && hasSomePending);
+  const isOutletComplete = allDone;
 
   const totalQty = outlet.items.reduce((sum: number, item: DispatchItem) => sum + parseFloat(item.requestedQty || item.weight || "0"), 0);
   const formattedQty = totalQty % 1 === 0 ? totalQty.toFixed(0) : totalQty.toFixed(1);
@@ -418,21 +421,25 @@ function OutletCard({
 
   const totalDNs = toNoMap.size;
   let deliveredDNs = 0;
+  let partialDNs = 0;
   for (const [_, dnItems] of Array.from(toNoMap.entries())) {
-    const allDone = dnItems.every((i: DispatchItem) => (i.delivery?.status || "pending") !== "pending");
-    if (allDone) {
+    const dnAllDone = dnItems.length > 0 && dnItems.every((i: DispatchItem) => i.delivery?.status === "delivered" && parseFloat(i.delivery?.remainingQty || "0") === 0);
+    const dnSomeDelivered = dnItems.some((i: DispatchItem) => i.delivery?.status === "delivered" || parseFloat(i.delivery?.deliveredQty || "0") > 0);
+    if (dnAllDone) {
       deliveredDNs++;
+    } else if (dnSomeDelivered) {
+      partialDNs++;
     }
   }
 
   return (
-    <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : anyPartial ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
+    <div className={`rounded-xl border ${allDone ? "border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20" : isOutletPartial ? "border-amber-300 bg-amber-50/40 dark:bg-amber-950/20" : "border-border bg-card"} shadow-sm`}>
       <div className="p-3 cursor-pointer space-y-2.5" onClick={() => { setExpanded(e => !e); if (onSelect) onSelect(); }}>
         {/* Row 1: Icon + Name + Chevron */}
         <div className="flex items-center justify-between gap-2 min-w-0">
           <div className="flex items-center gap-2 min-w-0">
-            <div className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 ${allDone ? "bg-emerald-100" : "bg-primary/10"}`}>
-              <MapPin className={`h-4 w-4 ${allDone ? "text-emerald-600" : "text-primary"}`} />
+            <div className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 ${allDone ? "bg-emerald-100" : isOutletPartial ? "bg-amber-100" : "bg-primary/10"}`}>
+              <MapPin className={`h-4 w-4 ${allDone ? "text-emerald-600" : isOutletPartial ? "text-amber-600" : "text-primary"}`} />
             </div>
             <p className="font-semibold text-sm break-words whitespace-normal text-slate-800 dark:text-slate-200">
               {outlet.outletName}
@@ -459,13 +466,16 @@ function OutletCard({
 
         {/* Row 3: Metrics (Qty, Progress, Override, Move) */}
         <div className="flex flex-wrap items-center justify-between gap-2 pl-9 pt-1.5 border-t border-slate-100/50 mt-1.5">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {outlet.isOverridden && (
               <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 text-[10px] h-4 px-1 font-normal">Override</Badge>
             )}
             <Badge variant="outline" className="text-[10px] h-5 bg-primary/5 text-primary border-primary/20 font-semibold">Qty: {formattedQty}</Badge>
-            <Badge variant="outline" className="text-[10px] h-5 bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">DNs: {deliveredDNs}/{totalDNs}</Badge>
+            <Badge variant="outline" className="text-[10px] h-5 bg-indigo-50 text-indigo-700 border-indigo-200 font-medium">DNs: {deliveredDNs}/{totalDNs}{partialDNs > 0 ? ` (${partialDNs} partial)` : ""}</Badge>
             <Badge variant="outline" className="text-[10px] h-5 bg-slate-100 text-slate-700 border-slate-200 font-medium">Items: {delivered}/{total}</Badge>
+            {isOutletPartial && (
+              <Badge variant="outline" className="text-[10px] h-5 bg-amber-100 text-amber-700 border-amber-300 font-medium">Partial</Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-1">
@@ -640,7 +650,7 @@ const getCompletedDeliveryNotesCount = (outletsList: any[]) => {
 
   let completedCount = 0;
   for (const [_, dnItems] of Array.from(toNoMap.entries())) {
-    const allDone = dnItems.every(i => (i.delivery?.status || "pending") !== "pending");
+    const allDone = dnItems.length > 0 && dnItems.every(i => i.delivery?.status === "delivered" && parseFloat(i.delivery?.remainingQty || "0") === 0);
     if (allDone) {
       completedCount++;
     }
@@ -945,7 +955,7 @@ function ZoneColumn({
   const initialCompletionPercentage = initialTotalQty > 0 ? Math.round((initialDeliveredQty / initialTotalQty) * 100) : 0;
 
   const initialCompletedOutletsCount = initialOutlets.filter(o =>
-    o.items.length > 0 && o.items.every(i => (i.delivery?.status || "pending") !== "pending")
+    o.items.length > 0 && o.items.every(i => i.delivery?.status === "delivered" && parseFloat(i.delivery?.remainingQty || "0") === 0)
   ).length;
 
   const formattedInitialTotalQty = initialTotalQty % 1 === 0 ? initialTotalQty.toFixed(0) : initialTotalQty.toFixed(1);
@@ -2230,8 +2240,11 @@ export default function DailyDispatchPage() {
 
         totalOutletsSet.add(outletKey);
 
-        let hasPending = false;
-        let hasPartial = false;
+        let outletHasPending = false;
+        let outletHasPartial = false;
+        let outletHasDelivered = false;
+        let outletDeliveredQty = 0;
+        let outletPendingQty = 0;
 
         o.items.forEach(item => {
           const req = parseFloat(item.requestedQty || item.weight || "0");
@@ -2240,11 +2253,14 @@ export default function DailyDispatchPage() {
 
           totalQtyAssigned += req;
           completedQty += del;
+          outletDeliveredQty += del;
 
           if (status === "pending") {
-            hasPending = true;
+            outletHasPending = true;
           } else if (status === "partial" || status === "partially_delivered" || status === "damaged") {
-            hasPartial = true;
+            outletHasPartial = true;
+          } else if (status === "delivered") {
+            outletHasDelivered = true;
           }
 
           // Calculate remaining quantity
@@ -2253,6 +2269,7 @@ export default function DailyDispatchPage() {
             rem = req - del;
           }
           pendingQty += rem;
+          outletPendingQty += rem;
 
           // Group by DN (Transfer Order number `toNo` or fallback)
           const dnKey = item.toNo ? String(item.toNo) : `fallback-${item.id || item.itemCode}`;
@@ -2262,10 +2279,13 @@ export default function DailyDispatchPage() {
           dnItemsMap.get(dnKey)!.push(item);
         });
 
-        if (hasPending) {
+        // Outlet is partial if an item is partial, or if some items/qty are delivered while others are still pending
+        const isOutletPartial = outletHasPartial || ((outletHasDelivered || outletDeliveredQty > 0) && (outletHasPending || outletPendingQty > 0));
+
+        if (outletHasPending || outletPendingQty > 0) {
           pendingOutletsSet.add(outletKey);
         }
-        if (hasPartial) {
+        if (isOutletPartial) {
           partialOutletsSet.add(outletKey);
         }
       });
@@ -2274,7 +2294,11 @@ export default function DailyDispatchPage() {
     const totalDNs = dnItemsMap.size;
     let completedDNs = 0;
     for (const [_, itemsList] of Array.from(dnItemsMap.entries())) {
-      const allDone = itemsList.every(i => (i.delivery?.status || "pending") !== "pending");
+      const allDone = itemsList.length > 0 && itemsList.every(i => {
+        const status = i.delivery?.status || "pending";
+        const rem = parseFloat(i.delivery?.remainingQty || "0");
+        return status === "delivered" && rem === 0;
+      });
       if (allDone) {
         completedDNs++;
       }
@@ -3152,10 +3176,30 @@ export default function DailyDispatchPage() {
                           }
                         }
 
+                        const isOutletPartial = outlet.items.some(i => i.delivery?.status === "partial" || i.delivery?.status === "partially_delivered" || i.delivery?.status === "damaged") || (outlet.items.some(i => i.delivery?.status === "delivered" || parseFloat(i.delivery?.deliveredQty || "0") > 0) && outlet.items.some(i => (i.delivery?.status || "pending") === "pending" || parseFloat(i.delivery?.remainingQty || "0") > 0));
+                        const isOutletDelivered = outlet.items.length > 0 && outlet.items.every(i => i.delivery?.status === "delivered" && parseFloat(i.delivery?.remainingQty || "0") === 0);
+                        const isOutletPending = outlet.items.some(i => (i.delivery?.status || "pending") === "pending" || parseFloat(i.delivery?.remainingQty || "0") > 0);
+
+                        if (boardStatusFilter === "partial" && !isOutletPartial) {
+                          return null;
+                        }
+                        if (boardStatusFilter === "delivered" && !isOutletDelivered) {
+                          return null;
+                        }
+                        if (boardStatusFilter === "pending" && !isOutletPending) {
+                          return null;
+                        }
+
                         const filteredItems = outlet.items.filter(item => {
+                          if (boardStatusFilter === "all" || boardStatusFilter === "partial") return true;
                           let status = item.delivery?.status || "pending";
                           if (status === "partially_delivered") status = "partial";
-                          if (boardStatusFilter !== "all" && status !== boardStatusFilter) return false;
+                          if (boardStatusFilter === "pending") {
+                            return status === "pending" || parseFloat(item.delivery?.remainingQty || "0") > 0;
+                          }
+                          if (boardStatusFilter === "delivered") {
+                            return status === "delivered" && parseFloat(item.delivery?.remainingQty || "0") === 0;
+                          }
                           return true;
                         });
 
