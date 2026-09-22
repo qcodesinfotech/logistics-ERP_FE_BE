@@ -3732,8 +3732,16 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    const arabianDeliveryTime = deliveryData.deliveryTime || new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Riyadh",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    }).format(new Date());
+
     const finalDeliveryData = {
       ...deliveryData,
+      deliveryTime: arabianDeliveryTime,
       outletId: resolvedOutletId,
       deliveryStartTime: deliveryData.deliveryStartTime ? new Date(deliveryData.deliveryStartTime) : undefined,
       deliveryEndTime: deliveryData.deliveryEndTime ? new Date(deliveryData.deliveryEndTime) : undefined,

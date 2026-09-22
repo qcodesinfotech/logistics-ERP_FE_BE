@@ -7611,12 +7611,37 @@ export async function registerRoutes(
         }
       });
 
+      // Auto-register any new outlets found in the uploaded sheet for this client
+      for (const row of items) {
+        const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
+        const rawCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
+        const norm = normalizeOutletCode(rawCode);
+        if (norm && !outletCodeMap.has(norm)) {
+          const outletName = rawDesc || `Outlet ${rawCode}`;
+          try {
+            const [newOutlet] = await db.insert(schema.outlets).values({
+              code: rawCode,
+              name: outletName,
+              clientId: clientId || null,
+              status: "active"
+            }).returning();
+            if (newOutlet) {
+              outletCodeMap.set(norm, newOutlet);
+              outletNameMap.set(outletName.toLowerCase(), newOutlet);
+            }
+          } catch {
+            // Safe ignore in case of race condition
+          }
+        }
+      }
+
       const resolvedItems = items
         .map((row: any) => {
-          const rowCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
-          const outletDesc = (row.to_sub_desc || row.outlet_desc || row.outlet_name || "").trim().toLowerCase();
+          const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
+          const rowCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
+          const outletDesc = rawDesc.toLowerCase();
           const outlet = outletCodeMap.get(normalizeOutletCode(rowCode)) || (outletDesc ? outletNameMap.get(outletDesc) : null);
-          const itemCode = String(row.item_number || row.item_code || row.itemCode || "");
+          const itemCode = String(row.item_code || row.item_number || row.itemCode || row.product_code || row.product || row.sku || "").trim();
           
           let description = row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || null;
           
@@ -10642,10 +10667,7 @@ export async function registerRoutes(
     if (!dateVal) return "Today";
     const d = new Date(dateVal);
     if (isNaN(d.getTime())) return String(dateVal);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
   };
 
   app.get("/api/reports/route-pod-pdf", async (req: Request, res) => {
@@ -10790,7 +10812,8 @@ export async function registerRoutes(
       doc.fillColor("#1F2937").fontSize(10);
       doc.text(`Route Name: ${routeName}`, 40, doc.y);
       doc.text(`Sheet Date: ${sheetDate}`, 300, doc.y - 12);
-      doc.text(`Generated At: ${formatToDDMMYYYY(new Date())} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`, 40, doc.y + 6);
+      const genTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date());
+      doc.text(`Generated At: ${formatToDDMMYYYY(new Date())} ${genTimeStr} (AST)`, 40, doc.y + 6);
       doc.moveDown(2);
 
       // Horizontal separator line
@@ -11162,8 +11185,8 @@ export async function registerRoutes(
           currentY += 15;
           const rawStartTime = toFirstRow?.deliveryStartTime || firstRow?.deliveryStartTime;
           const rawEndTime = toFirstRow?.deliveryEndTime || firstRow?.deliveryEndTime;
-          const startTimeStr = rawStartTime ? new Date(rawStartTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
-          const endTimeStr = rawEndTime ? new Date(rawEndTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "N/A";
+          const startTimeStr = rawStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawStartTime)) : "N/A";
+          const endTimeStr = rawEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawEndTime)) : "N/A";
           doc.text(`Delivery Start Time: ${startTimeStr}`, 40, currentY);
           doc.text(`Delivery End Time: ${endTimeStr}`, 300, currentY);
         }

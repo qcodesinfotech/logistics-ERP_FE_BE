@@ -91,29 +91,107 @@ interface Driver { id: string; name: string; status: string; }
 interface Zone { id: string; name: string; }
 
 // ===== CSV Parser =====
+// ===== Header Normalization for Multi-Client CSV/Excel Files =====
+function normalizeDispatchHeader(h: string): string {
+  const lower = (h || "").toLowerCase().trim().replace(/[\s\-_.]+/g, "_");
+
+  // Outlet / Customer / Store / Branch Code
+  if (
+    (lower.includes("outlet") && lower.includes("code")) ||
+    (lower.includes("customer") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
+    (lower.includes("cust") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
+    (lower.includes("account") && (lower.includes("code") || lower.includes("no") || lower.includes("num"))) ||
+    (lower.includes("acc") && (lower.includes("code") || lower.includes("no"))) ||
+    (lower.includes("store") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("branch") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("party") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("ship_to") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    lower.includes("to_sub_code") || lower.includes("sub_code") ||
+    lower === "outlet_code" || lower === "customer_code" || lower === "store_code" || lower === "branch_code" ||
+    lower === "outlet" || lower === "customer" || lower === "store" || lower === "branch" || lower === "shipto"
+  ) {
+    return "outlet_code";
+  }
+
+  // Outlet / Customer Name / Description
+  if (
+    lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") ||
+    lower.includes("outlet_name") || lower.includes("customer_name") || lower.includes("cust_name") ||
+    lower.includes("store_name") || lower.includes("branch_name") || lower.includes("party_name") ||
+    lower.includes("ship_to_name") || (lower.includes("to") && lower.includes("desc"))
+  ) {
+    return "to_sub_desc";
+  }
+
+  // Item / Product / SKU / Material Code
+  if (
+    (lower.includes("item") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
+    (lower.includes("product") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
+    (lower.includes("material") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
+    (lower.includes("sku") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    lower.includes("item_number") || lower.includes("part_no") || lower.includes("part_num") ||
+    lower === "item_code" || lower === "product_code" || lower === "item" || lower === "product" || lower === "material" || lower === "sku" || lower === "code"
+  ) {
+    return "item_code";
+  }
+
+  // Item / Product Description / Name
+  if (
+    (lower.includes("item") && lower.includes("desc")) ||
+    (lower.includes("product") && lower.includes("desc")) ||
+    (lower.includes("material") && lower.includes("desc")) ||
+    lower.includes("item_name") || lower.includes("product_name") || lower.includes("material_name") ||
+    lower === "description" || lower === "desc" || lower === "item_description" || lower === "product_description"
+  ) {
+    return "description";
+  }
+
+  // Quantity / Weight
+  if (lower.includes("fus") && lower.includes("requested") && lower.includes("qty")) return "fus_requested_qty";
+  if (lower.includes("validation") && (lower.includes("qty") || lower.includes("quantity"))) return "weight";
+  if (lower.includes("total") && (lower.includes("qty") || lower.includes("quantity"))) return "total_qty_col";
+  if (
+    (lower.includes("order") && (lower.includes("qty") || lower.includes("quantity"))) ||
+    (lower.includes("requested") && (lower.includes("qty") || lower.includes("quantity"))) ||
+    (lower.includes("delivery") && (lower.includes("qty") || lower.includes("quantity"))) ||
+    lower.includes("qty") || lower.includes("quantity") || lower.includes("weight") ||
+    lower.includes("pieces") || lower.includes("units") || lower.includes("cases") || lower.includes("cartons")
+  ) {
+    return "weight";
+  }
+
+  // TO / Delivery Note / Invoice Number
+  if (
+    lower.includes("to_no") || lower.includes("to_number") || lower === "to" ||
+    lower.includes("delivery_note") || lower.includes("dn_no") || lower.includes("dn_number") || lower === "dn" ||
+    lower.includes("invoice") || lower.includes("inv_no") || lower.includes("do_no") || lower.includes("order_no")
+  ) {
+    return "to_no";
+  }
+
+  // Storage Type / Temperature Class
+  if (lower.includes("storage") || lower.includes("temperature") || lower.includes("temp_class") || lower === "temp") {
+    return "storage_type";
+  }
+
+  // UOM
+  if (lower.includes("uom") || lower.includes("unit_of_measure") || lower === "unit") {
+    return "uom";
+  }
+
+  if (lower === "remaining") return "remaining";
+  if (lower.includes("remark")) return "remark";
+  if (lower.includes("grn")) return "grn_number";
+  if (lower.includes("delivery") && lower.includes("date")) return "requested_delivery_date";
+
+  return lower;
+}
+
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length < 2) return [];
-  const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
-  // Normalize common header variants
-  const normalize = (h: string) => {
-    if (h.includes("outlet") && h.includes("code")) return "outlet_code";
-    if (h.includes("item") && h.includes("code")) return "item_code";
-    if (h.includes("sub_desc") || h.includes("outlet_desc") || h.includes("customer_desc") || h.includes("outlet_name") || h.includes("customer_name") || (h.includes("to") && h.includes("desc"))) {
-      return "to_sub_desc";
-    }
-    if (h.includes("desc")) return "description";
-    if (h.includes("name") && (h.includes("item") || h.includes("product"))) return "description";
-    if (h.includes("validation") && (h.includes("qty") || h.includes("quantity"))) return "weight";
-    if (h.includes("total") && (h.includes("qty") || h.includes("quantity"))) return "total_qty_col";
-    if (h.includes("qty") && !h.includes("fus")) return "weight"; // Fallback for old format
-    if (h === "remaining") return "remaining";
-    if (h.includes("remark")) return "remark";
-    if (h.includes("grn")) return "grn_number";
-    if (h.includes("requested") && h.includes("delivery") && h.includes("date")) return "requested_delivery_date";
-    return h;
-  };
-  const headers = rawHeaders.map(normalize);
+  const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+  const headers = rawHeaders.map(normalizeDispatchHeader);
   return lines.slice(1).map(line => {
     const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
     const row: Record<string, string> = {};
@@ -2422,12 +2500,19 @@ export default function DailyDispatchPage() {
     onSuccess: async (res) => {
       const result = await res.json();
       toast({ title: `Sheet uploaded! ${result.itemCount} items loaded.` });
-      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
       setCsvPreview(null);
       setSkippedRowsInfo(null);
       setCsvFileName("");
-      setActiveTab("board");
+      
+      // Keep date and client selection aligned with the newly uploaded sheet
+      setSelectedDate(uploadDate);
+      if (uploadClientId) {
+        setBoardClientId(uploadClientId);
+        localStorage.setItem("dispatchBoardClientId", uploadClientId);
+      }
       setBoardSheetId(result.sheet.id);
+      setActiveTab("board");
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -2638,26 +2723,8 @@ export default function DailyDispatchPage() {
 
           if (rawJson.length > 0) {
             const rawHeaders = Object.keys(rawJson[0]);
-            const normalize = (h: string) => {
-              const lower = h.toLowerCase().replace(/\s+/g, "_");
-              if (lower.includes("outlet") && lower.includes("code")) return "outlet_code";
-              if (lower.includes("item") && lower.includes("code")) return "item_code";
-              if (lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") || lower.includes("outlet_name") || lower.includes("customer_name") || (lower.includes("to") && lower.includes("desc"))) {
-                return "to_sub_desc";
-              }
-              if (lower.includes("desc")) return "description";
-              if (lower.includes("name") && (lower.includes("item") || lower.includes("product"))) return "description";
-              if (lower.includes("validation") && (lower.includes("qty") || lower.includes("quantity"))) return "weight";
-              if (lower.includes("total") && (lower.includes("qty") || lower.includes("quantity"))) return "total_qty_col";
-              if (lower.includes("qty") && !lower.includes("fus")) return "weight";
-              if (lower === "remaining") return "remaining";
-              if (lower.includes("remark")) return "remark";
-              if (lower.includes("grn")) return "grn_number";
-              if (lower.includes("requested") && lower.includes("delivery") && lower.includes("date")) return "requested_delivery_date";
-              return lower;
-            };
             const headerMap = new Map();
-            rawHeaders.forEach(h => headerMap.set(h, normalize(h)));
+            rawHeaders.forEach(h => headerMap.set(h, normalizeDispatchHeader(h)));
 
             const sheetParsed = rawJson.map(row => {
               const newRow: Record<string, string> = {};
@@ -2665,7 +2732,8 @@ export default function DailyDispatchPage() {
                 let finalVal = val;
 
                 // If it's a numeric value and the column is likely a date (Excel serial number)
-                if (typeof val === "number" && headerMap.get(key).includes("date")) {
+                const normalizedKey = headerMap.get(key) || key;
+                if (typeof val === "number" && (normalizedKey.includes("date") || key.toLowerCase().includes("date"))) {
                   try {
                     const parsedDate = XLSX.SSF.parse_date_code(val);
                     if (parsedDate) {
@@ -2679,7 +2747,7 @@ export default function DailyDispatchPage() {
                   }
                 }
 
-                newRow[headerMap.get(key)] = String(finalVal);
+                newRow[normalizedKey] = String(finalVal ?? "");
               });
               return newRow;
             });
@@ -2696,11 +2764,12 @@ export default function DailyDispatchPage() {
 
       // Filter out total/summary rows and invalid lines
       const filteredParsed = parsed.filter(row => {
-        const outletCode = row.to_sub_code || row.outlet_code || row.outletCode || "";
-        const itemCode = row.item_number || row.item_code || row.itemCode || "";
+        const outletDesc = (row.to_sub_desc || row.outlet_name || row.customer_name || row.outlet_desc || row.customer_desc || row.outlet_description || "").trim();
+        const outletCode = (row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || outletDesc || "").trim();
+        const itemCode = (row.item_code || row.item_number || row.itemCode || row.product_code || row.product || row.sku || "").trim();
 
-        const hasOutlet = !!outletCode.trim();
-        const hasItem = !!itemCode.trim();
+        const hasOutlet = !!outletCode;
+        const hasItem = !!itemCode;
 
         if (!hasOutlet) {
           missingOutletCount++;
@@ -2715,12 +2784,19 @@ export default function DailyDispatchPage() {
         const lowerOutletCode = outletCode.toLowerCase();
         if (lowerOutletCode.includes("total") || lowerOutletCode.includes("summary") || lowerOutletCode.includes("count")) return false;
 
-        const qtyVal = row.fus_requested_qty || row.weight || row.requestedQty || row.qty || "0";
+        const qtyVal = row.fus_requested_qty || row.weight || row.requestedQty || row.qty || row.quantity || "0";
         const parsedQty = parseFloat(qtyVal);
         if (isNaN(parsedQty) || parsedQty <= 0) {
           missingItemOrQtyCount++;
           return false;
         }
+
+        // Normalize essential keys for downstream use
+        row.outlet_code = outletCode;
+        if (!row.to_sub_desc && outletDesc) row.to_sub_desc = outletDesc;
+        row.item_code = itemCode;
+        row.weight = parsedQty.toString();
+        if (!row.requestedQty && row.fus_requested_qty) row.requestedQty = row.fus_requested_qty;
 
         return true;
       });
@@ -2730,6 +2806,16 @@ export default function DailyDispatchPage() {
         missingOutlet: missingOutletCount,
         missingItemOrQty: missingItemOrQtyCount
       });
+
+      if (filteredParsed.length === 0) {
+        toast({
+          title: "No Valid Records Found",
+          description: "Could not identify valid Outlet/Customer Code and Item/Product Code columns with positive quantities. Please verify the columns in your file.",
+          variant: "destructive"
+        });
+        setCsvPreview([]);
+        return;
+      }
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -2764,13 +2850,9 @@ export default function DailyDispatchPage() {
 
       if (hasPastDate) {
         toast({
-          title: "Invalid Delivery Date",
-          description: "One or more items have a requested delivery date prior to today.",
-          variant: "destructive"
+          title: "Prior Delivery Dates Detected",
+          description: "Some items specify a requested delivery date prior to today. They have been included for dispatch processing.",
         });
-        setCsvPreview(null);
-        setCsvFileName("");
-        return;
       }
 
       setCsvPreview(filteredParsed);
@@ -6054,14 +6136,49 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   const [startDate, setStartDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
 
+  // Format dates and times in Arabian Time (Asia/Riyadh, GMT+3)
   const safeFormatDate = (dateVal: any, formatStr: string) => {
     if (!dateVal) return "";
     const parsed = new Date(dateVal);
     if (isNaN(parsed.getTime())) return "";
     try {
-      return format(parsed, formatStr);
+      const is12Hour = formatStr.includes("a") || formatStr.includes("hh");
+      const formatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Riyadh",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: is12Hour,
+      });
+      const parts = formatter.formatToParts(parsed);
+      const get = (t: string) => parts.find(p => p.type === t)?.value || "";
+      const day = get("day");
+      const month = get("month");
+      const year = get("year");
+      const hour = get("hour");
+      const minute = get("minute");
+      const second = get("second");
+      const dayPeriod = get("dayPeriod").toUpperCase();
+
+      return formatStr
+        .replace("yyyy", year)
+        .replace("yy", year.slice(-2))
+        .replace("MM", month)
+        .replace("dd", day)
+        .replace("HH", hour)
+        .replace("hh", hour)
+        .replace("mm", minute)
+        .replace("ss", second)
+        .replace("a", dayPeriod);
     } catch (e) {
-      return "";
+      try {
+        return format(parsed, formatStr);
+      } catch {
+        return "";
+      }
     }
   };
 
