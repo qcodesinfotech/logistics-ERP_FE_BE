@@ -8305,20 +8305,30 @@ export class DatabaseStorage implements IStorage {
 
   async getDriverAttendance(driverId?: string, date?: string): Promise<any[]> {
     const conditions = [];
-    if (driverId) conditions.push(eq(driverAttendance.driverId, driverId));
+    if (driverId) {
+      conditions.push(or(
+        eq(driverAttendance.driverId, driverId),
+        inArray(
+          driverAttendance.driverId,
+          db.select({ employeeId: users.employeeId }).from(users).where(and(eq(users.id, driverId), isNotNull(users.employeeId)))
+        ),
+        inArray(
+          driverAttendance.driverId,
+          db.select({ id: users.id }).from(users).where(and(eq(users.employeeId, driverId), isNotNull(users.employeeId)))
+        )
+      ));
+    }
     if (date) {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      conditions.push(and(
-        sql`check_in_time >= ${startOfDay.toISOString()}`,
-        sql`check_in_time <= ${endOfDay.toISOString()}`
+      conditions.push(or(
+        sql`TO_CHAR(check_in_time AT TIME ZONE 'Asia/Riyadh', 'YYYY-MM-DD') = ${date}`,
+        sql`TO_CHAR(created_at AT TIME ZONE 'Asia/Riyadh', 'YYYY-MM-DD') = ${date}`,
+        sql`check_in_time::date = ${date}::date`,
+        sql`created_at::date = ${date}::date`
       ));
     }
     const list = conditions.length > 0
-      ? await db.select().from(driverAttendance).where(and(...conditions))
-      : await db.select().from(driverAttendance);
+      ? await db.select().from(driverAttendance).where(and(...conditions)).orderBy(desc(driverAttendance.checkInTime))
+      : await db.select().from(driverAttendance).orderBy(desc(driverAttendance.checkInTime));
 
     const employeesList = await this.getEmployees();
     const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));

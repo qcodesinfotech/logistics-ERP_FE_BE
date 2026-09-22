@@ -6568,25 +6568,27 @@ export async function registerRoutes(
       }
 
       let isDriver = false;
+      let userPosition = "";
       if (isEmployeeLogin) {
+        userPosition = employeeObj.position || "";
         if (employeeObj.position?.toLowerCase() === "driver") {
           isDriver = true;
         }
       } else {
         if (user!.role?.toLowerCase() === "driver") {
           isDriver = true;
+          userPosition = "driver";
         } else if (user!.employeeId) {
           const [emp] = await db.select().from(schema.employees)
             .where(eq(schema.employees.id, user!.employeeId))
             .limit(1);
-          if (emp && emp.position?.toLowerCase() === "driver") {
-            isDriver = true;
+          if (emp) {
+            userPosition = emp.position || "";
+            if (emp.position?.toLowerCase() === "driver") {
+              isDriver = true;
+            }
           }
         }
-      }
-
-      if (!isDriver) {
-        return res.status(403).json({ message: "Access denied: Only drivers can login to the mobile app" });
       }
 
       const jwtLib = await import("jsonwebtoken");
@@ -6595,7 +6597,9 @@ export async function registerRoutes(
       const activeUser = isEmployeeLogin ? {
         id: employeeObj.id,
         username: employeeObj.employeeCode,
-        role: "driver",
+        role: isDriver ? "driver" : (employeeObj.position?.toLowerCase() || "employee"),
+        position: employeeObj.position || "",
+        isDriver,
         name: employeeObj.name,
         employeeId: employeeObj.id,
         companyId: employeeObj.companyId,
@@ -6604,7 +6608,9 @@ export async function registerRoutes(
       } : {
         id: user!.id,
         username: user!.username,
-        role: "driver", // Force role to driver on mobile app for consistent navigation
+        role: isDriver ? "driver" : (user!.role || "employee"),
+        position: userPosition || "",
+        isDriver,
         name: user!.name,
         employeeId: user!.employeeId,
         companyId: user!.companyId,
@@ -9552,14 +9558,49 @@ export async function registerRoutes(
         isWithinRange = true;
       }
 
-      // Restrict check-in if driver is outside authorized store/warehouse location (> 50km)
-      if (authorizedPlaces.some(p => p.latitude && p.longitude) && minDistance > 50000 && minDistance !== Infinity) {
-        return res.status(403).json({
-          error: `Check-in restricted: You are ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}. Attendance check-in is strictly permitted only within the authorized store/warehouse location.`
-        });
+      // Check if driver has an existing check-in for today in Arabian Time (Asia/Riyadh, GMT+3)
+      const todayArabian = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const existingToday = await storage.getDriverAttendance(effectiveDriverId, todayArabian);
+      const isSecondLogin = Array.isArray(existingToday) && existingToday.length > 0;
+
+      // First login of the day is restricted to within 100 meters of the authorized warehouse location.
+      // Second/subsequent logins on the same day are permitted from ANY location.
+      if (!isSecondLogin) {
+        if (authorizedPlaces.some(p => p.latitude && p.longitude) && minDistance > 100) {
+          return res.status(403).json({
+            error: `First check-in for the day is restricted to the authorized warehouse/depot location (within 100 meters). You are currently ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}.`
+          });
+        }
       }
 
       const isAuthorizedDevice = !!deviceToken;
+      const employeesList = await storage.getEmployees();
+      const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
+
+      if (isSecondLogin) {
+        // Second login on the same day: update location/crew on existing record and permit from any location
+        const primaryRecord = existingToday[0];
+        const updated = await storage.updateDriverAttendance(primaryRecord.id, {
+          ...(crewMemberId ? { crewMemberId } : {}),
+          endLatitude: !isNaN(latNum) ? latNum.toString() as any : undefined,
+          endLongitude: !isNaN(lonNum) ? lonNum.toString() as any : undefined,
+        });
+
+        const attendanceWithNames = {
+          ...(updated || primaryRecord),
+          driverName: employeeMap.get(primaryRecord.driverId) || "Unknown Driver",
+          crewMemberName: (updated || primaryRecord).crewMemberId ? (employeeMap.get((updated || primaryRecord).crewMemberId!) || "Unknown Crew Member") : null,
+          isSecondLogin: true
+        };
+
+        return res.status(200).json({
+          attendance: attendanceWithNames,
+          geofenceValid: true,
+          isSecondLogin: true,
+          distanceToNearest: "Second login permitted from any location",
+          isAuthorizedDevice
+        });
+      }
 
       const attendance = await storage.createDriverAttendance({
         driverId: effectiveDriverId,
@@ -9572,9 +9613,6 @@ export async function registerRoutes(
         crewCheckInTime: crewMemberId ? new Date() : null,
       } as any);
 
-      // Enrich with employee names for mobile front-end state usage
-      const employeesList = await storage.getEmployees();
-      const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
       const attendanceWithNames = {
         ...attendance,
         driverName: employeeMap.get(attendance.driverId) || "Unknown Driver",
