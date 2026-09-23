@@ -3949,13 +3949,15 @@ export class DatabaseStorage implements IStorage {
         ));
     }
 
+    const truckIdClean = (data.overrideTruckId && data.overrideTruckId !== "any" && data.overrideTruckId.trim() !== "") ? data.overrideTruckId.trim() : null;
+
     const [row] = await db.insert(dispatchOutletZoneOverrides).values({
       sheetId: data.sheetId,
       outletId: data.outletId,
       storageType: storageType,
       overrideZoneId: data.overrideZoneId,
-      overrideTruckId: data.overrideTruckId,
-      reason: data.reason,
+      overrideTruckId: truckIdClean,
+      reason: data.reason || null,
       createdBy: data.createdBy,
     }).returning();
     return row;

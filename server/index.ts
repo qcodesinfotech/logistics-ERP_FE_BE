@@ -22,7 +22,17 @@ app.use(cors({
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Company-Id',
+    'X-Shop-Id',
+    'X-Branch-Id',
+    'X-Warehouse-Id',
+    'Accept',
+    'Origin',
+  ],
 }));
 
 app.use(cookieParser());
