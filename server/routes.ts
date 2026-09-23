@@ -7653,6 +7653,51 @@ export async function registerRoutes(
         }
       }
 
+      const parseDeliveryDate = (val: any): string | null => {
+        if (!val) return null;
+        if (val instanceof Date) {
+          if (isNaN(val.getTime())) return null;
+          return val.toISOString().split("T")[0];
+        }
+        const s = String(val).trim();
+        if (!s || s === "-" || s.toLowerCase() === "n/a" || s.toLowerCase() === "null") return null;
+
+        // Check Excel serial number (e.g., 45558)
+        const num = Number(s);
+        if (!isNaN(num) && num > 10000 && num < 100000) {
+          const excelEpoch = new Date(Math.round((num - 25569) * 86400 * 1000));
+          if (!isNaN(excelEpoch.getTime())) {
+            return excelEpoch.toISOString().split("T")[0];
+          }
+        }
+
+        // Check YYYY-MM-DD or YYYY/MM/DD
+        const ymd = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (ymd) {
+          const yyyy = ymd[1];
+          const mm = ymd[2].padStart(2, "0");
+          const dd = ymd[3].padStart(2, "0");
+          return `${yyyy}-${mm}-${dd}`;
+        }
+
+        // Check DD-MM-YYYY or DD/MM/YYYY
+        const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        if (dmy) {
+          const dd = dmy[1].padStart(2, "0");
+          const mm = dmy[2].padStart(2, "0");
+          const yyyy = dmy[3];
+          return `${yyyy}-${mm}-${dd}`;
+        }
+
+        // Fallback to Date.parse
+        const d = new Date(s);
+        if (!isNaN(d.getTime())) {
+          return d.toISOString().split("T")[0];
+        }
+
+        return null;
+      };
+
       const resolvedItems = items
         .map((row: any) => {
           const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
@@ -7675,6 +7720,14 @@ export async function registerRoutes(
             }
           }
 
+          const rawQty = row.fus_requested_qty !== undefined && row.fus_requested_qty !== null && row.fus_requested_qty !== ""
+            ? row.fus_requested_qty
+            : (row.weight !== undefined && row.weight !== null && row.weight !== ""
+              ? row.weight
+              : (row.requestedQty !== undefined && row.requestedQty !== null && row.requestedQty !== "" ? row.requestedQty : null));
+          const parsedQty = rawQty !== null ? parseFloat(String(rawQty)) : null;
+          const safeQty = parsedQty !== null && !isNaN(parsedQty) ? parsedQty : null;
+
           return {
             sheetId: sheet.id,
             outletCode: String(rowCode),
@@ -7684,12 +7737,12 @@ export async function registerRoutes(
             description: description,
             toNo: row.to_no || null,
             lineNumber: row.line_number || null,
-            requestedDeliveryDate: row.requested_delivery_date ? new Date(row.requested_delivery_date.split('-').reverse().join('-')) : null, // Assuming DD-MM-YYYY
+            requestedDeliveryDate: parseDeliveryDate(row.requested_delivery_date || row.delivery_date || row.requestedDeliveryDate || row.deliveryDate),
             storageType: row.storage_type || null,
             uom: row.uom || null,
             fromOrg: row.from_org || null,
-            requestedQty: row.fus_requested_qty ? parseFloat(row.fus_requested_qty) : null,
-            weight: row.weight ? parseFloat(row.weight) : null,
+            requestedQty: safeQty,
+            weight: safeQty,
             totalDelivered: row.total_delivered || row.totalDelivered || null,
             remaining: row.remaining || null,
             remark: row.remark || null,
@@ -7727,7 +7780,7 @@ export async function registerRoutes(
             if (mergeStrategy === "replace") {
               const reqQtyStr = existing.requestedQty?.toString() || "0";
               const newReqQtyStr = item.requestedQty?.toString() || "0";
-              if (reqQtyStr !== newReqQtyStr || existing.weight !== item.weight || existing.toNo !== item.toNo || existing.remark !== item.remark) {
+              if (reqQtyStr !== newReqQtyStr || existing.weight !== item.weight || existing.toNo !== item.toNo || existing.remark !== item.remark || existing.requestedDeliveryDate !== item.requestedDeliveryDate) {
                 await db.update(schema.dispatchItems)
                   .set({
                     requestedQty: item.requestedQty,
@@ -7735,6 +7788,7 @@ export async function registerRoutes(
                     toNo: item.toNo,
                     remark: item.remark,
                     description: item.description,
+                    requestedDeliveryDate: item.requestedDeliveryDate,
                   })
                   .where(eq(schema.dispatchItems.id, existing.id));
               }

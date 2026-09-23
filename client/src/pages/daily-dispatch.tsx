@@ -2836,7 +2836,8 @@ export default function DailyDispatchPage() {
               dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
               if (isNaN(dateObj.getTime())) dateObj = new Date(dateStr);
             } else if (parts[0].length === 4) {
-              dateObj = new Date(dateStr);
+              dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+              if (isNaN(dateObj.getTime())) dateObj = new Date(dateStr);
             }
           }
           if (!dateObj) dateObj = new Date(dateStr);
