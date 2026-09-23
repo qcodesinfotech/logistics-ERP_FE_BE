@@ -3444,7 +3444,7 @@ export class DatabaseStorage implements IStorage {
     return false;
   }
 
-  async getDispatchSheets(): Promise<any[]> {
+  async getDispatchSheets(driverIdentifiers?: string[]): Promise<any[]> {
     const sheets = await db.select().from(dispatchSheets).orderBy(desc(dispatchSheets.date));
     if (sheets.length === 0) return [];
 
@@ -3487,10 +3487,45 @@ export class DatabaseStorage implements IStorage {
     startedItemSheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
     startedTruckSheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
 
-    return sheets.map(sheet => ({
+    // If driver identifiers are provided, find all sheets where this driver has assignments
+    const driverSheetIdSet = new Set<string>();
+    if (driverIdentifiers && driverIdentifiers.length > 0) {
+      const truckSheets = await db
+        .selectDistinct({ sheetId: dispatchTruckAssignments.sheetId })
+        .from(dispatchTruckAssignments)
+        .where(inArray(dispatchTruckAssignments.driverId, driverIdentifiers));
+      truckSheets.forEach(r => r.sheetId && driverSheetIdSet.add(r.sheetId));
+
+      const zoneSheets = await db
+        .selectDistinct({ sheetId: dispatchItems.sheetId })
+        .from(dispatchItems)
+        .innerJoin(driverZones, eq(dispatchItems.routeId, driverZones.zoneId))
+        .where(inArray(driverZones.driverId, driverIdentifiers));
+      zoneSheets.forEach(r => r.sheetId && driverSheetIdSet.add(r.sheetId));
+    }
+
+    const mapped = sheets.map(sheet => ({
       ...sheet,
       hasDeliveryStarted: activeSheetIdSet.has(sheet.id),
+      hasDriverAssignment: driverSheetIdSet.has(sheet.id),
     }));
+
+    if (driverIdentifiers && driverIdentifiers.length > 0) {
+      mapped.sort((a, b) => {
+        const dateA = typeof a.date === "string" ? a.date : new Date(a.date).toISOString().split("T")[0];
+        const dateB = typeof b.date === "string" ? b.date : new Date(b.date).toISOString().split("T")[0];
+        const dateComp = dateB.localeCompare(dateA);
+        if (dateComp !== 0) return dateComp;
+
+        const aHas = driverSheetIdSet.has(a.id) ? 1 : 0;
+        const bHas = driverSheetIdSet.has(b.id) ? 1 : 0;
+        if (aHas !== bHas) return bHas - aHas;
+
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
+    }
+
+    return mapped;
   }
 
   async getDispatchSheet(id: string): Promise<any> {

@@ -7514,7 +7514,8 @@ export async function registerRoutes(
   // Dispatch Sheets
   app.get("/api/dispatch/sheets", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const sheets = await storage.getDispatchSheets();
+      const driverIdentifiers = req.user ? [req.user.id, req.user.employeeId, req.user.username].filter(Boolean) as string[] : [];
+      const sheets = await storage.getDispatchSheets(driverIdentifiers);
       res.json(sheets);
     } catch (e) {
       console.error("Get dispatch sheets error:", e);
