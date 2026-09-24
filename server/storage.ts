@@ -641,7 +641,7 @@ export interface IStorage {
   createDriverAttendance(data: InsertDriverAttendance): Promise<DriverAttendance>;
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
   getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
-  getCompletedDeliveries(startDate?: string, endDate?: string): Promise<any[]>;
+  getCompletedDeliveries(startDate?: string, endDate?: string, clientId?: string): Promise<any[]>;
   getActivityUtilizationReport(options?: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string }): Promise<any>;
   getTruckLastClosingKm(truckId: string): Promise<number>;
 
@@ -8580,7 +8580,7 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async getCompletedDeliveries(startDate?: string, endDate?: string): Promise<any[]> {
+  async getCompletedDeliveries(startDate?: string, endDate?: string, clientId?: string): Promise<any[]> {
     const conditions = [];
     
     // Filter for completed deliveries based on status or deliveredAt
@@ -8595,6 +8595,10 @@ export class DatabaseStorage implements IStorage {
       if (endDate) {
         conditions.push(sql`${dispatchSheets.date}::date <= ${endDate}::date`);
       }
+    }
+
+    if (clientId && clientId !== 'all') {
+      conditions.push(sql`(COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}) = ${clientId})`);
     }
 
     const query = db.select({
@@ -8629,6 +8633,8 @@ export class DatabaseStorage implements IStorage {
       
       sheetId: dispatchItems.sheetId,
       sheetDate: dispatchSheets.date,
+      clientId: sql<string>`COALESCE(${dispatchSheets.clientId}, ${outlets.clientId})`,
+      clientName: clients.name,
       
       outletName: outlets.name,
       outletCode: outlets.code,
@@ -8643,6 +8649,7 @@ export class DatabaseStorage implements IStorage {
     .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
     .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
     .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
+    .leftJoin(clients, eq(clients.id, sql`COALESCE(${dispatchSheets.clientId}, ${outlets.clientId})`))
     .leftJoin(brands, eq(outlets.brandId, brands.id))
     .leftJoin(routes, eq(dispatchItems.routeId, routes.id))
     .where(and(...conditions))
@@ -9440,7 +9447,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAdvancedPendingDeliveries(filters: any = {}): Promise<any[]> {
-    const { startDate, endDate, routeId, outletId, driverId, storageType } = filters;
+    const { startDate, endDate, routeId, outletId, driverId, storageType, clientId } = filters;
     
     let conditions: any[] = [
       or(
@@ -9464,19 +9471,24 @@ export class DatabaseStorage implements IStorage {
     if (storageType && storageType !== 'all') {
       conditions.push(eq(schema.dispatchItems.storageType, storageType));
     }
+    if (clientId && clientId !== 'all') {
+      conditions.push(sql`(COALESCE(${schema.dispatchSheets.clientId}, ${schema.outlets.clientId}) = ${clientId})`);
+    }
     
     const results = await db.select({
       delivery: schema.dispatchDeliveries,
       item: schema.dispatchItems,
       sheet: schema.dispatchSheets,
       route: schema.routes,
-      outlet: schema.outlets
+      outlet: schema.outlets,
+      client: schema.clients
     })
     .from(schema.dispatchItems)
     .leftJoin(schema.dispatchDeliveries, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
     .innerJoin(schema.dispatchSheets, eq(schema.dispatchItems.sheetId, schema.dispatchSheets.id))
     .leftJoin(schema.routes, eq(schema.routes.id, sql`COALESCE(${schema.dispatchItems.overrideRouteId}, ${schema.dispatchItems.routeId})`))
     .leftJoin(schema.outlets, eq(schema.outlets.id, schema.dispatchItems.outletId))
+    .leftJoin(schema.clients, eq(schema.clients.id, sql`COALESCE(${schema.dispatchSheets.clientId}, ${schema.outlets.clientId})`))
     .where(and(...conditions))
     .orderBy(desc(schema.dispatchSheets.date));
     
@@ -9708,6 +9720,8 @@ export class DatabaseStorage implements IStorage {
         toNo: r.item.toNo || null,
         date: r.sheet.date,
         sheetId: r.sheet.id,
+        clientId: r.sheet.clientId || r.outlet?.clientId || r.client?.id || null,
+        clientName: r.client?.name || null,
         itemCode: r.item.itemCode,
         description: r.item.description,
         requestedQty: r.item.requestedQty,

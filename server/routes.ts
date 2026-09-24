@@ -10585,8 +10585,8 @@ export async function registerRoutes(
 
   app.get("/api/dispatch/completed-deliveries", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { startDate, endDate } = req.query as any;
-      const deliveries = await storage.getCompletedDeliveries(startDate, endDate);
+      const { startDate, endDate, clientId } = req.query as any;
+      const deliveries = await storage.getCompletedDeliveries(startDate, endDate, clientId);
       res.json(deliveries);
     } catch (error) {
       console.error("Error fetching completed deliveries:", error);

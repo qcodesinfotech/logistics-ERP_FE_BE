@@ -3620,7 +3620,7 @@ export default function DailyDispatchPage() {
         {/* ===== PENDING QUANTITIES TAB ===== */}
         <TabsContent value="pending" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
           <div className="flex-1 overflow-auto p-6 min-h-0 bg-slate-50/50 print:overflow-visible print:bg-white print:p-0 print:block">
-            <PendingQuantitiesTab selectedDate={selectedDate} />
+            <PendingQuantitiesTab selectedDate={selectedDate} initialClientId={boardClientId} />
           </div>
         </TabsContent>
 
@@ -3629,6 +3629,7 @@ export default function DailyDispatchPage() {
           <ErrorBoundary>
             <CompletedDeliveriesTab
               selectedDate={selectedDate}
+              initialClientId={boardClientId}
               onManageItems={(outletCode: string, outletName: string, items: any[]) => {
                 setManageItemsModal({
                   isOpen: true,
@@ -5814,7 +5815,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 }
 
 // ===== PENDING QUANTITIES TAB =====
-function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
+function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selectedDate?: string; initialClientId?: string }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role?.toLowerCase().includes("admin");
@@ -5822,6 +5823,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
   const [startDate, setStartDate] = useState(selectedDate || "");
   const [endDate, setEndDate] = useState(selectedDate || "");
+  const [clientFilter, setClientFilter] = useState(initialClientId || "all");
 
   useEffect(() => {
     if (selectedDate) {
@@ -5829,6 +5831,13 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
       setEndDate(selectedDate);
     }
   }, [selectedDate]);
+
+  useEffect(() => {
+    if (initialClientId) {
+      setClientFilter(initialClientId);
+    }
+  }, [initialClientId]);
+
   const [routeFilter, setRouteFilter] = useState("all");
   const [outletFilter, setOutletFilter] = useState("all");
   const [driverFilter, setDriverFilter] = useState("all");
@@ -5862,8 +5871,9 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
   const { data: routes = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
   const { data: outlets = [] } = useQuery<any[]>({ queryKey: ["/api/outlets"] });
   const { data: drivers = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
+  const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
 
-  const queryKey = ["/api/dispatch/pending-advanced", { startDate, endDate, routeId: routeFilter, outletId: outletFilter, driverId: driverFilter, storageType: storageTypeFilter }];
+  const queryKey = ["/api/dispatch/pending-advanced", { startDate, endDate, routeId: routeFilter, outletId: outletFilter, driverId: driverFilter, storageType: storageTypeFilter, clientId: clientFilter }];
 
   const { data: pendingDeliveries = [], isLoading } = useQuery<any[]>({
     queryKey,
@@ -5875,6 +5885,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
       if (outletFilter !== "all") q.append("outletId", outletFilter);
       if (driverFilter !== "all") q.append("driverId", driverFilter);
       if (storageTypeFilter !== "all") q.append("storageType", storageTypeFilter);
+      if (clientFilter !== "all") q.append("clientId", clientFilter);
       const res = await apiRequest("GET", `/api/dispatch/pending-advanced?${q.toString()}`);
       return res.json();
     }
@@ -5904,9 +5915,9 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
   }, [outlets, pendingDeliveries]);
 
   const allStorageTypes = new Set<string>();
-  const groupedData: { zoneName: string; outlets: any[] }[] = [];
+  const groupedData: { zoneName: string; clientName?: string; outlets: any[] }[] = [];
 
-  // Group by zoneName -> outletName -> items
+  // Group by (zoneName + client) -> outletName -> items
   const routeMap = new Map<string, any>();
 
   pendingDeliveries.forEach((item: any) => {
@@ -5919,17 +5930,21 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
     if (item.storageType) allStorageTypes.add(item.storageType);
 
-    if (!routeMap.has(item.zoneName)) {
-      routeMap.set(item.zoneName, { zoneName: item.zoneName, outletsMap: new Map() });
+    const clientDisplay = item.clientName || (item.clientId ? clientList.find((c: any) => c.id === item.clientId)?.name : null);
+    const routeKey = clientFilter === "all" && clientDisplay ? `${item.zoneName} · ${clientDisplay}` : item.zoneName;
+
+    if (!routeMap.has(routeKey)) {
+      routeMap.set(routeKey, { zoneName: item.zoneName, clientName: clientDisplay, outletsMap: new Map() });
     }
 
-    const r = routeMap.get(item.zoneName);
+    const r = routeMap.get(routeKey);
     const outletKey = `${item.outletCode}-${item.outletName}`;
 
     if (!r.outletsMap.has(outletKey)) {
       r.outletsMap.set(outletKey, {
         outletName: item.outletName,
         outletCode: item.outletCode,
+        clientName: clientDisplay,
         sequence: item.sequence !== undefined ? item.sequence : 999999,
         items: []
       });
@@ -5938,7 +5953,12 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
     r.outletsMap.get(outletKey).items.push(item);
   });
 
-  const sortedRoutes = Array.from(routeMap.values()).sort((a, b) => (a.zoneName || "").localeCompare(b.zoneName || ""));
+  const sortedRoutes = Array.from(routeMap.values()).sort((a, b) => {
+    if (a.clientName && b.clientName && a.clientName !== b.clientName) {
+      return a.clientName.localeCompare(b.clientName);
+    }
+    return (a.zoneName || "").localeCompare(b.zoneName || "");
+  });
 
   sortedRoutes.forEach(r => {
     const outletsList = Array.from(r.outletsMap.values()).sort((a: any, b: any) => {
@@ -5950,6 +5970,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
     groupedData.push({
       zoneName: r.zoneName,
+      clientName: r.clientName,
       outlets: outletsList
     });
   });
@@ -5966,7 +5987,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                 <Package className="h-4 w-4 text-primary" /> Advanced Pending Deliveries
               </CardTitle>
               <CardDescription className="mt-1">
-                View all pending items across dates, routes, and outlets.
+                View all pending items across dates, clients, routes, and outlets.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -5985,7 +6006,17 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-4 pt-4 border-t">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mt-4 pt-4 border-t">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Client / Customer</Label>
+              <Select value={clientFilter} onValueChange={setClientFilter}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Clients" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clients</SelectItem>
+                  {clientList.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Start Date</Label>
               <Input type="date" className="h-8 text-xs" value={startDate} onChange={e => setStartDate(e.target.value)} />
@@ -6103,6 +6134,11 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
+                            {zone.clientName && (
+                              <Badge variant="outline" className="ml-1 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-300 text-[10px] h-4">
+                                🏢 {zone.clientName}
+                              </Badge>
+                            )}
                             <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
                               {zone.outlets.length} Outlets · {getDeliveryNotesSet(zone.outlets).size} DNs
                             </Badge>
@@ -6134,6 +6170,11 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                                   )}
                                   {outlet.outletName}
                                   <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
+                                  {outlet.clientName && (
+                                    <Badge variant="outline" className="ml-1 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-300 text-[10px] h-4">
+                                      🏢 {outlet.clientName}
+                                    </Badge>
+                                  )}
                                   <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
                                     {new Set(outlet.items.map((i: any) => i.toNo || i.id).filter(Boolean)).size} DNs · {outlet.items.length} Items (Qty: {formattedQty})
                                   </Badge>
@@ -6218,9 +6259,10 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
 
 // ===== TRUCK TRANSFERS TAB =====
 // ===== COMPLETED DELIVERIES TAB =====
-function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?: string; onManageItems?: (outletCode: string, outletName: string, items: any[]) => void }) {
+function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManageItems }: { selectedDate?: string; initialClientId?: string; onManageItems?: (outletCode: string, outletName: string, items: any[]) => void }) {
   const [startDate, setStartDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(selectedDate || format(new Date(), "yyyy-MM-dd"));
+  const [clientFilter, setClientFilter] = useState(initialClientId || "all");
 
   // Format dates and times in Arabian Time (Asia/Riyadh, GMT+3)
   const safeFormatDate = (dateVal: any, formatStr: string) => {
@@ -6274,6 +6316,13 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
       setEndDate(selectedDate);
     }
   }, [selectedDate]);
+
+  useEffect(() => {
+    if (initialClientId) {
+      setClientFilter(initialClientId);
+    }
+  }, [initialClientId]);
+
   const [storageTypeFilter, setStorageTypeFilter] = useState("all");
   const [routeFilter, setRouteFilter] = useState("all");
   const [outletFilter, setOutletFilter] = useState("all");
@@ -6315,10 +6364,16 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   const toggleRoute = (id: string) => setExpandedRoutes(prev => ({ ...prev, [id]: prev[id] === undefined ? false : !prev[id] }));
   const toggleOutlet = (id: string) => setExpandedOutlets(prev => ({ ...prev, [id]: !prev[id] }));
 
+  const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
+
   const { data: deliveries = [], isLoading } = useQuery<any[]>({
-    queryKey: ["/api/dispatch/completed-deliveries", { startDate, endDate }],
+    queryKey: ["/api/dispatch/completed-deliveries", { startDate, endDate, clientId: clientFilter }],
     queryFn: async () => {
-      const res = await apiRequest("GET", `/api/dispatch/completed-deliveries?startDate=${startDate}&endDate=${endDate}`);
+      const q = new URLSearchParams();
+      if (startDate) q.append("startDate", startDate);
+      if (endDate) q.append("endDate", endDate);
+      if (clientFilter !== "all") q.append("clientId", clientFilter);
+      const res = await apiRequest("GET", `/api/dispatch/completed-deliveries?${q.toString()}`);
       return res.json();
     }
   });
@@ -6375,20 +6430,23 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
   });
 
   // Group by Route -> Outlet
-  const groupedMap = new Map<string, { zoneId: string; zoneName: string; outlets: Map<string, { outletId: string; outletCode: string; outletName: string; items: any[]; pods: Map<string, string> }> }>();
+  const groupedMap = new Map<string, { zoneId: string; zoneName: string; clientName?: string; outlets: Map<string, { outletId: string; outletCode: string; outletName: string; clientName?: string; items: any[]; pods: Map<string, string> }> }>();
 
   filteredDeliveries.forEach(d => {
-    const routeId = d.routeId || "unassigned";
+    const rawRouteId = d.routeId || "unassigned";
     const routeName = d.zoneName || "Unassigned Route";
+    const clientDisplay = d.clientName || "";
+    // If viewing all clients, segregate route groups by client so different customers don't mix into the same route row
+    const groupKey = clientFilter === "all" && clientDisplay ? `${rawRouteId} · ${clientDisplay}` : rawRouteId;
     const outletId = d.outletId || d.outletCode || "unassigned";
 
-    if (!groupedMap.has(routeId)) {
-      groupedMap.set(routeId, { zoneId: routeId, zoneName: routeName, outlets: new Map() });
+    if (!groupedMap.has(groupKey)) {
+      groupedMap.set(groupKey, { zoneId: groupKey, zoneName: routeName, clientName: clientDisplay, outlets: new Map() });
     }
-    const routeGroup = groupedMap.get(routeId)!;
+    const routeGroup = groupedMap.get(groupKey)!;
 
     if (!routeGroup.outlets.has(outletId)) {
-      routeGroup.outlets.set(outletId, { outletId: d.outletId, outletCode: d.outletCode, outletName: d.outletName || "Unassigned", items: [], pods: new Map() });
+      routeGroup.outlets.set(outletId, { outletId: d.outletId, outletCode: d.outletCode, outletName: d.outletName || "Unassigned", clientName: clientDisplay, items: [], pods: new Map() });
     }
     const outletGroup = routeGroup.outlets.get(outletId)!;
     outletGroup.items.push(d);
@@ -6419,6 +6477,7 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
     if (!filteredDeliveries.length) return;
     const formattedData = filteredDeliveries.map((d, idx) => ({
       "SN": idx + 1,
+      "Client": d.clientName || "General",
       "Date": safeFormatDate(d.deliveredAt || d.sheetDate, "dd/MM/yyyy"),
       "Type of Goods": d.storageType || "Frozen",
       "Brand": d.brandName || "General",
@@ -6477,7 +6536,19 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
         </CardHeader>
 
         <div className="px-6 pb-4 border-b space-y-4 print:hidden">
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Client / Customer</Label>
+              <Select value={clientFilter} onValueChange={setClientFilter}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Clients" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clients</SelectItem>
+                  {clientList.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1">
               <Label className="text-xs">Start Date</Label>
               <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="h-8 text-xs" />
@@ -6589,6 +6660,11 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
+                            {zone.clientName && (
+                              <Badge variant="outline" className="ml-1 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-300 text-[10px] h-4">
+                                🏢 {zone.clientName}
+                              </Badge>
+                            )}
                             <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
                               {zone.outlets.length} Outlets · {getDeliveryNotesSet(zone.outlets).size} DNs
                             </Badge>
@@ -6611,6 +6687,11 @@ function CompletedDeliveriesTab({ selectedDate, onManageItems }: { selectedDate?
                                     {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
                                     <span className="font-medium text-sm whitespace-nowrap">{outlet.outletName}</span>
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">({outlet.outletCode})</span>
+                                    {outlet.clientName && (
+                                      <Badge variant="outline" className="ml-1 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-300 text-[10px] h-4 flex-shrink-0">
+                                        🏢 {outlet.clientName}
+                                      </Badge>
+                                    )}
                                     <Badge variant="outline" className="bg-white text-[10px] h-4 whitespace-nowrap flex-shrink-0">
                                       {new Set(outlet.items.map((i: any) => i.toNo || i.id).filter(Boolean)).size} DNs · {outlet.items.length} Items (Qty: {formattedDelQty} / {formattedReqQty})
                                     </Badge>
