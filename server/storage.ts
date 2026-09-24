@@ -8598,7 +8598,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (clientId && clientId !== 'all') {
-      conditions.push(sql`(COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}) = ${clientId})`);
+      conditions.push(sql`(COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}) = ${clientId} OR COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}) IN (SELECT id FROM clients WHERE parent_client_id = ${clientId}))`);
     }
 
     const query = db.select({
@@ -9472,7 +9472,7 @@ export class DatabaseStorage implements IStorage {
       conditions.push(eq(schema.dispatchItems.storageType, storageType));
     }
     if (clientId && clientId !== 'all') {
-      conditions.push(sql`(COALESCE(${schema.dispatchSheets.clientId}, ${schema.outlets.clientId}) = ${clientId})`);
+      conditions.push(sql`(COALESCE(${schema.dispatchSheets.clientId}, ${schema.outlets.clientId}) = ${clientId} OR COALESCE(${schema.dispatchSheets.clientId}, ${schema.outlets.clientId}) IN (SELECT id FROM clients WHERE parent_client_id = ${clientId}))`);
     }
     
     const results = await db.select({

@@ -657,6 +657,7 @@ export const salaryAdvances = pgTable("salary_advances", {
 
 export const clients = pgTable("clients", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  parentClientId: varchar("parent_client_id"),
   brandId: varchar("brand_id"),
   name: text("name").notNull(),
   companyName: text("company_name"),

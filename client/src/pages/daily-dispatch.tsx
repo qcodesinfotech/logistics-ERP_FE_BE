@@ -2121,6 +2121,18 @@ export default function DailyDispatchPage() {
   const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
   const { data: brandList = [] } = useQuery<any[]>({ queryKey: ["/api/brands"] });
 
+  const clientOptions = useMemo(() => {
+    const parentMap = new Map<string, string>();
+    clientList.forEach((c: any) => parentMap.set(c.id, c.name));
+    return clientList.map((c: any) => {
+      const parentName = c.parentClientId ? parentMap.get(c.parentClientId) : null;
+      return {
+        ...c,
+        displayName: parentName ? `${parentName} → ${c.name}` : c.name
+      };
+    }).sort((a: any, b: any) => a.displayName.localeCompare(b.displayName));
+  }, [clientList]);
+
   const filteredBrands = useMemo(() => {
     if (boardClientId === "all") {
       return brandList;
@@ -2984,11 +2996,11 @@ export default function DailyDispatchPage() {
               <select
                 value={boardClientId}
                 onChange={e => setBoardClientId(e.target.value)}
-                className="h-8 border rounded-md px-2 bg-transparent text-xs w-36"
+                className="h-8 border rounded-md px-2 bg-transparent text-xs w-48 font-medium"
               >
                 <option value="all">All Clients</option>
-                {clientList.map((c: any) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                {clientOptions.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.displayName}</option>
                 ))}
               </select>
             </div>
@@ -5873,6 +5885,18 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
   const { data: drivers = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
   const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
 
+  const clientOptions = useMemo(() => {
+    const parentMap = new Map<string, string>();
+    clientList.forEach((c: any) => parentMap.set(c.id, c.name));
+    return clientList.map((c: any) => {
+      const parentName = c.parentClientId ? parentMap.get(c.parentClientId) : null;
+      return {
+        ...c,
+        displayName: parentName ? `${parentName} → ${c.name}` : c.name
+      };
+    }).sort((a: any, b: any) => a.displayName.localeCompare(b.displayName));
+  }, [clientList]);
+
   const queryKey = ["/api/dispatch/pending-advanced", { startDate, endDate, routeId: routeFilter, outletId: outletFilter, driverId: driverFilter, storageType: storageTypeFilter, clientId: clientFilter }];
 
   const { data: pendingDeliveries = [], isLoading } = useQuery<any[]>({
@@ -6013,7 +6037,7 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Clients" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Clients</SelectItem>
-                  {clientList.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  {clientOptions.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.displayName}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -6366,6 +6390,18 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
 
   const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
 
+  const clientOptions = useMemo(() => {
+    const parentMap = new Map<string, string>();
+    clientList.forEach((c: any) => parentMap.set(c.id, c.name));
+    return clientList.map((c: any) => {
+      const parentName = c.parentClientId ? parentMap.get(c.parentClientId) : null;
+      return {
+        ...c,
+        displayName: parentName ? `${parentName} → ${c.name}` : c.name
+      };
+    }).sort((a: any, b: any) => a.displayName.localeCompare(b.displayName));
+  }, [clientList]);
+
   const { data: deliveries = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/dispatch/completed-deliveries", { startDate, endDate, clientId: clientFilter }],
     queryFn: async () => {
@@ -6543,8 +6579,8 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Clients" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Clients</SelectItem>
-                  {clientList.map((c: any) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  {clientOptions.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.displayName}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

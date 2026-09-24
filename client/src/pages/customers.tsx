@@ -31,13 +31,14 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { 
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage 
+  Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage 
 } from "@/components/ui/form";
 import type { Client } from "@shared/schema";
 
 // Form Schema matching db schema and prompt requirements
 const customerFormSchema = z.object({
   customerCode: z.string().min(1, "Customer Code is required"),
+  parentClientId: z.string().optional().nullable().default(null),
   name: z.string().min(1, "Customer name is required"),
   tradeName: z.string().optional().default(""),
   customerType: z.enum(["company", "individual"]),
@@ -326,7 +327,15 @@ export default function CustomersPage() {
                         data-testid={`table-row-${client.id}`}
                       >
                         <td className="p-4 font-mono font-medium">{client.customerCode || "N/A"}</td>
-                        <td className="p-4 font-semibold">{client.name}</td>
+                        <td className="p-4">
+                          <div className="font-semibold text-slate-900">{client.name}</div>
+                          {(client as any).parentClientId && (
+                            <div className="text-xs text-blue-600 font-medium flex items-center gap-1 mt-0.5">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                              Sub-client of {clients.find(c => c.id === (client as any).parentClientId)?.name || "Major Customer"}
+                            </div>
+                          )}
+                        </td>
                         <td className="p-4 text-muted-foreground">{client.tradeName || "N/A"}</td>
                         <td className="p-4 capitalize">{client.customerType || "N/A"}</td>
                         <td className="p-4 capitalize">{client.customerCategory || "N/A"}</td>
@@ -507,10 +516,16 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
     enabled: mode === "edit" && !!id,
   });
 
+  const { data: allClients = [] } = useQuery<Client[]>({
+    queryKey: ["/api/clients"],
+  });
+  const potentialParents = allClients.filter(c => c.id !== id);
+
   const form = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
     defaultValues: {
       customerCode: "",
+      parentClientId: null,
       name: "",
       tradeName: "",
       customerType: "company",
@@ -556,6 +571,7 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
     if (customer && mode === "edit") {
       form.reset({
         customerCode: customer.customerCode || "",
+        parentClientId: (customer as any).parentClientId || null,
         name: customer.name || "",
         tradeName: customer.tradeName || "",
         customerType: (customer as any).customerType || "company",
@@ -725,7 +741,7 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
   const nextStep = async () => {
     let fieldsToValidate: any[] = [];
     if (activeStep === 1) {
-      fieldsToValidate = ["name", "tradeName", "customerType", "customerCategory", "status", "crNumber", "vatNumber"];
+      fieldsToValidate = ["name", "tradeName", "customerType", "customerCategory", "status", "crNumber", "vatNumber", "parentClientId"];
     } else if (activeStep === 2) {
       fieldsToValidate = ["contactPerson", "designation", "phone", "whatsappNumber", "email", "alternativeContact"];
     } else if (activeStep === 3) {
@@ -880,6 +896,38 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
                         <FormControl>
                           <Input {...field} data-testid="input-trade-name" />
                         </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="parentClientId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Major Customer / Parent Account (Optional)</FormLabel>
+                        <Select
+                          onValueChange={(val) => field.onChange(val === "none" ? null : val)}
+                          value={field.value || "none"}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="None (Independent Major Customer)" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="none">None (Independent Major Customer)</SelectItem>
+                            {potentialParents.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormDescription className="text-xs text-muted-foreground">
+                          Assign if this is a sub-client under a major customer (e.g. under BANZ).
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1699,6 +1747,10 @@ function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewP
     queryKey: [`/api/clients/${id}`],
   });
 
+  const { data: allClients = [] } = useQuery<Client[]>({
+    queryKey: ["/api/clients"],
+  });
+
   if (isLoading) {
     return (
       <div className="p-6 flex items-center justify-center">
@@ -1785,6 +1837,16 @@ function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewP
                     <span className="text-xs text-muted-foreground block font-medium uppercase">Status</span>
                     <div className="mt-1"><StatusBadge status={customer.status} /></div>
                   </div>
+                  {(customer as any).parentClientId && (
+                    <div>
+                      <span className="text-xs text-muted-foreground block font-medium uppercase">Major Customer / Parent</span>
+                      <div className="mt-1">
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                          {allClients.find(c => c.id === (customer as any).parentClientId)?.name || "Parent Account"}
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
