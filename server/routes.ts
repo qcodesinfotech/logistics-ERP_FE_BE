@@ -9899,7 +9899,7 @@ export async function registerRoutes(
 
   app.post("/api/drivers/closing-km", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { attendanceId, closingKm, latitude, longitude, crewCheckOutTime } = req.body;
+      const { attendanceId, closingKm, latitude, longitude, crewCheckOutTime, lastDeliveryTime } = req.body;
       if (!attendanceId || closingKm === undefined || closingKm === null) {
         return res.status(400).json({ error: "attendanceId and closingKm are required" });
       }
@@ -9924,9 +9924,48 @@ export async function registerRoutes(
         });
       }
 
+      // Determine checkOutTime: Duty hours is from login time to the last delivery time
+      let checkOutTime: Date = new Date();
+      if (lastDeliveryTime) {
+        const parsed = new Date(lastDeliveryTime);
+        if (!isNaN(parsed.getTime())) {
+          checkOutTime = parsed;
+        }
+      } else {
+        // Query database for the latest deliveredAt / deliveryEndTime for this driver today
+        try {
+          const matchDriverIds = [effectiveDriverId, req.user?.id, record.driverId].filter(Boolean) as string[];
+          const todayArabian = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
+          const recentDeliveries = await db.select({
+            deliveredAt: schema.dispatchDeliveries.deliveredAt,
+            deliveryEndTime: schema.dispatchDeliveries.deliveryEndTime,
+            createdAt: schema.dispatchDeliveries.createdAt,
+          })
+          .from(schema.dispatchDeliveries)
+          .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
+          .innerJoin(schema.dispatchSheets, eq(schema.dispatchItems.sheetId, schema.dispatchSheets.id))
+          .where(and(
+            inArray(schema.dispatchDeliveries.driverId, matchDriverIds),
+            eq(schema.dispatchSheets.date, todayArabian),
+            eq(schema.dispatchDeliveries.status, "delivered")
+          ))
+          .orderBy(desc(schema.dispatchDeliveries.deliveredAt), desc(schema.dispatchDeliveries.deliveryEndTime), desc(schema.dispatchDeliveries.createdAt));
+
+          if (recentDeliveries.length > 0) {
+            const top = recentDeliveries[0];
+            const topDate = top.deliveredAt ? new Date(top.deliveredAt) : (top.deliveryEndTime ? new Date(top.deliveryEndTime) : (top.createdAt ? new Date(top.createdAt) : null));
+            if (topDate && !isNaN(topDate.getTime())) {
+              checkOutTime = topDate;
+            }
+          }
+        } catch (queryErr) {
+          console.warn("Could not query last delivery time for driver:", queryErr);
+        }
+      }
+
       let shiftHours = "0.00";
       let overtimeHours = "0.00";
-      const checkOutTime = new Date();
       
       if (record && record.checkInTime) {
         const diffMs = checkOutTime.getTime() - new Date(record.checkInTime).getTime();
@@ -9959,12 +9998,13 @@ export async function registerRoutes(
         driverId: effectiveDriverId || updated.driverId,
         kmBefore: openingKmVal,
         kmAfter: closeKmVal,
-        notes: `Duty ended. Closing KM: ${closeKmVal}. Total KM: ${closeKmVal - openingKmVal}`,
+        notes: `Duty ended. Closing KM: ${closeKmVal}. Total KM: ${closeKmVal - openingKmVal}. Duty end time: ${checkOutTime.toISOString()}`,
       });
 
       res.json({
         attendance: updated,
         totalKmTravelled: closeKmVal - openingKmVal,
+        checkOutTime: checkOutTime.toISOString(),
       });
     } catch (error) {
       console.error("Record closing KM error:", error);
