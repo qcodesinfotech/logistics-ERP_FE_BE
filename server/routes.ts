@@ -9742,18 +9742,73 @@ export async function registerRoutes(
       const updated = await storage.updateDriverAttendance(targetRecord.id, {
         departureTime: depDate,
         loadingDurationMinutes,
+        ...(req.body.truckId && !targetRecord.truckId ? { truckId: String(req.body.truckId).trim() } : {}),
       });
 
       await storage.createDriverActivity({
         driverId: effectiveDriverId || targetRecord.driverId,
-        notes: `Truck departed store/warehouse at ${depDate.toLocaleTimeString()}. Loading duration: ${loadingDurationMinutes} minutes.`,
+        notes: `Truck departed store/warehouse premises at ${depDate.toLocaleTimeString()}. Loading duration: ${loadingDurationMinutes} minutes.`,
       });
+
+      // Auto-sync departure time and dispatched status to Daily Dispatch truck assignments
+      let syncedTruckAssignments = 0;
+      try {
+        let hours = depDate.getHours();
+        const minutes = depDate.getMinutes();
+        const ampm = hours >= 12 ? "PM" : "AM";
+        hours = hours % 12 || 12;
+        const formattedDepartTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
+
+        const todayStr = depDate.toLocaleDateString("en-CA");
+        const activeSheets = await db.select().from(schema.dispatchSheets)
+          .where(or(eq(schema.dispatchSheets.date, todayStr), eq(schema.dispatchSheets.status, "active")));
+        const sheetIds = activeSheets.map(s => s.id);
+
+        if (sheetIds.length > 0) {
+          const driverIdentifiers = [targetRecord.driverId, effectiveDriverId, req.user?.id].filter(Boolean) as string[];
+          const targetTruck = (req.body.truckId || targetRecord.truckId) ? String(req.body.truckId || targetRecord.truckId).trim().toLowerCase() : null;
+
+          let matchedVehicleId: string | null = null;
+          if (targetTruck) {
+            const allVehicles = await storage.getVehicles();
+            const matchedVeh = allVehicles.find(v => 
+              v.id.toLowerCase() === targetTruck ||
+              (v.plateNumber && v.plateNumber.toLowerCase() === targetTruck) ||
+              (v.name && v.name.toLowerCase() === targetTruck)
+            );
+            if (matchedVeh) matchedVehicleId = matchedVeh.id;
+          }
+
+          const truckAssignments = await db.select().from(schema.dispatchTruckAssignments)
+            .where(inArray(schema.dispatchTruckAssignments.sheetId, sheetIds));
+
+          for (const ta of truckAssignments) {
+            const matchesDriver = ta.driverId && driverIdentifiers.includes(ta.driverId);
+            const matchesTruck = (matchedVehicleId && ta.truckId === matchedVehicleId) ||
+                                 (targetTruck && ta.truckId.toLowerCase() === targetTruck);
+
+            if (matchesDriver || matchesTruck) {
+              const updatePayload: any = {
+                departTime: formattedDepartTime,
+              };
+              if (!ta.loadingStatus || ta.loadingStatus === "pending" || ta.loadingStatus === "loading" || ta.loadingStatus === "loaded") {
+                updatePayload.loadingStatus = "dispatched";
+              }
+              await storage.updateDispatchTruckAssignment(ta.id, updatePayload);
+              syncedTruckAssignments++;
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.error("Error auto-syncing departure time to dispatch truck assignments:", syncErr);
+      }
 
       res.json({
         success: true,
         attendanceId: targetRecord.id,
         departureTime: depDate,
         loadingDurationMinutes,
+        syncedTruckAssignments,
         record: updated,
       });
     } catch (error: any) {

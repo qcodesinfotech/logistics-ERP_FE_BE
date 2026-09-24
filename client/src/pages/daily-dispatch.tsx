@@ -84,6 +84,7 @@ interface ZoneGroup {
     loadingEndTime?: string | null;
     loadingStatus?: string | null;
     supervisorNotes?: string | null;
+    isAutoDeparted?: boolean | null;
   }[];
   outlets: OutletGroup[];
 }
@@ -1122,9 +1123,9 @@ function ZoneColumn({
                     <Badge 
                       className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5"
                       onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
-                      title="Click to view/edit timings"
+                      title={primaryTruck.isAutoDeparted ? "Auto-detected by driver premises GPS departure" : "Click to view/edit timings"}
                     >
-                      <Truck className="h-3 w-3" /> Dispatched {primaryTruck.departTime ? `@ ${primaryTruck.departTime}` : ""}
+                      <Truck className="h-3 w-3" /> Dispatched {primaryTruck.departTime ? `@ ${primaryTruck.departTime}` : ""} {primaryTruck.isAutoDeparted ? "📍" : ""}
                     </Badge>
                   ) : primaryTruck?.loadingStatus === "loaded" ? (
                     <Badge 
@@ -1733,7 +1734,15 @@ function ZoneColumn({
 
               {/* Dispatch Time */}
               <div className="space-y-1.5">
-                <Label className="text-xs">Dispatching (Departure) Time</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">Dispatching (Departure) Time</Label>
+                  {(primaryTruck?.isAutoDeparted || (primaryTruck?.departTime && primaryTruck?.loadingStatus === "dispatched")) && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Auto-detected via Driver GPS
+                    </span>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <Input
                     value={timingForm.departTime}

@@ -59,6 +59,30 @@ import { sendLeaveRequestNotification } from "./lib/email";
 import { type ScopeParams } from "./auth";
 import { randomUUID } from "crypto";
 
+export const formatTime12h = (timeInput: any): string => {
+  if (!timeInput) return "";
+  if (typeof timeInput === "string" && (timeInput.includes("AM") || timeInput.includes("PM"))) {
+    return timeInput;
+  }
+  const dateObj = new Date(timeInput);
+  if (isNaN(dateObj.getTime())) {
+    if (typeof timeInput === "string" && timeInput.includes(":")) {
+      const parts = timeInput.split(":");
+      let h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) || 0;
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12 || 12;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+    }
+    return String(timeInput);
+  }
+  let hours = dateObj.getHours();
+  const minutes = dateObj.getMinutes();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
+};
+
 // Storage interface for all CRUD operations
 export interface IStorage {
   // Users
@@ -3721,6 +3745,64 @@ export class DatabaseStorage implements IStorage {
     const allTrucks = allTruckIds.length > 0 ? await db.select().from(vehicles).where(inArray(vehicles.id, allTruckIds)) : [];
     const truckMap = new Map(allTrucks.map(t => [t.id, t]));
 
+    // Reconcile truck departure and reporting times with actual driver attendance GPS logs
+    try {
+      const [sheetRow] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.id, sheetId));
+      const sheetDateStr = sheetRow?.date ? (typeof sheetRow.date === 'string' ? sheetRow.date : new Date(sheetRow.date).toLocaleDateString("en-CA")) : new Date().toLocaleDateString("en-CA");
+      const allAttendances = await db.select().from(driverAttendance);
+      const sheetAttendances = allAttendances.filter(a => {
+        const attDate = a.checkInTime ? new Date(a.checkInTime).toLocaleDateString("en-CA") : (a.createdAt ? new Date(a.createdAt).toLocaleDateString("en-CA") : "");
+        return attDate === sheetDateStr;
+      });
+
+      for (const t of truckAssigns) {
+        const matchedAtt = sheetAttendances.find(a => {
+          if (t.driverId && a.driverId === t.driverId) return true;
+          if (t.truckId && a.truckId) {
+            const aTrk = a.truckId.trim().toLowerCase();
+            const tTrk = t.truckId.trim().toLowerCase();
+            const veh = truckMap.get(t.truckId);
+            const vehPlate = veh?.plateNumber?.trim().toLowerCase();
+            const vehName = veh?.name?.trim().toLowerCase();
+            return aTrk === tTrk || (vehPlate && aTrk === vehPlate) || (vehName && aTrk === vehName);
+          }
+          return false;
+        });
+
+        if (matchedAtt) {
+          let needsUpdate = false;
+          const updateData: any = {};
+
+          if (!t.reportingTime && matchedAtt.checkInTime) {
+            t.reportingTime = formatTime12h(matchedAtt.checkInTime);
+            updateData.reportingTime = t.reportingTime;
+            needsUpdate = true;
+          }
+
+          if (!t.departTime && matchedAtt.departureTime) {
+            t.departTime = formatTime12h(matchedAtt.departureTime);
+            (t as any).isAutoDeparted = true;
+            updateData.departTime = t.departTime;
+            if (t.loadingStatus === "pending" || t.loadingStatus === "loading" || t.loadingStatus === "loaded") {
+              t.loadingStatus = "dispatched";
+              updateData.loadingStatus = "dispatched";
+            }
+            needsUpdate = true;
+          } else if (matchedAtt.departureTime) {
+            (t as any).isAutoDeparted = true;
+          }
+
+          if (needsUpdate) {
+            await db.update(dispatchTruckAssignments)
+              .set(updateData)
+              .where(eq(dispatchTruckAssignments.id, t.id));
+          }
+        }
+      }
+    } catch (attSyncErr) {
+      console.error("Error reconciling driver attendance in getDispatchBoard:", attSyncErr);
+    }
+
     // Get all driver names (from both users and employees table)
     const allDriverIds = Array.from(new Set([
       ...allDriverZones.map(dz => dz.driverId),
@@ -3794,7 +3876,8 @@ export class DatabaseStorage implements IStorage {
           trucks: truckAssigns.filter(t => t.zoneId === effectiveZoneId).map(t => ({
              ...t,
              vehicle: truckMap.get(t.truckId),
-             driver: t.driverId ? driverMap.get(t.driverId) : null
+             driver: t.driverId ? driverMap.get(t.driverId) : null,
+             isAutoDeparted: (t as any).isAutoDeparted || false,
           })),
           outlets: {},
         };
