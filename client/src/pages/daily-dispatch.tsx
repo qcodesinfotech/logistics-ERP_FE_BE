@@ -857,6 +857,7 @@ function ZoneColumn({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       toast({ title: "Delivery sequence updated successfully" });
     },
     onError: (err: any) => {
@@ -2572,6 +2573,7 @@ export default function DailyDispatchPage() {
     onSuccess: () => {
       toast({ title: "Zone override applied!" });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       setOverrideDialog(null);
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
@@ -2582,6 +2584,7 @@ export default function DailyDispatchPage() {
     onSuccess: () => {
       toast({ title: "Item moved successfully!" });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       setItemOverrideDialog(null);
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
@@ -2677,6 +2680,7 @@ export default function DailyDispatchPage() {
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/overrides/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
     },
   });
 
@@ -4984,6 +4988,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
       apiRequest("POST", "/api/dispatch/outlets/assign", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       toast({ title: "Outlet assigned to truck!" });
     },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
@@ -4994,6 +4999,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
       apiRequest("DELETE", "/api/dispatch/outlets/assign", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       toast({ title: "Outlet unassigned" });
     },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
@@ -5004,6 +5010,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       const msg = data.overflow?.length > 0
         ? `Allocated ${data.allocated} outlets. ⚠ ${data.overflow.length} outlets couldn't fit any truck.`
         : `✅ Allocated ${data.allocated} outlets across trucks.`;
@@ -5914,6 +5921,7 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
       r.outletsMap.set(outletKey, {
         outletName: item.outletName,
         outletCode: item.outletCode,
+        sequence: item.sequence !== undefined ? item.sequence : 999999,
         items: []
       });
     }
@@ -5921,10 +5929,19 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
     r.outletsMap.get(outletKey).items.push(item);
   });
 
-  routeMap.forEach(r => {
+  const sortedRoutes = Array.from(routeMap.values()).sort((a, b) => (a.zoneName || "").localeCompare(b.zoneName || ""));
+
+  sortedRoutes.forEach(r => {
+    const outletsList = Array.from(r.outletsMap.values()).sort((a: any, b: any) => {
+      const seqA = a.sequence !== undefined ? a.sequence : 999999;
+      const seqB = b.sequence !== undefined ? b.sequence : 999999;
+      if (seqA !== seqB) return seqA - seqB;
+      return (a.outletName || "").localeCompare(b.outletName || "");
+    });
+
     groupedData.push({
       zoneName: r.zoneName,
-      outlets: Array.from(r.outletsMap.values())
+      outlets: outletsList
     });
   });
 
@@ -6101,6 +6118,11 @@ function PendingQuantitiesTab({ selectedDate }: { selectedDate?: string }) {
                               <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
                                 <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={isAdmin ? 9 : 8}>
                                   {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                                  {outlet.sequence !== undefined && outlet.sequence !== 999999 && (
+                                    <Badge variant="secondary" className="text-[10px] h-4 px-1.5 font-mono text-muted-foreground mr-0.5">
+                                      #{outlet.sequence + 1}
+                                    </Badge>
+                                  )}
                                   {outlet.outletName}
                                   <span className="text-xs text-muted-foreground ml-1">({outlet.outletCode})</span>
                                   <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">

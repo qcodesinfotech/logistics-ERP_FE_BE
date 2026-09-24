@@ -9372,14 +9372,11 @@ export class DatabaseStorage implements IStorage {
     if (endDate) {
       conditions.push(lte(schema.dispatchSheets.date, endDate));
     }
-    if (routeId && routeId !== 'all') {
-      conditions.push(or(
-        eq(schema.dispatchItems.routeId, routeId),
-        eq(schema.dispatchItems.overrideRouteId, routeId)
-      ));
-    }
     if (outletId && outletId !== 'all') {
-      conditions.push(eq(schema.dispatchItems.outletId, outletId));
+      conditions.push(or(
+        eq(schema.dispatchItems.outletId, outletId),
+        eq(schema.dispatchItems.outletCode, outletId)
+      ));
     }
     if (storageType && storageType !== 'all') {
       conditions.push(eq(schema.dispatchItems.storageType, storageType));
@@ -9401,29 +9398,106 @@ export class DatabaseStorage implements IStorage {
     .orderBy(desc(schema.dispatchSheets.date));
     
     const sheetIds = Array.from(new Set(results.map(r => r.sheet.id)));
-    const assignmentsMap = new Map();
+    
+    let allTruckAssignments: any[] = [];
+    let outletTruckAssignments: any[] = [];
+    let overrides: any[] = [];
+    let outletSeqs: any[] = [];
     
     if (sheetIds.length > 0) {
-      const allTruckAssignments = await db.select().from(schema.dispatchTruckAssignments)
+      allTruckAssignments = await db.select().from(schema.dispatchTruckAssignments)
         .where(inArray(schema.dispatchTruckAssignments.sheetId, sheetIds));
         
-      if (allTruckAssignments.length > 0) {
-        const truckAssigIds = allTruckAssignments.map(t => t.id);
-        const outletAssignments = await db.select().from(schema.dispatchOutletTruckAssignments)
+      const truckAssigIds = allTruckAssignments.map(t => t.id);
+      if (truckAssigIds.length > 0) {
+        outletTruckAssignments = await db.select().from(schema.dispatchOutletTruckAssignments)
           .where(inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckAssigIds));
-          
-        for (const oa of outletAssignments) {
-          const ta = allTruckAssignments.find(t => t.id === oa.truckAssignmentId);
-          if (ta) {
-            const key = `${ta.sheetId}_${oa.outletCode}${oa.storageType ? '_' + oa.storageType : ''}`;
-            assignmentsMap.set(key, ta);
-          }
+      }
+
+      overrides = await db.select().from(schema.dispatchOutletZoneOverrides)
+        .where(inArray(schema.dispatchOutletZoneOverrides.sheetId, sheetIds));
+
+      outletSeqs = await db.select().from(schema.dispatchOutletSequences)
+        .where(inArray(schema.dispatchOutletSequences.sheetId, sheetIds));
+    }
+
+    const allRoutes = await db.select().from(schema.routes);
+    const routeMap = new Map(allRoutes.map(r => [r.id, r]));
+
+    const allOutlets = await db.select().from(schema.outlets);
+    const outletMap = new Map(allOutlets.map(o => [o.id, o]));
+    const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+    const outletCodeMap = new Map(allOutlets.map(o => [normalizeCode(o.code || ""), o]));
+
+    const vehicles = await db.select().from(schema.vehicles);
+    const vehicleById = new Map(vehicles.map(v => [v.id, v]));
+    const vehicleByPlate = new Map(vehicles.map(v => [v.plateNumber, v]));
+
+    const users = await db.select().from(schema.users);
+    const userMap = new Map<string, string>(users.map(u => [u.id, u.name || u.username]));
+
+    const employeesList = await db.select().from(schema.employees);
+    for (const emp of employeesList) {
+      if (!userMap.has(emp.id)) {
+        userMap.set(emp.id, emp.name);
+      }
+    }
+
+    // Index sheet-specific overrides
+    const sheetOverridesMap = new Map<string, Map<string, any>>();
+    for (const ov of overrides) {
+      if (!sheetOverridesMap.has(ov.sheetId)) {
+        sheetOverridesMap.set(ov.sheetId, new Map());
+      }
+      const map = sheetOverridesMap.get(ov.sheetId)!;
+      const st = ov.storageType ? ov.storageType.trim().toLowerCase() : null;
+      if (st) {
+        map.set(`${ov.outletId}:${st}`, ov);
+      } else {
+        map.set(ov.outletId, ov);
+      }
+    }
+
+    // Index sheet-specific truck assignments
+    const truckAssignMap = new Map<string, any>(allTruckAssignments.map(ta => [ta.id, ta]));
+    const sheetTruckAssignsMap = new Map<string, any[]>();
+    for (const ta of allTruckAssignments) {
+      if (!sheetTruckAssignsMap.has(ta.sheetId)) {
+        sheetTruckAssignsMap.set(ta.sheetId, []);
+      }
+      sheetTruckAssignsMap.get(ta.sheetId)!.push(ta);
+    }
+
+    // Index sheet-specific outlet-to-truck assignments
+    const sheetOutletTruckMap = new Map<string, Map<string, string>>();
+    for (const ota of outletTruckAssignments) {
+      const ta = truckAssignMap.get(ota.truckAssignmentId);
+      if (ta) {
+        if (!sheetOutletTruckMap.has(ta.sheetId)) {
+          sheetOutletTruckMap.set(ta.sheetId, new Map());
+        }
+        const map = sheetOutletTruckMap.get(ta.sheetId)!;
+        const st = ota.storageType ? ota.storageType.trim().toLowerCase() : null;
+        if (ota.outletId) {
+          if (st) map.set(`${ota.outletId}_${st}`, ota.truckAssignmentId);
+          map.set(ota.outletId, ota.truckAssignmentId);
+        }
+        if (ota.outletCode) {
+          if (st) map.set(`${ota.outletCode}_${st}`, ota.truckAssignmentId);
+          map.set(ota.outletCode, ota.truckAssignmentId);
+          const norm = normalizeCode(ota.outletCode);
+          if (st) map.set(`${norm}_${st}`, ota.truckAssignmentId);
+          map.set(norm, ota.truckAssignmentId);
         }
       }
     }
-    
-    const vehicles = await db.select().from(schema.vehicles);
-    const users = await db.select().from(schema.users);
+
+    // Index outlet sequence per sheet and route
+    const seqMap = new Map<string, number>();
+    for (const s of outletSeqs) {
+      seqMap.set(`${s.sheetId}-${s.routeId}-${s.outletId}`, s.sequence);
+      seqMap.set(`${s.routeId}-${s.outletId}`, s.sequence);
+    }
     
     // Check if any carried-forward downstream items have already been completed
     const downstreamIds = results.map(r => r.item.carriedToItemId).filter(Boolean) as string[];
@@ -9456,26 +9530,92 @@ export class DatabaseStorage implements IStorage {
       return true;
     });
 
-    const mapped = filteredResults.map(r => {
-      const outletCode = r.outlet?.code || r.item.outletCode;
+    let mapped = filteredResults.map(r => {
       const sheetId = r.sheet.id;
-      const st = r.item.storageType;
-      
-      let assignment = assignmentsMap.get(`${sheetId}_${outletCode}_${st}`);
-      if (!assignment) {
-        assignment = assignmentsMap.get(`${sheetId}_${outletCode}`);
+      const outletId = r.outlet?.id || r.item.outletId;
+      const outletCode = r.outlet?.code || r.item.outletCode;
+      const normCode = normalizeCode(outletCode);
+      const st = r.item.storageType ? r.item.storageType.trim().toLowerCase() : null;
+
+      // 1. Resolve override on this sheet
+      const overrideMap = sheetOverridesMap.get(sheetId);
+      let ov = null;
+      if (overrideMap) {
+        if (outletId && st) ov = overrideMap.get(`${outletId}:${st}`);
+        if (!ov && outletId) ov = overrideMap.get(outletId);
+        if (!ov && outletCode && st) ov = overrideMap.get(`${outletCode}:${st}`);
+        if (!ov && outletCode) ov = overrideMap.get(outletCode);
+        if (!ov && normCode && st) ov = overrideMap.get(`${normCode}:${st}`);
+        if (!ov && normCode) ov = overrideMap.get(normCode);
       }
-      
-      let assignedTruckPlate = null;
-      let assignedDriverName = null;
-      let actualDriverId = null;
-      
-      if (assignment) {
-        actualDriverId = assignment.driverId;
-        const vehicle = vehicles.find(v => v.id === assignment.truckId);
-        const driver = users.find(u => u.id === assignment.driverId);
-        assignedTruckPlate = vehicle ? vehicle.plateNumber : null;
-        assignedDriverName = driver ? (driver.name || driver.username) : null;
+
+      // 2. Resolve truck assignment
+      const outletToTruck = sheetOutletTruckMap.get(sheetId);
+      let tAssignId: string | null = null;
+      if (ov?.overrideTruckId) {
+        tAssignId = ov.overrideTruckId;
+      } else if (outletToTruck) {
+        if (outletId && st) tAssignId = outletToTruck.get(`${outletId}_${st}`) || null;
+        if (!tAssignId && outletCode && st) tAssignId = outletToTruck.get(`${outletCode}_${st}`) || null;
+        if (!tAssignId && normCode && st) tAssignId = outletToTruck.get(`${normCode}_${st}`) || null;
+        if (!tAssignId && outletId) tAssignId = outletToTruck.get(outletId) || null;
+        if (!tAssignId && outletCode) tAssignId = outletToTruck.get(outletCode) || null;
+        if (!tAssignId && normCode) tAssignId = outletToTruck.get(normCode) || null;
+      }
+
+      const assignedTruck = tAssignId ? truckAssignMap.get(tAssignId) : null;
+
+      // 3. Resolve effectiveZoneId (Actual route as per moves and arrangements)
+      let effectiveZoneId: string | null = null;
+      if (assignedTruck && assignedTruck.zoneId) {
+        effectiveZoneId = assignedTruck.zoneId;
+      } else if (r.item.overrideRouteId) {
+        effectiveZoneId = r.item.overrideRouteId;
+      } else if (ov && ov.overrideZoneId) {
+        effectiveZoneId = ov.overrideZoneId;
+      } else if (outletId && outletMap.get(outletId)?.routeId) {
+        effectiveZoneId = outletMap.get(outletId)!.routeId;
+      } else if (outletCode && outletCodeMap.get(normCode)?.routeId) {
+        effectiveZoneId = outletCodeMap.get(normCode)!.routeId;
+      } else if (r.item.routeId) {
+        effectiveZoneId = r.item.routeId;
+      }
+
+      const resolvedRoute = effectiveZoneId ? routeMap.get(effectiveZoneId) : null;
+
+      // 4. Resolve assigned driver and truck plate
+      let actualDriverId: string | null = null;
+      let assignedTruckPlate: string | null = null;
+      let assignedDriverName: string | null = null;
+
+      if (assignedTruck) {
+        actualDriverId = assignedTruck.driverId;
+        const vehicle = vehicleById.get(assignedTruck.truckId) || vehicleByPlate.get(assignedTruck.truckId);
+        assignedTruckPlate = vehicle ? vehicle.plateNumber : (assignedTruck.truckId && !assignedTruck.truckId.includes('-') ? assignedTruck.truckId : null);
+      }
+      if (!actualDriverId && r.delivery?.driverId) {
+        actualDriverId = r.delivery.driverId;
+      }
+      if (actualDriverId) {
+        assignedDriverName = userMap.get(actualDriverId) || null;
+      }
+
+      // 5. Resolve sequence (arranged delivery order)
+      let itemSeq = 999999;
+      if (effectiveZoneId) {
+        if (outletId && seqMap.has(`${sheetId}-${effectiveZoneId}-${outletId}`)) {
+          itemSeq = seqMap.get(`${sheetId}-${effectiveZoneId}-${outletId}`)!;
+        } else if (outletCode && seqMap.has(`${sheetId}-${effectiveZoneId}-${outletCode}`)) {
+          itemSeq = seqMap.get(`${sheetId}-${effectiveZoneId}-${outletCode}`)!;
+        } else if (normCode && seqMap.has(`${sheetId}-${effectiveZoneId}-${normCode}`)) {
+          itemSeq = seqMap.get(`${sheetId}-${effectiveZoneId}-${normCode}`)!;
+        } else if (outletId && seqMap.has(`${effectiveZoneId}-${outletId}`)) {
+          itemSeq = seqMap.get(`${effectiveZoneId}-${outletId}`)!;
+        } else if (outletCode && seqMap.has(`${effectiveZoneId}-${outletCode}`)) {
+          itemSeq = seqMap.get(`${effectiveZoneId}-${outletCode}`)!;
+        } else if (normCode && seqMap.has(`${effectiveZoneId}-${normCode}`)) {
+          itemSeq = seqMap.get(`${effectiveZoneId}-${normCode}`)!;
+        }
       }
       
       return {
@@ -9498,9 +9638,12 @@ export class DatabaseStorage implements IStorage {
         carriedFromItemId: r.item.carriedFromItemId || null,
         carriedToItemId: r.item.carriedToItemId || null,
         isCarriedForward: !!r.item.carriedFromItemId,
-        zoneName: r.route?.name || "Unassigned Route",
-        outletName: r.outlet?.name || "Unknown Outlet",
-        outletCode: r.outlet?.code || r.item.outletCode || "Unknown",
+        routeId: effectiveZoneId || null,
+        zoneName: resolvedRoute?.name || r.route?.name || "Unassigned Route",
+        outletId: outletId || null,
+        outletName: r.outlet?.name || outletCodeMap.get(normCode)?.name || "Unknown Outlet",
+        outletCode: outletCode || "Unknown",
+        sequence: itemSeq,
         assignedDriverId: actualDriverId,
         assignedTruckPlate,
         assignedDriverName
@@ -9508,8 +9651,23 @@ export class DatabaseStorage implements IStorage {
     });
     
     if (driverId && driverId !== 'all') {
-      return mapped.filter(m => m.assignedDriverId === driverId);
+      mapped = mapped.filter(m => m.assignedDriverId === driverId);
     }
+    
+    if (routeId && routeId !== 'all') {
+      mapped = mapped.filter(m => m.routeId === routeId);
+    }
+
+    // Sort by sheet date desc, then route name asc, then sequence asc, then outlet name asc, then itemCode asc
+    mapped.sort((a, b) => {
+      if (a.date !== b.date) return (b.date || "").localeCompare(a.date || "");
+      if (a.zoneName !== b.zoneName) return (a.zoneName || "").localeCompare(b.zoneName || "");
+      if ((a.sequence ?? 999999) !== (b.sequence ?? 999999)) {
+        return (a.sequence ?? 999999) - (b.sequence ?? 999999);
+      }
+      if (a.outletName !== b.outletName) return (a.outletName || "").localeCompare(b.outletName || "");
+      return (a.itemCode || "").localeCompare(b.itemCode || "");
+    });
     
     return mapped;
   }
