@@ -27,7 +27,8 @@ import {
   Route,
   Globe,
   Store,
-  History
+  History,
+  Smartphone
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { usePermissions } from "@/contexts/permissions-context";
@@ -72,7 +73,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Users", url: "/users", icon: Users, menuKey: "users", superAdminOnly: true },
       // { title: "Compliance Reminders", url: "/compliance/reminders", icon: Clock, menuKey: "compliance" },
       { title: "Roles & Permissions", url: "/rbac", icon: Shield, menuKey: "rbac", superAdminOnly: true },
-      // { title: "System Settings", url: "/settings", icon: Settings, menuKey: "settings", superAdminOnly: true },
+      { title: "System Settings", url: "/settings", icon: Settings },
     ],
   },
   {
@@ -86,6 +87,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
       { title: "Fleet & Assets", url: "/logistics/fleet", icon: Truck },
       { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },
+      { title: "Driver App Updates", url: "/settings", icon: Smartphone },
     ],
   },
   {

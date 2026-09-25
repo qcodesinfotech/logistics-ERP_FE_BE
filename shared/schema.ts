@@ -2177,6 +2177,22 @@ export const companySettings = pgTable("company_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const mobileAppVersions = pgTable("mobile_app_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  platform: text("platform").notNull().default("android"),
+  versionName: text("version_name").notNull().default("1.0.1"),
+  versionCode: integer("version_code").notNull().default(1),
+  minVersionCode: integer("min_version_code").notNull().default(1),
+  forceUpdate: boolean("force_update").notNull().default(true),
+  apkUrl: text("apk_url"),
+  apkFileName: text("apk_file_name"),
+  releaseNotes: text("release_notes").default("Operational update: Live route segregation, automated duty hours, and Jasmis outlets."),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type MobileAppVersion = typeof mobileAppVersions.$inferSelect;
+export type InsertMobileAppVersion = typeof mobileAppVersions.$inferInsert;
+
 // Zod insertion schemas
 export const insertZoneSchema = createInsertSchema(zones).omit({ id: true, createdAt: true });
 export const insertSupervisorZoneSchema = createInsertSchema(supervisorZones).omit({ id: true, createdAt: true });

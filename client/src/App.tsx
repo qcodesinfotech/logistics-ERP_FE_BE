@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { User as UserIcon, LogOut, Key, ChevronDown, Truck } from "lucide-react";
+import { User as UserIcon, LogOut, Key, ChevronDown, Truck, Settings } from "lucide-react";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
@@ -123,7 +123,7 @@ function AuthenticatedLayoutContent() {
   const { user, logout, canChangeScope } = useAuth();
   const { isScopeReady, isLoading: scopeLoading } = useGlobalScope();
   const [isChangePasswordOpen, setIsChangePasswordOpen] = React.useState(false);
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   
   const style = {
     "--sidebar-width": "16rem",
@@ -197,6 +197,10 @@ function AuthenticatedLayoutContent() {
                   <DropdownMenuItem onClick={() => setIsChangePasswordOpen(true)}>
                     <Key className="mr-2 h-4 w-4" />
                     <span>Change Password</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation("/settings")}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>System Settings & App Updates</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-600">

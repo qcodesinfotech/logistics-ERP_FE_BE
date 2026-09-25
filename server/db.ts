@@ -101,6 +101,23 @@ export async function ensureDriverTablesSchema() {
         "created_at" timestamp DEFAULT now()
       );
 
+      CREATE TABLE IF NOT EXISTS "mobile_app_versions" (
+        "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        "platform" text NOT NULL DEFAULT 'android',
+        "version_name" text NOT NULL DEFAULT '1.0.1',
+        "version_code" integer NOT NULL DEFAULT 2,
+        "min_version_code" integer NOT NULL DEFAULT 2,
+        "force_update" boolean NOT NULL DEFAULT true,
+        "apk_url" text DEFAULT '/uploads/apks/ERP.apk',
+        "apk_file_name" text DEFAULT 'ERP.apk',
+        "release_notes" text DEFAULT 'Operational update: Live route segregation, automated duty hours, and Jasmis outlets.',
+        "updated_at" timestamp DEFAULT now()
+      );
+
+      INSERT INTO "mobile_app_versions" ("platform", "version_name", "version_code", "min_version_code", "force_update", "apk_url", "apk_file_name", "release_notes")
+      SELECT 'android', '1.0.1', 2, 2, true, '/uploads/apks/ERP.apk', 'ERP.apk', 'Operational update: Live route segregation, automated duty hours, and Jasmis outlets.'
+      WHERE NOT EXISTS (SELECT 1 FROM "mobile_app_versions" WHERE "platform" = 'android');
+
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "current_zone_id" varchar;
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "assigned_brand_id" varchar;
       ALTER TABLE "vehicles" ADD COLUMN IF NOT EXISTS "assigned_driver_id" varchar;

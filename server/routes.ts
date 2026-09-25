@@ -7085,6 +7085,109 @@ export async function registerRoutes(
     }
   });
 
+  // Mobile App Version Check (Public - needed before and after login)
+  app.get("/api/mobile/version-check", async (req, res) => {
+    try {
+      const platform = (req.query.platform as string) || "android";
+      const currentCode = parseInt((req.query.versionCode as string) || "0", 10);
+
+      const versions = await db.select().from(schema.mobileAppVersions).where(eq(schema.mobileAppVersions.platform, platform));
+      let versionData = versions[0];
+
+      if (!versionData) {
+        versionData = {
+          id: "default",
+          platform: "android",
+          versionName: "1.0.1",
+          versionCode: 2,
+          minVersionCode: 2,
+          forceUpdate: true,
+          apkUrl: "/uploads/apks/ERP.apk",
+          apkFileName: "ERP.apk",
+          releaseNotes: "Required operational update: Live route segregation, automated duty hours, and Jasmis outlets.",
+          updatedAt: new Date(),
+        };
+      }
+
+      const updateAvailable = currentCode > 0 ? currentCode < versionData.versionCode : false;
+      const isForceUpdate = versionData.forceUpdate && (currentCode > 0 ? (currentCode < versionData.minVersionCode || currentCode < versionData.versionCode) : false);
+
+      const host = req.get("host") || "logistics.erp.qcodesinfotech.com";
+      const protocol = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
+      const baseUrl = `${protocol}://${host}`;
+
+      const fullApkUrl = versionData.apkUrl?.startsWith("http")
+        ? versionData.apkUrl
+        : `${baseUrl}${versionData.apkUrl || "/uploads/apks/ERP.apk"}`;
+
+      res.json({
+        platform: versionData.platform,
+        latestVersionName: versionData.versionName,
+        latestVersionCode: versionData.versionCode,
+        minVersionCode: versionData.minVersionCode,
+        clientVersionCode: currentCode,
+        updateAvailable,
+        forceUpdate: isForceUpdate,
+        apkUrl: fullApkUrl,
+        downloadUrl: `${baseUrl}/api/mobile/download-apk`,
+        releaseNotes: versionData.releaseNotes || "Performance improvements and bug fixes.",
+        updatedAt: versionData.updatedAt,
+      });
+    } catch (error: any) {
+      console.error("Mobile version check error:", error);
+      res.status(500).json({ error: error.message || "Failed to check version" });
+    }
+  });
+
+  // Mobile APK direct download
+  app.get("/api/mobile/download-apk", (req, res) => {
+    const apkPath = path.join(process.cwd(), "uploads", "apks", "ERP.apk");
+    if (fs.existsSync(apkPath)) {
+      res.download(apkPath, "ERP.apk");
+    } else {
+      res.status(404).json({ error: "APK build file not found" });
+    }
+  });
+
+  // Mobile version config update (Admin only)
+  app.post("/api/mobile/version-config", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      if (req.user?.role !== "admin" && req.user?.role !== "super_admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+
+      const { platform = "android", versionName, versionCode, minVersionCode, forceUpdate, releaseNotes } = req.body;
+      const existing = await db.select().from(schema.mobileAppVersions).where(eq(schema.mobileAppVersions.platform, platform));
+
+      if (existing.length > 0) {
+        const [updated] = await db.update(schema.mobileAppVersions).set({
+          versionName: versionName || existing[0].versionName,
+          versionCode: versionCode !== undefined ? Number(versionCode) : existing[0].versionCode,
+          minVersionCode: minVersionCode !== undefined ? Number(minVersionCode) : existing[0].minVersionCode,
+          forceUpdate: forceUpdate !== undefined ? Boolean(forceUpdate) : existing[0].forceUpdate,
+          releaseNotes: releaseNotes !== undefined ? releaseNotes : existing[0].releaseNotes,
+          updatedAt: new Date(),
+        }).where(eq(schema.mobileAppVersions.id, existing[0].id)).returning();
+        res.json(updated);
+      } else {
+        const [inserted] = await db.insert(schema.mobileAppVersions).values({
+          platform,
+          versionName: versionName || "1.0.1",
+          versionCode: Number(versionCode || 2),
+          minVersionCode: Number(minVersionCode || 2),
+          forceUpdate: forceUpdate !== undefined ? Boolean(forceUpdate) : true,
+          releaseNotes: releaseNotes || "Operational update",
+          apkUrl: "/uploads/apks/ERP.apk",
+          apkFileName: "ERP.apk",
+        }).returning();
+        res.status(201).json(inserted);
+      }
+    } catch (error: any) {
+      console.error("Mobile version update error:", error);
+      res.status(500).json({ error: error.message || "Failed to update version config" });
+    }
+  });
+
   // Helper to calculate distance for Geofence validation
   function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
     const R = 6371e3; // metres
