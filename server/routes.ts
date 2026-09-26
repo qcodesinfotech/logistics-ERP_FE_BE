@@ -7658,22 +7658,36 @@ export async function registerRoutes(
       // Note: createDispatchSheet now takes mergeStrategy. It deletes the sheet if "overwrite" or if not provided.
       const sheet = await storage.createDispatchSheet({ date, uploadedBy, fileName, clientId: clientId || null }, mergeStrategy);
 
-      // Resolve outlet codes to outlet IDs and route IDs
+      // Resolve outlet codes to outlet IDs and route IDs scoped by client
       const allOutlets = await storage.getOutlets();
       
+      let parentClientId: string | null = null;
+      if (clientId) {
+        const clientObj = await storage.getClient(clientId);
+        parentClientId = clientObj?.parentClientId || null;
+      }
+
       const normalizeOutletCode = (code: string | number | null | undefined): string => {
         if (code === null || code === undefined) return "";
         return String(code).trim().toLowerCase().replace(/^0+/, "");
       };
 
-      const outletCodeMap = new Map();
-      const outletNameMap = new Map();
+      const clientOutletCodeMap = new Map<string, any>();
+      const clientOutletNameMap = new Map<string, any>();
+      const genericOutletCodeMap = new Map<string, any>();
+      const genericOutletNameMap = new Map<string, any>();
+
       allOutlets.forEach(o => {
+        const cKey = o.clientId || "null";
         if (o.code) {
-          outletCodeMap.set(normalizeOutletCode(o.code), o);
+          const normCode = normalizeOutletCode(o.code);
+          clientOutletCodeMap.set(`${cKey}:${normCode}`, o);
+          if (!genericOutletCodeMap.has(normCode)) genericOutletCodeMap.set(normCode, o);
         }
         if (o.name) {
-          outletNameMap.set(o.name.trim().toLowerCase(), o);
+          const normName = o.name.trim().toLowerCase();
+          clientOutletNameMap.set(`${cKey}:${normName}`, o);
+          if (!genericOutletNameMap.has(normName)) genericOutletNameMap.set(normName, o);
         }
       });
 
@@ -7734,11 +7748,17 @@ export async function registerRoutes(
       });
 
       // Auto-register any new outlets found in the uploaded sheet for this client
+      const cKey = clientId || "null";
       for (const row of items) {
         const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
         const rawCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
         const norm = normalizeOutletCode(rawCode);
-        if (norm && !outletCodeMap.has(norm)) {
+        const hasExisting = norm && (
+          clientOutletCodeMap.has(`${cKey}:${norm}`) ||
+          (parentClientId ? clientOutletCodeMap.has(`${parentClientId}:${norm}`) : false)
+        );
+
+        if (norm && !hasExisting) {
           const outletName = rawDesc || `Outlet ${rawCode}`;
           try {
             const [newOutlet] = await db.insert(schema.outlets).values({
@@ -7748,8 +7768,10 @@ export async function registerRoutes(
               status: "active"
             }).returning();
             if (newOutlet) {
-              outletCodeMap.set(norm, newOutlet);
-              outletNameMap.set(outletName.toLowerCase(), newOutlet);
+              clientOutletCodeMap.set(`${cKey}:${norm}`, newOutlet);
+              clientOutletNameMap.set(`${cKey}:${outletName.toLowerCase()}`, newOutlet);
+              if (!genericOutletCodeMap.has(norm)) genericOutletCodeMap.set(norm, newOutlet);
+              if (!genericOutletNameMap.has(outletName.toLowerCase())) genericOutletNameMap.set(outletName.toLowerCase(), newOutlet);
             }
           } catch {
             // Safe ignore in case of race condition
@@ -7807,7 +7829,16 @@ export async function registerRoutes(
           const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
           const rowCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
           const outletDesc = rawDesc.toLowerCase();
-          const outlet = outletCodeMap.get(normalizeOutletCode(rowCode)) || (outletDesc ? outletNameMap.get(outletDesc) : null);
+          const normCode = normalizeOutletCode(rowCode);
+          const outlet =
+            (normCode ? clientOutletCodeMap.get(`${cKey}:${normCode}`) : null) ||
+            (normCode && parentClientId ? clientOutletCodeMap.get(`${parentClientId}:${normCode}`) : null) ||
+            (outletDesc ? clientOutletNameMap.get(`${cKey}:${outletDesc}`) : null) ||
+            (outletDesc && parentClientId ? clientOutletNameMap.get(`${parentClientId}:${outletDesc}`) : null) ||
+            (normCode ? clientOutletCodeMap.get(`null:${normCode}`) : null) ||
+            (outletDesc ? clientOutletNameMap.get(`null:${outletDesc}`) : null) ||
+            (normCode ? genericOutletCodeMap.get(normCode) : null) ||
+            (outletDesc ? genericOutletNameMap.get(outletDesc) : null);
           const itemCode = String(row.item_code || row.item_number || row.itemCode || row.product_code || row.product || row.sku || "").trim();
           
           let description = row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || null;

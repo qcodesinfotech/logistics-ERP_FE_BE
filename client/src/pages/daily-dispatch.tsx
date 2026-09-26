@@ -2112,6 +2112,9 @@ export default function DailyDispatchPage() {
     localStorage.setItem("dispatchBoardClientId", boardClientId);
     setBoardBrandId("all");
     localStorage.setItem("dispatchBoardBrandId", "all");
+    if (boardClientId && boardClientId !== "all") {
+      setUploadClientId(boardClientId);
+    }
   }, [boardClientId]);
 
   useEffect(() => {
@@ -3027,7 +3030,11 @@ export default function DailyDispatchPage() {
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-shrink-0">
                 <FileText className="h-3.5 w-3.5" />
                 No sheet.
-                <Button size="sm" variant="ghost" className="h-8 text-xs px-1" onClick={() => { setUploadDate(selectedDate); setActiveTab("upload"); }}>
+                <Button size="sm" variant="ghost" className="h-8 text-xs px-1" onClick={() => {
+                  setUploadDate(selectedDate);
+                  if (boardClientId && boardClientId !== "all") setUploadClientId(boardClientId);
+                  setActiveTab("upload");
+                }}>
                   Upload one →
                 </Button>
               </div>
@@ -3744,17 +3751,22 @@ export default function DailyDispatchPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Client / Customer</Label>
+                  <Label className="flex items-center gap-1.5 font-medium">
+                    Client / Customer <span className="text-red-500">*</span>
+                  </Label>
                   <select
                     value={uploadClientId}
                     onChange={e => setUploadClientId(e.target.value)}
-                    className="w-full h-10 border rounded-md px-3 bg-transparent text-sm"
+                    className="w-full h-10 border rounded-md px-3 bg-transparent text-sm font-medium focus:ring-2 focus:ring-primary/20"
                   >
-                    <option value="">-- Select Client --</option>
-                    {clientList.map((c: any) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                    <option value="">-- Select Client (e.g. BANZ → Americana or BANZ → Jasmis) --</option>
+                    {clientOptions.map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.displayName}</option>
                     ))}
                   </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Assigning the correct customer ensures outlets and deliveries are isolated and never mixed with another client.
+                  </p>
                 </div>
 
                 {/* Dropzone */}

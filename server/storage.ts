@@ -3651,13 +3651,51 @@ export class DatabaseStorage implements IStorage {
 
   async getDispatchItemsForSheet(sheetId: string): Promise<any[]> {
     const itemsRaw = await db.select().from(dispatchItems).where(eq(dispatchItems.sheetId, sheetId));
+    const [sheet] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.id, sheetId));
+    const sheetClientId = sheet?.clientId || null;
+
+    let parentClientId: string | null = null;
+    if (sheetClientId) {
+      const [clientObj] = await db.select().from(clients).where(eq(clients.id, sheetClientId));
+      parentClientId = clientObj?.parentClientId || null;
+    }
+
     const allOutlets = await db.select().from(outlets);
+    const outletMapById = new Map(allOutlets.map(o => [o.id, o]));
     const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
-    const outletCodeMap = new Map(allOutlets.map(o => [normalizeCode(o.code || ""), o]));
+
+    // Build hierarchical client-aware maps
+    const exactClientCodeMap = new Map();
+    const parentClientCodeMap = new Map();
+    const unassignedClientCodeMap = new Map();
+    const genericCodeMap = new Map();
+
+    for (const o of allOutlets) {
+      if (!o.code) continue;
+      const code = normalizeCode(o.code);
+      if (!genericCodeMap.has(code)) genericCodeMap.set(code, o);
+
+      if (sheetClientId && o.clientId === sheetClientId) {
+        exactClientCodeMap.set(code, o);
+      } else if (parentClientId && o.clientId === parentClientId) {
+        parentClientCodeMap.set(code, o);
+      } else if (!o.clientId) {
+        unassignedClientCodeMap.set(code, o);
+      }
+    }
 
     const items = [];
     for (const item of itemsRaw) {
-      const outlet = outletCodeMap.get(normalizeCode(item.outletCode));
+      const code = normalizeCode(item.outletCode);
+      // If item already has a valid outlet assigned that matches the outletCode and belongs to this client, preserve it!
+      let outlet = item.outletId ? outletMapById.get(item.outletId) : null;
+      if (!outlet || normalizeCode(outlet.code || "") !== code || (sheetClientId && outlet.clientId && outlet.clientId !== sheetClientId && outlet.clientId !== parentClientId)) {
+        outlet = (sheetClientId ? exactClientCodeMap.get(code) : null) ||
+                 (parentClientId ? parentClientCodeMap.get(code) : null) ||
+                 unassignedClientCodeMap.get(code) ||
+                 genericCodeMap.get(code);
+      }
+
       if (outlet) {
         const targetRouteId = outlet.routeId;
         if (item.outletId !== outlet.id || item.routeId !== targetRouteId) {
