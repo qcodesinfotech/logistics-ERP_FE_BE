@@ -2123,6 +2123,7 @@ export default function DailyDispatchPage() {
 
   const { data: clientList = [] } = useQuery<any[]>({ queryKey: ["/api/clients"] });
   const { data: brandList = [] } = useQuery<any[]>({ queryKey: ["/api/brands"] });
+  const { data: knownProducts = [] } = useQuery<any[]>({ queryKey: ["/api/dispatch/known-products"] });
 
   const clientOptions = useMemo(() => {
     const parentMap = new Map<string, string>();
@@ -2193,6 +2194,10 @@ export default function DailyDispatchPage() {
     isOpen: false,
     selectedOutletCode: "",
   });
+  const [addModalTab, setAddModalTab] = useState<"single" | "bulk">("single");
+  const [bulkOutlets, setBulkOutlets] = useState<Record<string, number>>({});
+  const [bulkDefaultQty, setBulkDefaultQty] = useState<string>("1");
+  const [bulkOutletFilter, setBulkOutletFilter] = useState<string>("");
 
   const [summarySearchQuery, setSummarySearchQuery] = useState("");
   const [pivotSearchQuery, setPivotSearchQuery] = useState("");
@@ -2616,14 +2621,15 @@ export default function DailyDispatchPage() {
 
   // Item Management mutations
   const addItemMutation = useMutation({
-    mutationFn: async (data: { sheetId: string; outletCode: string; itemCode: string; description: string; requestedQty: number; storageType: string; routeId?: string; toNo?: string; uom?: string }) => {
+    mutationFn: async (data: any) => {
       const res = await apiRequest("POST", `/api/dispatch/sheets/${data.sheetId}/items`, data);
       return res.json();
     },
-    onSuccess: (newItem) => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
-      setEditedItems(prev => [...prev, newItem]);
-      toast({ title: "Item added successfully" });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      const count = result?.count || (result?.id ? 1 : 0);
+      toast({ title: count > 1 ? `Successfully added items across ${count} outlets!` : "Item added successfully!" });
       setNewItemForm({
         itemCode: "",
         description: "",
@@ -2633,6 +2639,7 @@ export default function DailyDispatchPage() {
         toNo: "",
         uom: "",
       });
+      setBulkOutlets({});
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -2907,14 +2914,6 @@ export default function DailyDispatchPage() {
 
     const existingSheet = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
     if (existingSheet) {
-      if (existingSheet.hasDeliveryStarted) {
-        toast({
-          title: "Cannot Replace Sheet",
-          description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
-          variant: "destructive",
-        });
-        return;
-      }
       setMergeConfirmOpen(true);
       return;
     }
@@ -3953,66 +3952,83 @@ export default function DailyDispatchPage() {
 
       {/* Merge Confirm Dialog */}
       <Dialog open={mergeConfirmOpen} onOpenChange={setMergeConfirmOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Sheet Already Exists</DialogTitle>
-            <DialogDescription>
-              A dispatch sheet for {format(parseISO(uploadDate), "dd MMM yyyy")} already exists. How would you like to handle duplicates?
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <FileText className="h-5 w-5 text-primary" />
+              Sheet Already Exists for this Date
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              A dispatch sheet for <strong>{format(parseISO(uploadDate), "dd MMM yyyy")}</strong> is already active. Choose how you want to process this file:
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3 mt-2">
-            <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
-              const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
-              if (currentExisting?.hasDeliveryStarted) {
-                toast({
-                  title: "Cannot Replace Sheet",
-                  description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
-                  variant: "destructive",
-                });
-                setMergeConfirmOpen(false);
-                return;
-              }
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip", clientId: uploadClientId });
-              setMergeConfirmOpen(false);
-            }}>
-              <p className="font-medium text-sm text-primary">Skip Duplicates</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Ignore items that are already in the system. Only add new items.</p>
-            </div>
-            <div className="border rounded-lg p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors" onClick={() => {
-              const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
-              if (currentExisting?.hasDeliveryStarted) {
-                toast({
-                  title: "Cannot Replace Sheet",
-                  description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
-                  variant: "destructive",
-                });
-                setMergeConfirmOpen(false);
-                return;
-              }
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace", clientId: uploadClientId });
-              setMergeConfirmOpen(false);
-            }}>
-              <p className="font-medium text-sm text-primary">Replace Duplicates</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Update quantities for existing items, and add new items.</p>
-            </div>
-            <div className="border rounded-lg p-3 cursor-pointer hover:border-destructive hover:bg-destructive/10 transition-colors" onClick={() => {
-              const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
-              if (currentExisting?.hasDeliveryStarted) {
-                toast({
-                  title: "Cannot Replace Sheet",
-                  description: "Delivery has already started for this day. The uploaded sheet cannot be replaced or overwritten.",
-                  variant: "destructive",
-                });
-                setMergeConfirmOpen(false);
-                return;
-              }
-              uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite", clientId: uploadClientId });
-              setMergeConfirmOpen(false);
-            }}>
-              <p className="font-medium text-sm text-destructive">Overwrite Entire Sheet</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Delete ALL existing assignments and deliveries for this date, and start fresh.</p>
-            </div>
-          </div>
+
+          {(() => {
+            const currentExisting = sheets.find(s => s.date === uploadDate && s.clientId === uploadClientId);
+            const isStarted = !!currentExisting?.hasDeliveryStarted;
+
+            return (
+              <div className="flex flex-col gap-3 mt-2">
+                {/* Option 1: Append 2nd List */}
+                <div
+                  className="border-2 border-emerald-500/40 bg-emerald-50/20 dark:bg-emerald-950/20 rounded-xl p-3.5 cursor-pointer hover:border-emerald-500 hover:bg-emerald-50/40 transition-all shadow-xs"
+                  onClick={() => {
+                    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "skip", clientId: uploadClientId });
+                    setMergeConfirmOpen(false);
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-semibold text-sm text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                      <PlusCircle className="h-4 w-4" /> Append New Items (2nd List / Add-on Sheet)
+                    </p>
+                    <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] font-semibold">Recommended</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Keeps all existing routes, truck allocations, and ongoing driver deliveries 100% intact. Only newly received outlets or items will be added to today's sheet. Safe even during active operations!
+                  </p>
+                </div>
+
+                {/* Option 2: Replace / Update Duplicates */}
+                <div
+                  className="border rounded-xl p-3 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors"
+                  onClick={() => {
+                    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "replace", clientId: uploadClientId });
+                    setMergeConfirmOpen(false);
+                  }}
+                >
+                  <p className="font-medium text-sm text-primary">Update Quantities & Add New Items</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Updates box quantities for pending items if changed, and adds any new outlets or items.
+                  </p>
+                </div>
+
+                {/* Option 3: Overwrite */}
+                <div
+                  className={`border rounded-xl p-3 transition-colors ${isStarted ? "opacity-50 cursor-not-allowed bg-muted/40 border-muted" : "cursor-pointer hover:border-destructive hover:bg-destructive/10"}`}
+                  onClick={() => {
+                    if (isStarted) {
+                      toast({
+                        title: "Cannot Overwrite Sheet",
+                        description: "Driver deliveries have already started. Please use 'Append New Items' to upload your second list safely.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview!, mergeStrategy: "overwrite", clientId: uploadClientId });
+                    setMergeConfirmOpen(false);
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <p className={`font-medium text-sm ${isStarted ? "text-muted-foreground" : "text-destructive"}`}>Overwrite Entire Sheet</p>
+                    {isStarted && <Badge variant="outline" className="text-[10px] text-amber-700 bg-amber-50 border-amber-200">Locked (Delivery Started)</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {isStarted ? "Locked because drivers are already delivering on the road. Use 'Append New Items' instead." : "Delete ALL existing items and start completely fresh from this new file."}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -4314,123 +4330,318 @@ export default function DailyDispatchPage() {
       </Dialog>
 
       {/* Global Add Item / Outlet Dialog */}
+      {/* Global Add Item / Outlet Dialog */}
       <Dialog
         open={globalAddModal.isOpen}
         onOpenChange={(open) => setGlobalAddModal(prev => ({ ...prev, isOpen: open }))}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-6">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base font-bold">
-              <PlusCircle className="h-5 w-5 text-orange-600" />
-              Add Item / Outlet to Sheet
-            </DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                <PlusCircle className="h-5 w-5 text-orange-600" />
+                Add Delivery Item to Sheet
+              </DialogTitle>
+            </div>
             <DialogDescription className="text-xs">
-              Select an outlet and add a new delivery item to it on this sheet.
+              Add products to today's active dispatch sheet. Details like description, packaging, and storage type are automatically filled from SKU memory.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 my-3 text-xs">
-            <div>
-              <label className="block text-slate-500 mb-1 font-semibold">Select Outlet *</label>
-              <SearchableSelect
-                value={globalAddModal.selectedOutletCode || ""}
-                onValueChange={(val) => {
-                  setGlobalAddModal(prev => ({ ...prev, selectedOutletCode: val }));
-                  const matched = (outlets || []).find((o: any) => o.code === val);
-                  if (matched && matched.routeId) {
-                    setNewItemForm(prev => ({ ...prev, routeId: matched.routeId }));
-                  } else {
-                    setNewItemForm(prev => ({ ...prev, routeId: "" }));
-                  }
-                }}
-                options={allOutletOptions}
-                placeholder="-- Choose Outlet --"
-                width="w-full"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold">Item Code *</label>
-                <Input
-                  placeholder="e.g. R1000121"
-                  value={newItemForm.itemCode || ""}
-                  onChange={e => setNewItemForm(prev => ({ ...prev, itemCode: e.target.value }))}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1 font-semibold">Quantity *</label>
-                <Input
-                  type="number"
-                  step="any"
-                  placeholder="e.g. 10"
-                  value={newItemForm.requestedQty || ""}
-                  onChange={e => setNewItemForm(prev => ({ ...prev, requestedQty: e.target.value }))}
-                  className="h-8 text-xs"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-slate-500 mb-1">Description</label>
-              <Input
-                placeholder="e.g. PH FLOUR PIZZA MIX (25KG/BAG)"
-                value={newItemForm.description || ""}
-                onChange={e => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
-                className="h-8 text-xs"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-500 mb-1">Storage Type</label>
-                <select
-                  value={newItemForm.storageType || "Dry"}
-                  onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
-                  className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
-                >
-                  <option value="Dry">Dry</option>
-                  <option value="Chilled">Chilled</option>
-                  <option value="Frozen">Frozen</option>
-                  <option value="Packaging">Packaging</option>
-                  <option value="Cleaning">Cleaning</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1">Route / Zone (Optional)</label>
-                <select
-                  value={newItemForm.routeId || ""}
-                  onChange={e => setNewItemForm(prev => ({ ...prev, routeId: e.target.value }))}
-                  className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
-                >
-                  <option value="">Default Route</option>
-                  {(activeZones || []).map((r: any) => (
-                    <option key={r.id} value={r.id}>{r.name || ""}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-500 mb-1">TO Number (Optional)</label>
-                <Input
-                  placeholder="e.g. TO-12502"
-                  value={newItemForm.toNo || ""}
-                  onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-500 mb-1">UOM (Optional)</label>
-                <Input
-                  placeholder="e.g. CT, PKT"
-                  value={newItemForm.uom || ""}
-                  onChange={e => setNewItemForm(prev => ({ ...prev, uom: e.target.value }))}
-                  className="h-8 text-xs"
-                />
-              </div>
-            </div>
+          {/* Mode Switcher */}
+          <div className="flex items-center gap-2 border-b pb-2 mt-2">
+            <button
+              type="button"
+              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-all ${addModalTab === "single" ? "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300" : "text-muted-foreground hover:bg-muted"}`}
+              onClick={() => setAddModalTab("single")}
+            >
+              Single Outlet
+            </button>
+            <button
+              type="button"
+              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${addModalTab === "bulk" ? "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300" : "text-muted-foreground hover:bg-muted"}`}
+              onClick={() => setAddModalTab("bulk")}
+            >
+              <Layers className="h-3.5 w-3.5" /> Bulk Add to Multiple Outlets
+            </button>
           </div>
 
-          <DialogFooter className="border-t pt-4">
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4 my-2 text-xs">
+            {/* Common Product Information */}
+            <div className="p-3 bg-muted/30 rounded-lg border space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">Item Code / SKU *</label>
+                    <span className="text-[10px] text-muted-foreground font-normal">Auto-fills details</span>
+                  </div>
+                  <Input
+                    list="known-products-datalist"
+                    placeholder="Type or select SKU code..."
+                    value={newItemForm.itemCode || ""}
+                    onChange={e => {
+                      const codeVal = e.target.value;
+                      const norm = codeVal.trim().toLowerCase();
+                      const match = (knownProducts || []).find((p: any) => p.itemCode.toLowerCase() === norm);
+                      setNewItemForm(prev => ({
+                        ...prev,
+                        itemCode: codeVal,
+                        description: match?.description || prev.description,
+                        storageType: match?.storageType || prev.storageType || "Dry",
+                        uom: match?.uom || prev.uom,
+                      }));
+                    }}
+                    className="h-8 text-xs font-mono font-medium"
+                  />
+                  <datalist id="known-products-datalist">
+                    {(knownProducts || []).slice(0, 300).map((p: any) => (
+                      <option key={p.itemCode} value={p.itemCode}>
+                        {p.description ? `${p.description} (${p.storageType || 'Dry'})` : p.itemCode}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 mb-1 font-semibold">Description</label>
+                  <Input
+                    placeholder="Product description..."
+                    value={newItemForm.description || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-500 mb-1">Storage Type</label>
+                  <select
+                    value={newItemForm.storageType || "Dry"}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
+                    className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                  >
+                    <option value="Dry">Dry</option>
+                    <option value="Chilled">Chilled</option>
+                    <option value="Frozen">Frozen</option>
+                    <option value="Packaging">Packaging</option>
+                    <option value="Cleaning">Cleaning</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 mb-1">UOM</label>
+                  <Input
+                    placeholder="e.g. CS, CT, EA, PKT"
+                    value={newItemForm.uom || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, uom: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 mb-1">TO / Order No (Optional)</label>
+                  <Input
+                    placeholder="e.g. TO-12502"
+                    value={newItemForm.toNo || ""}
+                    onChange={e => setNewItemForm(prev => ({ ...prev, toNo: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* TAB 1: Single Outlet Mode */}
+            {addModalTab === "single" ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1 font-semibold">Select Outlet *</label>
+                  <SearchableSelect
+                    value={globalAddModal.selectedOutletCode || ""}
+                    onValueChange={(val) => {
+                      setGlobalAddModal(prev => ({ ...prev, selectedOutletCode: val }));
+                      const matched = (outlets || []).find((o: any) => o.code === val);
+                      if (matched && matched.routeId) {
+                        setNewItemForm(prev => ({ ...prev, routeId: matched.routeId }));
+                      } else {
+                        setNewItemForm(prev => ({ ...prev, routeId: "" }));
+                      }
+                    }}
+                    options={allOutletOptions}
+                    placeholder="-- Choose Outlet --"
+                    width="w-full"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1 font-semibold">Quantity (Boxes) *</label>
+                    <Input
+                      type="number"
+                      step="any"
+                      placeholder="e.g. 10"
+                      value={newItemForm.requestedQty || ""}
+                      onChange={e => setNewItemForm(prev => ({ ...prev, requestedQty: e.target.value }))}
+                      className="h-8 text-xs font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-500 mb-1 font-semibold">Route / Zone Override</label>
+                    <select
+                      value={newItemForm.routeId || ""}
+                      onChange={e => setNewItemForm(prev => ({ ...prev, routeId: e.target.value }))}
+                      className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
+                    >
+                      <option value="">Default Outlet Route</option>
+                      {(activeZones || []).map((r: any) => (
+                        <option key={r.id} value={r.id}>{r.name || ""}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* TAB 2: Bulk Multi-Outlet Mode */
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3 bg-orange-50/50 dark:bg-orange-950/20 p-2.5 rounded-lg border border-orange-200 dark:border-orange-900/50">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-orange-900 dark:text-orange-300">Default Qty:</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      className="w-20 h-7 text-xs font-bold"
+                      value={bulkDefaultQty}
+                      onChange={e => setBulkDefaultQty(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs px-2 border-orange-300 hover:bg-orange-100"
+                      onClick={() => {
+                        const qtyNum = parseFloat(bulkDefaultQty) || 1;
+                        setBulkOutlets(prev => {
+                          const updated = { ...prev };
+                          Object.keys(updated).forEach(k => {
+                            updated[k] = qtyNum;
+                          });
+                          return updated;
+                        });
+                      }}
+                    >
+                      Apply to Selected
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] px-2 text-primary"
+                      onClick={() => {
+                        const qtyNum = parseFloat(bulkDefaultQty) || 1;
+                        const filtered = (allOutletOptions || []).filter((o: any) =>
+                          !bulkOutletFilter || o.label.toLowerCase().includes(bulkOutletFilter.toLowerCase())
+                        );
+                        setBulkOutlets(prev => {
+                          const updated = { ...prev };
+                          filtered.forEach((o: any) => {
+                            updated[o.value] = updated[o.value] || qtyNum;
+                          });
+                          return updated;
+                        });
+                      }}
+                    >
+                      Select All Filtered
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] px-2 text-muted-foreground hover:text-red-600"
+                      onClick={() => setBulkOutlets({})}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Search outlets */}
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search outlets by name or code..."
+                    value={bulkOutletFilter}
+                    onChange={e => setBulkOutletFilter(e.target.value)}
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+
+                {/* Outlets Checklist with Qty */}
+                <div className="border rounded-lg max-h-56 overflow-y-auto divide-y">
+                  {(allOutletOptions || [])
+                    .filter((o: any) => !bulkOutletFilter || o.label.toLowerCase().includes(bulkOutletFilter.toLowerCase()))
+                    .map((outlet: any) => {
+                      const isSelected = bulkOutlets[outlet.value] !== undefined;
+                      const currentQty = bulkOutlets[outlet.value] || "";
+
+                      return (
+                        <div
+                          key={outlet.value}
+                          className={`flex items-center justify-between p-2 hover:bg-muted/30 transition-colors ${isSelected ? "bg-orange-50/40 dark:bg-orange-950/20" : ""}`}
+                        >
+                          <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 pr-2">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={e => {
+                                const checked = e.target.checked;
+                                setBulkOutlets(prev => {
+                                  const updated = { ...prev };
+                                  if (checked) {
+                                    updated[outlet.value] = parseFloat(bulkDefaultQty) || 1;
+                                  } else {
+                                    delete updated[outlet.value];
+                                  }
+                                  return updated;
+                                });
+                              }}
+                              className="rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+                            />
+                            <span className="truncate text-xs font-medium">{outlet.label}</span>
+                          </label>
+
+                          {isSelected && (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] text-muted-foreground">Qty:</span>
+                              <Input
+                                type="number"
+                                min="1"
+                                step="any"
+                                value={currentQty}
+                                onChange={e => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setBulkOutlets(prev => ({
+                                    ...prev,
+                                    [outlet.value]: val
+                                  }));
+                                }}
+                                className="w-16 h-6 text-xs text-right font-bold"
+                              />
+                              <span className="text-[10px] text-muted-foreground">Boxes</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-3 flex items-center justify-between">
             <Button
               variant="outline"
               size="sm"
@@ -4438,34 +4649,79 @@ export default function DailyDispatchPage() {
             >
               Cancel
             </Button>
-            <Button
-              size="sm"
-              className="bg-orange-600 hover:bg-orange-700 text-white"
-              onClick={() => {
-                if (!globalAddModal.selectedOutletCode || !newItemForm.itemCode || !newItemForm.requestedQty) {
-                  toast({ title: "Validation Error", description: "Outlet, Item Code, and Quantity are required.", variant: "destructive" });
-                  return;
-                }
-                addItemMutation.mutate({
-                  sheetId: boardSheetId!,
-                  outletCode: globalAddModal.selectedOutletCode,
-                  itemCode: newItemForm.itemCode,
-                  description: newItemForm.description,
-                  requestedQty: parseFloat(newItemForm.requestedQty),
-                  storageType: newItemForm.storageType,
-                  routeId: newItemForm.routeId || undefined,
-                  toNo: newItemForm.toNo || undefined,
-                  uom: newItemForm.uom || undefined,
-                }, {
-                  onSuccess: () => {
-                    setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
+
+            {addModalTab === "single" ? (
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                onClick={() => {
+                  if (!globalAddModal.selectedOutletCode || !newItemForm.itemCode || !newItemForm.requestedQty) {
+                    toast({ title: "Validation Error", description: "Outlet, Item Code, and Quantity are required.", variant: "destructive" });
+                    return;
                   }
-                });
-              }}
-              disabled={addItemMutation.isPending}
-            >
-              Add to Sheet
-            </Button>
+                  addItemMutation.mutate({
+                    sheetId: boardSheetId!,
+                    outletCode: globalAddModal.selectedOutletCode,
+                    itemCode: newItemForm.itemCode,
+                    description: newItemForm.description,
+                    requestedQty: parseFloat(newItemForm.requestedQty),
+                    storageType: newItemForm.storageType,
+                    routeId: newItemForm.routeId || undefined,
+                    toNo: newItemForm.toNo || undefined,
+                    uom: newItemForm.uom || undefined,
+                  }, {
+                    onSuccess: () => {
+                      setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
+                    }
+                  });
+                }}
+                disabled={addItemMutation.isPending}
+              >
+                {addItemMutation.isPending ? "Adding..." : "Add to Sheet"}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                onClick={() => {
+                  if (!newItemForm.itemCode) {
+                    toast({ title: "Validation Error", description: "Item Code / SKU is required.", variant: "destructive" });
+                    return;
+                  }
+                  const selectedEntries = Object.entries(bulkOutlets).filter(([_, qty]) => qty > 0);
+                  if (selectedEntries.length === 0) {
+                    toast({ title: "Validation Error", description: "Please select at least one outlet with a quantity.", variant: "destructive" });
+                    return;
+                  }
+
+                  const batchItems = selectedEntries.map(([outletCode, qty]) => {
+                    const matchedOutlet = (outlets || []).find((o: any) => o.code === outletCode);
+                    return {
+                      outletCode,
+                      itemCode: newItemForm.itemCode,
+                      description: newItemForm.description,
+                      requestedQty: qty,
+                      storageType: newItemForm.storageType || "Dry",
+                      routeId: matchedOutlet?.routeId || undefined,
+                      toNo: newItemForm.toNo || undefined,
+                      uom: newItemForm.uom || undefined,
+                    };
+                  });
+
+                  addItemMutation.mutate({
+                    sheetId: boardSheetId!,
+                    items: batchItems,
+                  }, {
+                    onSuccess: () => {
+                      setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
+                    }
+                  });
+                }}
+                disabled={addItemMutation.isPending || Object.keys(bulkOutlets).length === 0}
+              >
+                {addItemMutation.isPending ? "Adding..." : `Add SKU to ${Object.keys(bulkOutlets).length} Outlets`}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -3572,8 +3572,8 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getDispatchSheetByDateAndClient(data.date, data.clientId);
     if (existing) {
       const started = await this.hasSheetDeliveryStarted(existing.id);
-      if (started) {
-        throw new Error("Cannot replace or overwrite this dispatch sheet because delivery has already started for this day.");
+      if (started && (mergeStrategy === "overwrite" || !mergeStrategy)) {
+        throw new Error("Cannot overwrite this dispatch sheet because delivery has already started for this day. Please use 'Append New Items' or 'Replace Duplicates' instead.");
       }
       if (mergeStrategy === "overwrite" || !mergeStrategy) {
         await this.deleteDispatchSheet(existing.id);

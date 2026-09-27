@@ -7650,8 +7650,8 @@ export async function registerRoutes(
       const existingSheet = await storage.getDispatchSheetByDateAndClient(date, clientId || null);
       if (existingSheet) {
         const hasStarted = await storage.hasSheetDeliveryStarted(existingSheet.id);
-        if (hasStarted) {
-          return res.status(400).json({ error: "Cannot replace or overwrite this dispatch sheet because delivery has already started for this day." });
+        if (hasStarted && (mergeStrategy === "overwrite" || !mergeStrategy)) {
+          return res.status(400).json({ error: "Cannot overwrite this dispatch sheet because delivery has already started for this day. Please select 'Append New Items (Add-on Sheet)' or 'Replace Duplicates' instead." });
         }
       }
 
@@ -7760,11 +7760,13 @@ export async function registerRoutes(
 
         if (norm && !hasExisting) {
           const outletName = rawDesc || `Outlet ${rawCode}`;
+          const existingOutletWithRoute = allOutlets.find(o => normalizeOutletCode(o.code) === norm && o.routeId);
           try {
             const [newOutlet] = await db.insert(schema.outlets).values({
               code: rawCode,
               name: outletName,
               clientId: clientId || null,
+              routeId: existingOutletWithRoute?.routeId || null,
               status: "active"
             }).returning();
             if (newOutlet) {
@@ -8162,19 +8164,77 @@ export async function registerRoutes(
     }
   }
 
+  app.get("/api/dispatch/known-products", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const rows = await db.select({
+        itemCode: schema.dispatchItems.itemCode,
+        description: schema.dispatchItems.description,
+        storageType: schema.dispatchItems.storageType,
+        uom: schema.dispatchItems.uom,
+      }).from(schema.dispatchItems);
+
+      const productMap = new Map<string, any>();
+      for (const r of rows) {
+        if (!r.itemCode) continue;
+        const code = r.itemCode.trim();
+        if (!productMap.has(code.toLowerCase())) {
+          productMap.set(code.toLowerCase(), {
+            itemCode: code,
+            description: r.description || "",
+            storageType: r.storageType || "Dry",
+            uom: r.uom || "CT",
+          });
+        }
+      }
+      const sortedProducts = Array.from(productMap.values()).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+      res.json(sortedProducts);
+    } catch (err) {
+      console.error("Get known products error:", err);
+      res.status(500).json({ error: "Failed to fetch known products" });
+    }
+  });
+
   app.post("/api/dispatch/sheets/:sheetId/items", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { sheetId } = req.params;
+      const allOutlets = await storage.getOutlets();
+      const normalize = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+
+      // Support bulk items array
+      if (Array.isArray(req.body.items) && req.body.items.length > 0) {
+        const toInsert = [];
+        for (const item of req.body.items) {
+          if (!item.outletCode || !item.itemCode || !item.requestedQty) continue;
+          const outlet = allOutlets.find(o => normalize(o.code || "") === normalize(item.outletCode));
+          toInsert.push({
+            sheetId,
+            outletCode: String(item.outletCode),
+            outletId: outlet?.id || null,
+            routeId: item.routeId || outlet?.routeId || null,
+            itemCode: String(item.itemCode),
+            description: item.description || null,
+            requestedQty: String(item.requestedQty),
+            weight: String(item.requestedQty),
+            storageType: item.storageType || "Dry",
+            toNo: item.toNo || null,
+            uom: item.uom || null,
+          });
+        }
+        if (toInsert.length === 0) {
+          return res.status(400).json({ error: "No valid items to insert" });
+        }
+        const createdItems = await db.insert(schema.dispatchItems).values(toInsert).returning();
+        await recalculateTruckCapacities(sheetId);
+        return res.json({ success: true, count: createdItems.length, items: createdItems });
+      }
+
       const { outletCode, itemCode, description, requestedQty, storageType, routeId, toNo, uom } = req.body;
       
       if (!outletCode || !itemCode || !requestedQty) {
         return res.status(400).json({ error: "outletCode, itemCode, and requestedQty are required" });
       }
 
-      const allOutlets = await storage.getOutlets();
-      const normalize = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
       const outlet = allOutlets.find(o => normalize(o.code || "") === normalize(outletCode));
-      
       const resolvedOutletId = outlet?.id || null;
       const resolvedRouteId = routeId || outlet?.routeId || null;
 
