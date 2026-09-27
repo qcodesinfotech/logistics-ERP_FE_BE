@@ -8368,6 +8368,97 @@ export async function registerRoutes(
     }
   });
 
+  // Get all distinct SKUs for a dispatch sheet with quantities & outlets
+  app.get("/api/dispatch/sheets/:sheetId/skus", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { sheetId } = req.params;
+      const items = await db.select().from(schema.dispatchItems).where(eq(schema.dispatchItems.sheetId, sheetId));
+      const outlets = await storage.getOutlets();
+      const normalize = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+      const outletMap = new Map(outlets.map(o => [normalize(o.code || ""), o.name]));
+
+      const skuMap = new Map<string, any>();
+      for (const item of items) {
+        const code = item.itemCode;
+        if (!skuMap.has(code)) {
+          skuMap.set(code, {
+            itemCode: code,
+            description: item.description || "",
+            storageType: item.storageType || "Dry",
+            uom: item.uom || "",
+            totalQty: 0,
+            itemCount: 0,
+            outlets: [] as any[],
+          });
+        }
+        const entry = skuMap.get(code)!;
+        const qty = parseFloat(item.requestedQty || item.weight || "0");
+        entry.totalQty += isNaN(qty) ? 0 : qty;
+        entry.itemCount += 1;
+        entry.outlets.push({
+          itemId: item.id,
+          outletCode: item.outletCode,
+          outletName: outletMap.get(normalize(item.outletCode)) || item.outletCode,
+          qty: item.requestedQty,
+        });
+      }
+
+      const skuList = Array.from(skuMap.values()).map(s => ({
+        ...s,
+        totalQty: Math.round(s.totalQty * 1000) / 1000,
+        outletsCount: new Set(s.outlets.map((o: any) => o.outletCode)).size,
+      })).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
+
+      res.json(skuList);
+    } catch (e: any) {
+      console.error("Get sheet SKUs error:", e);
+      res.status(500).json({ error: "Failed to fetch sheet SKUs: " + e.message });
+    }
+  });
+
+  // Delete an SKU from a sheet (all outlets or specific outlets)
+  app.delete("/api/dispatch/sheets/:sheetId/sku/:itemCode", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { sheetId, itemCode } = req.params;
+      const { outletCodes } = req.body || {};
+
+      let conditions: any[] = [
+        eq(schema.dispatchItems.sheetId, sheetId),
+        eq(schema.dispatchItems.itemCode, itemCode),
+      ];
+
+      if (Array.isArray(outletCodes) && outletCodes.length > 0) {
+        conditions.push(inArray(schema.dispatchItems.outletCode, outletCodes));
+      }
+
+      const matchingItems = await db.select().from(schema.dispatchItems).where(and(...conditions));
+      if (matchingItems.length === 0) {
+        return res.status(404).json({ error: `No items found for SKU ${itemCode}` });
+      }
+
+      const itemIds = matchingItems.map(i => i.id);
+      const affectedOutlets = Array.from(new Set(matchingItems.map(i => i.outletCode)));
+
+      // Delete associated deliveries
+      if (itemIds.length > 0) {
+        await db.delete(schema.dispatchDeliveries).where(inArray(schema.dispatchDeliveries.dispatchItemId, itemIds));
+        await db.delete(schema.dispatchItems).where(inArray(schema.dispatchItems.id, itemIds));
+      }
+
+      await recalculateTruckCapacities(sheetId);
+
+      res.json({
+        success: true,
+        deletedCount: matchingItems.length,
+        affectedOutlets,
+        itemCode,
+      });
+    } catch (e: any) {
+      console.error("Delete SKU error:", e);
+      res.status(500).json({ error: "Failed to delete SKU: " + e.message });
+    }
+  });
+
 
 
   const contractUploadDir = path.join(process.cwd(), "uploads", "contracts");

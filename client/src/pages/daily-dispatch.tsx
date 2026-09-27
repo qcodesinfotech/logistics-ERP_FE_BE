@@ -46,7 +46,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
-  Layers,
+  Layers, RotateCcw, DollarSign, Receipt,
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
 import { exportCompletedDeliveriesExcel, exportPendingDeliveriesExcel } from "@/lib/customer-excel-export";
@@ -63,7 +63,19 @@ interface DispatchItem {
   toNo?: string | null;
   carriedFromItemId?: string | null;
   carriedToItemId?: string | null;
-  delivery?: { status: string; deliveredQty: string | null; remainingQty: string | null; remark: string | null; damagedQty?: string | null; damageReason?: string | null; } | null;
+  delivery?: {
+    status: string;
+    deliveredQty: string | null;
+    remainingQty: string | null;
+    remark: string | null;
+    damagedQty?: string | null;
+    damageReason?: string | null;
+    returnedQty?: string | null;
+    returnReason?: string | null;
+    cashCollected?: string | null;
+    cashReceiptNo?: string | null;
+    paymentMethod?: string | null;
+  } | null;
 }
 interface OutletGroup {
   outletId: string | null; outletCode: string; outletName: string;
@@ -209,6 +221,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: any }> 
   partially_delivered: { label: "Partial", color: "bg-amber-100 text-amber-700 border-amber-200", icon: AlertTriangle },
   delivered: { label: "Delivered", color: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: CheckCircle2 },
   damaged: { label: "Damaged", color: "bg-red-100 text-red-700 border-red-200", icon: X },
+  returned: { label: "Returned", color: "bg-purple-100 text-purple-700 border-purple-200", icon: RotateCcw },
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -230,11 +243,16 @@ function DeliveryDialog({
   const [remainingQty, setRemainingQty] = useState(item.delivery?.remainingQty || item.remaining || "0");
   const [damagedQty, setDamagedQty] = useState(item.delivery?.damagedQty || "0");
   const [damageReason, setDamageReason] = useState(item.delivery?.damageReason || "");
+  const [returnedQty, setReturnedQty] = useState(item.delivery?.returnedQty || "0");
+  const [returnReason, setReturnReason] = useState(item.delivery?.returnReason || "");
+  const [cashCollected, setCashCollected] = useState(item.delivery?.cashCollected || "0");
+  const [cashReceiptNo, setCashReceiptNo] = useState(item.delivery?.cashReceiptNo || "");
+  const [paymentMethod, setPaymentMethod] = useState(item.delivery?.paymentMethod || "credit");
   const [remark, setRemark] = useState(item.delivery?.remark || "");
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Package className="h-5 w-5 text-primary" />
@@ -249,10 +267,21 @@ function DeliveryDialog({
             {item.grnNumber && <p><span className="text-muted-foreground">GRN:</span> {item.grnNumber}</p>}
             {item.weight && <p><span className="text-muted-foreground">Weight:</span> {item.weight} kg</p>}
           </div>
-          <div className="space-y-2">
-            <Label>Delivery Status</Label>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Delivery Status</Label>
+            <Select
+              value={status}
+              onValueChange={(val) => {
+                setStatus(val);
+                if (val === "returned" && (!returnedQty || returnedQty === "0")) {
+                  setReturnedQty(item.requestedQty || item.weight || "0");
+                  setDeliveredQty("0");
+                  setRemainingQty("0");
+                }
+              }}
+            >
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {Object.entries(statusConfig).map(([k, v]) => (
                   <SelectItem key={k} value={k}>{v.label}</SelectItem>
@@ -260,37 +289,143 @@ function DeliveryDialog({
               </SelectContent>
             </Select>
           </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Delivered Qty</Label>
-              <Input type="number" value={deliveredQty} onChange={e => setDeliveredQty(e.target.value)} placeholder="0" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Delivered Qty</Label>
+              <Input type="number" step="0.001" value={deliveredQty} onChange={e => setDeliveredQty(e.target.value)} placeholder="0" className="h-8 text-xs" />
             </div>
-            <div className="space-y-2">
-              <Label>Remaining Qty</Label>
-              <Input type="number" value={remainingQty} onChange={e => setRemainingQty(e.target.value)} placeholder="0" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Remaining Qty</Label>
+              <Input type="number" step="0.001" value={remainingQty} onChange={e => setRemainingQty(e.target.value)} placeholder="0" className="h-8 text-xs" />
             </div>
           </div>
 
           {/* Damaged fields */}
-          <div className="grid grid-cols-2 gap-3 p-3 bg-red-50/50 rounded-lg border border-red-100">
-            <div className="space-y-2">
-              <Label className="text-red-700">Damaged Qty</Label>
-              <Input type="number" value={damagedQty} onChange={e => setDamagedQty(e.target.value)} placeholder="0" className="border-red-200" />
+          <div className="grid grid-cols-2 gap-3 p-3 bg-red-50/50 dark:bg-red-950/20 rounded-lg border border-red-100 dark:border-red-900/30">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-red-700 dark:text-red-400">Damaged Qty</Label>
+              <Input type="number" step="0.001" value={damagedQty} onChange={e => setDamagedQty(e.target.value)} placeholder="0" className="h-8 text-xs border-red-200" />
             </div>
-            <div className="space-y-2">
-              <Label className="text-red-700">Damage Reason</Label>
-              <Input value={damageReason} onChange={e => setDamageReason(e.target.value)} placeholder="Reason..." className="border-red-200" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-red-700 dark:text-red-400">Damage Reason</Label>
+              <Input value={damageReason} onChange={e => setDamageReason(e.target.value)} placeholder="e.g. Broken box..." className="h-8 text-xs border-red-200" />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>General Remark</Label>
-            <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="Optional notes..." rows={2} />
+          {/* Returns & Rejections Card */}
+          <div className="space-y-2 p-3 bg-purple-50/50 dark:bg-purple-950/20 rounded-lg border border-purple-200/60 dark:border-purple-800/40">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-purple-800 dark:text-purple-300">
+              <RotateCcw className="h-3.5 w-3.5" />
+              Returns / Rejections Management
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium text-purple-700 dark:text-purple-400">Returned Qty</Label>
+                <Input
+                  type="number"
+                  step="0.001"
+                  value={returnedQty}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setReturnedQty(val);
+                    if (parseFloat(val) > 0 && status === "pending") {
+                      setStatus("returned");
+                    }
+                  }}
+                  placeholder="0"
+                  className="h-8 text-xs border-purple-200 focus-visible:ring-purple-400"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium text-purple-700 dark:text-purple-400">Return Reason</Label>
+                <select
+                  value={returnReason}
+                  onChange={e => setReturnReason(e.target.value)}
+                  className="w-full h-8 border border-purple-200 rounded-md px-2 bg-transparent text-xs text-purple-900 dark:text-purple-200 font-medium"
+                >
+                  <option value="">-- Select Reason --</option>
+                  <option value="Outlet Closed / Refused">Outlet Closed / Refused</option>
+                  <option value="Near Expiry / Expired">Near Expiry / Expired</option>
+                  <option value="Wrong Item / Wrong SKU">Wrong Item / Wrong SKU</option>
+                  <option value="Refused by Store Manager">Refused by Store Manager</option>
+                  <option value="Quality / Packaging Issue">Quality / Packaging Issue</option>
+                  <option value="Customer Return / Excess">Customer Return / Excess</option>
+                  <option value="Temperature Non-Compliance">Temperature Non-Compliance</option>
+                  <option value="Other">Other (Note in remarks)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Cash on Delivery & Payment Card */}
+          <div className="space-y-2 p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+              <DollarSign className="h-3.5 w-3.5" />
+              Payment & Cash on Delivery (COD)
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Payment Method</Label>
+                <select
+                  value={paymentMethod}
+                  onChange={e => setPaymentMethod(e.target.value)}
+                  className="w-full h-8 border border-emerald-200 rounded-md px-2 bg-transparent text-xs text-emerald-900 dark:text-emerald-200 font-medium"
+                >
+                  <option value="credit">Credit / Account</option>
+                  <option value="cash">Cash on Delivery (COD)</option>
+                  <option value="card">Card / POS</option>
+                  <option value="cheque">Cheque</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Cash Amount (BD)</Label>
+                <Input
+                  type="number"
+                  step="0.001"
+                  value={cashCollected}
+                  onChange={e => setCashCollected(e.target.value)}
+                  placeholder="0.000"
+                  className="h-8 text-xs border-emerald-200 focus-visible:ring-emerald-400"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Receipt / Bill #</Label>
+                <Input
+                  value={cashReceiptNo}
+                  onChange={e => setCashReceiptNo(e.target.value)}
+                  placeholder="Voucher #"
+                  className="h-8 text-xs border-emerald-200 focus-visible:ring-emerald-400"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">General Remark</Label>
+            <Textarea value={remark} onChange={e => setRemark(e.target.value)} placeholder="Optional delivery notes..." rows={2} className="text-xs" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => onSave({ status, deliveredQty, remainingQty, damagedQty, damageReason, remark })}>Save Delivery</Button>
+          <Button variant="outline" onClick={onClose} size="sm">Cancel</Button>
+          <Button
+            size="sm"
+            onClick={() => onSave({
+              status,
+              deliveredQty,
+              remainingQty,
+              damagedQty,
+              damageReason,
+              returnedQty,
+              returnReason,
+              cashCollected,
+              cashReceiptNo,
+              paymentMethod,
+              remark,
+            })}
+          >
+            Save Delivery
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -658,6 +793,16 @@ function OutletCard({
                   {item.delivery?.remainingQty !== undefined && item.delivery?.remainingQty !== null && (
                     <span className="text-amber-600 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100/30 whitespace-nowrap">
                       Rem: {item.delivery.remainingQty}
+                    </span>
+                  )}
+                  {item.delivery?.returnedQty !== undefined && item.delivery?.returnedQty !== null && parseFloat(item.delivery.returnedQty) > 0 && (
+                    <span className="text-purple-700 font-semibold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 whitespace-nowrap" title={item.delivery.returnReason ? `Return Reason: ${item.delivery.returnReason}` : "Returned"}>
+                      Ret: {item.delivery.returnedQty} {item.delivery.returnReason ? `(${item.delivery.returnReason})` : ''}
+                    </span>
+                  )}
+                  {item.delivery?.cashCollected !== undefined && item.delivery?.cashCollected !== null && parseFloat(item.delivery.cashCollected) > 0 && (
+                    <span className="text-teal-700 font-semibold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200 whitespace-nowrap" title={item.delivery.cashReceiptNo ? `Receipt #${item.delivery.cashReceiptNo}` : "Cash Collected"}>
+                      COD: BD {item.delivery.cashCollected}
                     </span>
                   )}
                 </div>
@@ -2107,6 +2252,8 @@ export default function DailyDispatchPage() {
     return localStorage.getItem("dispatchBoardBrandId") || "all";
   });
   const [uploadClientId, setUploadClientId] = useState<string>("");
+  const [uploadMainClientId, setUploadMainClientId] = useState<string>("");
+  const [uploadSubClientId, setUploadSubClientId] = useState<string>("");
 
   useEffect(() => {
     localStorage.setItem("dispatchBoardClientId", boardClientId);
@@ -2136,6 +2283,27 @@ export default function DailyDispatchPage() {
       };
     }).sort((a: any, b: any) => a.displayName.localeCompare(b.displayName));
   }, [clientList]);
+
+  const parentClients = useMemo(() => {
+    return clientList.filter((c: any) => !c.parentClientId).sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }, [clientList]);
+
+  const subClientsOf = useCallback((parentId: string) => {
+    return clientList.filter((c: any) => c.parentClientId === parentId).sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }, [clientList]);
+
+  useEffect(() => {
+    if (uploadClientId) {
+      const target = clientList.find((c: any) => c.id === uploadClientId);
+      if (target?.parentClientId) {
+        setUploadMainClientId(target.parentClientId);
+        setUploadSubClientId(target.id);
+      } else if (target) {
+        setUploadMainClientId(uploadClientId);
+        setUploadSubClientId("");
+      }
+    }
+  }, [uploadClientId, clientList]);
 
   const filteredBrands = useMemo(() => {
     if (boardClientId === "all") {
@@ -2199,6 +2367,32 @@ export default function DailyDispatchPage() {
   const [bulkDefaultQty, setBulkDefaultQty] = useState<string>("1");
   const [bulkOutletFilter, setBulkOutletFilter] = useState<string>("");
 
+  // Confirmation modal state before adding items
+  const [addConfirmationData, setAddConfirmationData] = useState<{
+    isOpen: boolean;
+    sku: string;
+    description: string;
+    totalOutlets: number;
+    totalQty: number;
+    payload: any;
+    breakdown: Array<{
+      outletCode: string;
+      outletName: string;
+      qty: number;
+    }>;
+  } | null>(null);
+
+  // Global Delete SKU state
+  const [globalDeleteSkuModal, setGlobalDeleteSkuModal] = useState<{
+    isOpen: boolean;
+    selectedSku: string;
+  }>({
+    isOpen: false,
+    selectedSku: "",
+  });
+  const [selectedDeleteOutlets, setSelectedDeleteOutlets] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
   const [summarySearchQuery, setSummarySearchQuery] = useState("");
   const [pivotSearchQuery, setPivotSearchQuery] = useState("");
 
@@ -2258,6 +2452,16 @@ export default function DailyDispatchPage() {
     enabled: !!boardSheetId,
     refetchInterval: 5000,
   });
+
+  const { data: sheetSkus = [], refetch: refetchSheetSkus, isLoading: isLoadingSheetSkus } = useQuery<any[]>({
+    queryKey: [`/api/dispatch/sheets/${boardSheetId}/skus`],
+    enabled: !!boardSheetId,
+  });
+
+  const selectedSkuInfo = useMemo(() => {
+    if (!globalDeleteSkuModal.selectedSku) return null;
+    return sheetSkus.find((s: any) => s.itemCode === globalDeleteSkuModal.selectedSku) || null;
+  }, [sheetSkus, globalDeleteSkuModal.selectedSku]);
 
   const { data: vehiclesList = [] } = useQuery<any[]>({
     queryKey: ["/api/vehicles"],
@@ -2628,6 +2832,9 @@ export default function DailyDispatchPage() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/skus`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       const count = result?.count || (result?.id ? 1 : 0);
       toast({ title: count > 1 ? `Successfully added items across ${count} outlets!` : "Item added successfully!" });
       setNewItemForm({
@@ -2651,6 +2858,8 @@ export default function DailyDispatchPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/skus`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`] });
       toast({ title: "Item updated successfully" });
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
@@ -2663,6 +2872,8 @@ export default function DailyDispatchPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/skus`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`] });
       toast({ title: "Items updated successfully" });
       setManageItemsModal(prev => ({ ...prev, isOpen: false }));
     },
@@ -2676,8 +2887,33 @@ export default function DailyDispatchPage() {
     },
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/skus`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       setEditedItems(prev => prev.filter(item => item.id !== deletedId));
       toast({ title: "Item deleted successfully" });
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  const deleteSkuMutation = useMutation({
+    mutationFn: async (data: { sheetId: string; itemCode: string; outletCodes?: string[] }) => {
+      const res = await apiRequest("DELETE", `/api/dispatch/sheets/${data.sheetId}/sku/${encodeURIComponent(data.itemCode)}`, { outletCodes: data.outletCodes });
+      return res.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/skus`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/report`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+      toast({
+        title: "SKU Deleted Successfully",
+        description: `Removed ${result?.deletedCount || 0} delivery item(s) for SKU ${result?.itemCode}.`,
+      });
+      setDeleteConfirmOpen(false);
+      setGlobalDeleteSkuModal({ isOpen: false, selectedSku: "" });
+      setSelectedDeleteOutlets([]);
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -2921,8 +3157,15 @@ export default function DailyDispatchPage() {
     uploadMutation.mutate({ date: uploadDate, fileName: csvFileName, items: csvPreview, mergeStrategy: "overwrite", clientId: uploadClientId });
   };
 
-  // Find sheet for selected date on board
-  const sheetForDate = sheets.find(s => s.date === selectedDate && (boardClientId === "all" || s.clientId === boardClientId));
+  // Find sheet for selected date on board (hierarchical client matching)
+  const sheetForDate = sheets.find(s => {
+    if (s.date !== selectedDate) return false;
+    if (boardClientId === "all") return true;
+    if (s.clientId === boardClientId) return true;
+    const sheetClient = clientList.find((c: any) => c.id === s.clientId);
+    if (sheetClient && sheetClient.parentClientId === boardClientId) return true;
+    return false;
+  });
 
   const driverMap = new Map(drivers.map(d => [d.id, d]));
   const zoneMap = new Map(zones.map(z => [z.id, z]));
@@ -3051,6 +3294,19 @@ export default function DailyDispatchPage() {
                 onClick={() => setGlobalAddModal({ isOpen: true, selectedOutletCode: "" })}
               >
                 <PlusCircle className="h-3.5 w-3.5 mr-1" />Add Item / Outlet
+              </Button>
+            )}
+            {boardSheetId && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 flex-shrink-0 h-8 text-xs"
+                onClick={() => {
+                  refetchSheetSkus();
+                  setGlobalDeleteSkuModal({ isOpen: true, selectedSku: "" });
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1 text-red-600" />Delete SKU
               </Button>
             )}
             {boardData && boardData.overrides.length > 0 && (
@@ -3572,7 +3828,8 @@ export default function DailyDispatchPage() {
                           <th className="py-2 px-3 font-semibold text-slate-700 border-r w-20">UOM</th>
                           <th className="py-2 px-3 font-semibold text-slate-700 border-r w-24">FROM_ORG</th>
                           <th className="py-2 px-3 font-semibold text-slate-700 border-r w-32">STORAGE_TYPE</th>
-                          <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">QTY</th>
+                          <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24 border-r">QTY</th>
+                          <th className="py-2 px-2 font-semibold text-slate-700 text-center w-14 print:hidden">ACTION</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -3592,11 +3849,26 @@ export default function DailyDispatchPage() {
                                 <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.uom}</td>
                                 <td className="py-1.5 px-3 border-r text-slate-600 text-center">{item.fromOrg}</td>
                                 <td className="py-1.5 px-3 border-r text-slate-600">{item.storageType}</td>
-                                <td className="py-1.5 px-3 text-right font-medium text-slate-900">{item.totalQty}</td>
+                                <td className="py-1.5 px-3 text-right font-medium text-slate-900 border-r">{item.totalQty}</td>
+                                <td className="py-1 px-2 text-center print:hidden" onClick={e => e.stopPropagation()}>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    title={`Delete SKU ${item.itemCode}`}
+                                    onClick={() => {
+                                      refetchSheetSkus();
+                                      setGlobalDeleteSkuModal({ isOpen: true, selectedSku: item.itemCode });
+                                      setSelectedDeleteOutlets([]);
+                                    }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </td>
                               </tr>
                               {isExpanded && (
                                 <tr className="bg-slate-50/30">
-                                  <td colSpan={6} className="p-3 border-b">
+                                  <td colSpan={7} className="p-3 border-b">
                                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 max-w-2xl mx-auto shadow-inner space-y-1.5">
                                       <p className="font-semibold text-xs text-slate-700 border-b border-slate-200 pb-1">Outlet-wise Breakdown</p>
                                       <div className="divide-y divide-slate-200/60 text-xs">
@@ -3618,7 +3890,8 @@ export default function DailyDispatchPage() {
                       <tfoot className="bg-slate-100/80 border-t">
                         <tr>
                           <td colSpan={5} className="py-2 px-3 font-bold text-right border-r text-slate-900">Grand Total</td>
-                          <td className="py-2 px-3 font-bold text-right text-slate-900">{grandTotal}</td>
+                          <td className="py-2 px-3 font-bold text-right text-slate-900 border-r">{grandTotal}</td>
+                          <td className="print:hidden"></td>
                         </tr>
                       </tfoot>
                     </table>
@@ -3749,23 +4022,70 @@ export default function DailyDispatchPage() {
                   <Input type="date" value={uploadDate} onChange={e => setUploadDate(e.target.value)} className="w-44" />
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-1.5 font-medium">
-                    Client / Customer <span className="text-red-500">*</span>
-                  </Label>
-                  <select
-                    value={uploadClientId}
-                    onChange={e => setUploadClientId(e.target.value)}
-                    className="w-full h-10 border rounded-md px-3 bg-transparent text-sm font-medium focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="">-- Select Client (e.g. BANZ → Americana or BANZ → Jasmis) --</option>
-                    {clientOptions.map((c: any) => (
-                      <option key={c.id} value={c.id}>{c.displayName}</option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">
-                    Assigning the correct customer ensures outlets and deliveries are isolated and never mixed with another client.
-                  </p>
+                <div className="space-y-3 p-3.5 bg-slate-50/60 dark:bg-slate-900/40 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="flex items-center gap-1.5 font-medium text-xs">
+                        Client / Customer Account <span className="text-red-500">*</span>
+                      </Label>
+                      <select
+                        value={uploadMainClientId}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setUploadMainClientId(val);
+                          const subs = subClientsOf(val);
+                          if (subs.length > 0) {
+                            setUploadSubClientId("");
+                            setUploadClientId("");
+                          } else {
+                            setUploadSubClientId("");
+                            setUploadClientId(val);
+                          }
+                        }}
+                        className="w-full h-9 border rounded-md px-3 bg-white dark:bg-slate-950 text-xs font-medium focus:ring-2 focus:ring-primary/20"
+                      >
+                        <option value="">-- Select Client (e.g. BANZ) --</option>
+                        {parentClients.map((c: any) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {uploadMainClientId && subClientsOf(uploadMainClientId).length > 0 ? (
+                      <div className="space-y-1.5 animate-in fade-in-50 duration-200">
+                        <Label className="flex items-center gap-1.5 font-semibold text-xs text-orange-700 dark:text-orange-400">
+                          Sub-Client / Division <span className="text-red-500">*</span>
+                        </Label>
+                        <select
+                          value={uploadSubClientId}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setUploadSubClientId(val);
+                            setUploadClientId(val);
+                          }}
+                          className="w-full h-9 border border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/30 rounded-md px-3 text-xs font-semibold text-orange-900 dark:text-orange-200 focus:ring-2 focus:ring-orange-400/20"
+                        >
+                          <option value="">-- Select Division (Americana or Jasmis) --</option>
+                          {subClientsOf(uploadMainClientId).map((c: any) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {uploadClientId ? (
+                    <div className="flex items-center gap-2 text-xs font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-1.5 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40">
+                      <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                      <span>
+                        Upload Target: <strong>{clientList.find((c: any) => c.id === uploadClientId)?.parentClientId ? `${clientList.find((c: any) => c.id === clientList.find((x: any) => x.id === uploadClientId)?.parentClientId)?.name} → ` : ""}{clientList.find((c: any) => c.id === uploadClientId)?.name}</strong>
+                      </span>
+                    </div>
+                  ) : uploadMainClientId && subClientsOf(uploadMainClientId).length > 0 ? (
+                    <p className="text-[11px] text-orange-600 font-medium flex items-center gap-1">
+                      <AlertCircle className="h-3.5 w-3.5" /> Please select the sub-client division (e.g. Americana) above to proceed.
+                    </p>
+                  ) : null}
                 </div>
 
                 {/* Dropzone */}
@@ -4281,16 +4601,29 @@ export default function DailyDispatchPage() {
                         toast({ title: "Validation Error", description: "Item Code and Quantity are required.", variant: "destructive" });
                         return;
                       }
-                      addItemMutation.mutate({
-                        sheetId: boardSheetId!,
-                        outletCode: manageItemsModal.outletCode,
-                        itemCode: newItemForm.itemCode,
-                        description: newItemForm.description,
-                        requestedQty: parseFloat(newItemForm.requestedQty),
-                        storageType: newItemForm.storageType,
-                        routeId: newItemForm.routeId || undefined,
-                        toNo: newItemForm.toNo || undefined,
-                        uom: newItemForm.uom || undefined,
+                      const qty = parseFloat(newItemForm.requestedQty) || 0;
+                      setAddConfirmationData({
+                        isOpen: true,
+                        sku: newItemForm.itemCode,
+                        description: newItemForm.description || "",
+                        totalOutlets: 1,
+                        totalQty: qty,
+                        payload: {
+                          sheetId: boardSheetId!,
+                          outletCode: manageItemsModal.outletCode,
+                          itemCode: newItemForm.itemCode,
+                          description: newItemForm.description,
+                          requestedQty: qty,
+                          storageType: newItemForm.storageType,
+                          routeId: newItemForm.routeId || undefined,
+                          toNo: newItemForm.toNo || undefined,
+                          uom: newItemForm.uom || undefined,
+                        },
+                        breakdown: [{
+                          outletCode: manageItemsModal.outletCode,
+                          outletName: manageItemsModal.outletName || manageItemsModal.outletCode,
+                          qty,
+                        }],
                       });
                     }}
                     disabled={addItemMutation.isPending}
@@ -4659,20 +4992,32 @@ export default function DailyDispatchPage() {
                     toast({ title: "Validation Error", description: "Outlet, Item Code, and Quantity are required.", variant: "destructive" });
                     return;
                   }
-                  addItemMutation.mutate({
-                    sheetId: boardSheetId!,
-                    outletCode: globalAddModal.selectedOutletCode,
-                    itemCode: newItemForm.itemCode,
-                    description: newItemForm.description,
-                    requestedQty: parseFloat(newItemForm.requestedQty),
-                    storageType: newItemForm.storageType,
-                    routeId: newItemForm.routeId || undefined,
-                    toNo: newItemForm.toNo || undefined,
-                    uom: newItemForm.uom || undefined,
-                  }, {
-                    onSuccess: () => {
-                      setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
-                    }
+                  const matchedOutlet = (outlets || []).find((o: any) => o.code === globalAddModal.selectedOutletCode);
+                  const outletName = matchedOutlet?.name || globalAddModal.selectedOutletCode;
+                  const qty = parseFloat(newItemForm.requestedQty) || 0;
+
+                  setAddConfirmationData({
+                    isOpen: true,
+                    sku: newItemForm.itemCode,
+                    description: newItemForm.description || "",
+                    totalOutlets: 1,
+                    totalQty: qty,
+                    payload: {
+                      sheetId: boardSheetId!,
+                      outletCode: globalAddModal.selectedOutletCode,
+                      itemCode: newItemForm.itemCode,
+                      description: newItemForm.description,
+                      requestedQty: qty,
+                      storageType: newItemForm.storageType,
+                      routeId: newItemForm.routeId || undefined,
+                      toNo: newItemForm.toNo || undefined,
+                      uom: newItemForm.uom || undefined,
+                    },
+                    breakdown: [{
+                      outletCode: globalAddModal.selectedOutletCode,
+                      outletName,
+                      qty,
+                    }],
                   });
                 }}
                 disabled={addItemMutation.isPending}
@@ -4698,6 +5043,7 @@ export default function DailyDispatchPage() {
                     const matchedOutlet = (outlets || []).find((o: any) => o.code === outletCode);
                     return {
                       outletCode,
+                      outletName: matchedOutlet?.name || outletCode,
                       itemCode: newItemForm.itemCode,
                       description: newItemForm.description,
                       requestedQty: qty,
@@ -4708,13 +5054,23 @@ export default function DailyDispatchPage() {
                     };
                   });
 
-                  addItemMutation.mutate({
-                    sheetId: boardSheetId!,
-                    items: batchItems,
-                  }, {
-                    onSuccess: () => {
-                      setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
-                    }
+                  const totalQty = batchItems.reduce((sum, it) => sum + it.requestedQty, 0);
+
+                  setAddConfirmationData({
+                    isOpen: true,
+                    sku: newItemForm.itemCode,
+                    description: newItemForm.description || "",
+                    totalOutlets: batchItems.length,
+                    totalQty,
+                    payload: {
+                      sheetId: boardSheetId!,
+                      items: batchItems.map(({ outletName, ...rest }) => rest),
+                    },
+                    breakdown: batchItems.map(b => ({
+                      outletCode: b.outletCode,
+                      outletName: b.outletName,
+                      qty: b.requestedQty,
+                    })),
                   });
                 }}
                 disabled={addItemMutation.isPending || Object.keys(bulkOutlets).length === 0}
@@ -4725,6 +5081,314 @@ export default function DailyDispatchPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add SKU Confirmation Dialog */}
+      <Dialog
+        open={!!addConfirmationData?.isOpen}
+        onOpenChange={(open) => {
+          if (!open) setAddConfirmationData(null);
+        }}
+      >
+        <DialogContent className="max-w-md p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              Confirm Item Addition
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Please review the SKU details, total outlets, and total quantity before adding to today's active sheet.
+            </DialogDescription>
+          </DialogHeader>
+
+          {addConfirmationData && (
+            <div className="space-y-4 my-2">
+              {/* Highlight Cards */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-slate-50 border rounded-lg">
+                  <span className="text-[11px] font-semibold text-muted-foreground block uppercase">SKU / Item Code</span>
+                  <span className="text-sm font-bold font-mono text-slate-900">{addConfirmationData.sku}</span>
+                  {addConfirmationData.description && (
+                    <span className="text-xs text-slate-600 block truncate mt-0.5" title={addConfirmationData.description}>
+                      {addConfirmationData.description}
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-3 bg-emerald-50/60 border border-emerald-200/70 rounded-lg">
+                  <span className="text-[11px] font-semibold text-emerald-800 block uppercase">Total Quantity</span>
+                  <span className="text-base font-bold text-emerald-700">
+                    {addConfirmationData.totalQty} <span className="text-xs font-normal">Boxes / Pcs</span>
+                  </span>
+                  <span className="text-xs text-emerald-700/80 block mt-0.5">
+                    Across <strong className="font-bold">{addConfirmationData.totalOutlets}</strong> outlet(s)
+                  </span>
+                </div>
+              </div>
+
+              {/* Outlet Breakdown List */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                  <span>Target Outlets ({addConfirmationData.breakdown.length})</span>
+                  <span>Qty</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto border rounded-lg divide-y divide-slate-100 bg-white">
+                  {addConfirmationData.breakdown.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 text-xs hover:bg-slate-50">
+                      <div className="min-w-0 pr-2">
+                        <p className="font-medium text-slate-800 truncate">{item.outletName}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">{item.outletCode}</p>
+                      </div>
+                      <span className="font-bold text-slate-900 shrink-0 bg-slate-100 px-2 py-0.5 rounded">
+                        {item.qty}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="border-t pt-3 flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAddConfirmationData(null)}
+              disabled={addItemMutation.isPending}
+            >
+              Cancel / Back
+            </Button>
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+              disabled={addItemMutation.isPending}
+              onClick={() => {
+                if (!addConfirmationData?.payload) return;
+                addItemMutation.mutate(addConfirmationData.payload, {
+                  onSuccess: () => {
+                    setAddConfirmationData(null);
+                    setGlobalAddModal(prev => ({ ...prev, isOpen: false }));
+                  },
+                });
+              }}
+            >
+              {addItemMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Check className="h-3.5 w-3.5 mr-1" />
+                  Confirm & Add to Sheet
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Global Delete SKU Dialog */}
+      <Dialog
+        open={globalDeleteSkuModal.isOpen}
+        onOpenChange={(open) => {
+          setGlobalDeleteSkuModal(prev => ({ ...prev, isOpen: open }));
+          if (!open) {
+            setSelectedDeleteOutlets([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-xl max-h-[90vh] flex flex-col p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-red-700">
+              <Trash2 className="h-5 w-5 text-red-600" />
+              Delete SKU from Dispatch Sheet
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Permanently remove an SKU across all or selected outlets in today's active sheet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-4 my-2 text-xs">
+            {/* SKU Selector */}
+            <div>
+              <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                Select SKU to Remove *
+              </label>
+              <select
+                value={globalDeleteSkuModal.selectedSku}
+                onChange={e => {
+                  setGlobalDeleteSkuModal(prev => ({ ...prev, selectedSku: e.target.value }));
+                  setSelectedDeleteOutlets([]);
+                }}
+                className="w-full h-9 border rounded-md px-3 bg-background text-xs font-mono"
+              >
+                <option value="">-- Choose SKU from current sheet ({sheetSkus.length} available) --</option>
+                {sheetSkus.map((s: any) => (
+                  <option key={s.itemCode} value={s.itemCode}>
+                    {s.itemCode} - {s.description || "No description"} ({s.outletsCount} outlets | {s.totalQty} total qty)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedSkuInfo && (
+              <>
+                {/* SKU Details Summary Card */}
+                <div className="p-3 bg-red-50/50 border border-red-200/80 rounded-lg space-y-2">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-red-800 tracking-wider">SKU Code</span>
+                      <p className="text-base font-mono font-bold text-slate-900">{selectedSkuInfo.itemCode}</p>
+                      <p className="text-xs text-slate-600 mt-0.5">{selectedSkuInfo.description || "No description"}</p>
+                    </div>
+                    <Badge variant="outline" className="border-red-300 text-red-700 bg-red-50 font-normal">
+                      {selectedSkuInfo.storageType || "Dry"}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-red-200/60">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase block">Outlets In Sheet</span>
+                      <span className="text-sm font-bold text-slate-800">{selectedSkuInfo.outletsCount || selectedSkuInfo.outlets?.length || 0} Outlets</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase block">Total Quantity</span>
+                      <span className="text-sm font-bold text-red-700">{selectedSkuInfo.totalQty} {selectedSkuInfo.uom || "Boxes"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Outlet Scope Selection */}
+                <div className="space-y-2">
+                  <label className="font-semibold text-slate-700 block">Deletion Scope</label>
+                  <div className="flex items-center gap-4 border p-2.5 rounded-lg bg-muted/20">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs">
+                      <input
+                        type="radio"
+                        name="deleteScope"
+                        checked={selectedDeleteOutlets.length === 0}
+                        onChange={() => setSelectedDeleteOutlets([])}
+                        className="text-red-600 focus:ring-red-500"
+                      />
+                      <span>Delete from <strong>ALL</strong> Outlets ({selectedSkuInfo.outletsCount || 0} outlets, {selectedSkuInfo.totalQty} total qty)</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-xs">
+                      <input
+                        type="radio"
+                        name="deleteScope"
+                        checked={selectedDeleteOutlets.length > 0}
+                        onChange={() => {
+                          if (selectedDeleteOutlets.length === 0 && selectedSkuInfo.outlets?.length > 0) {
+                            setSelectedDeleteOutlets([selectedSkuInfo.outlets[0].outletCode]);
+                          }
+                        }}
+                        className="text-red-600 focus:ring-red-500"
+                      />
+                      <span>Select Specific Outlets Only</span>
+                    </label>
+                  </div>
+
+                  {/* Outlets Checklist (when specific outlets mode is active) */}
+                  {selectedDeleteOutlets.length > 0 && (
+                    <div className="border rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100 bg-white">
+                      {(selectedSkuInfo.outlets || []).map((o: any, idx: number) => {
+                        const isChecked = selectedDeleteOutlets.includes(o.outletCode);
+                        return (
+                          <div key={idx} className="flex items-center justify-between p-2 hover:bg-slate-50">
+                            <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 pr-2">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={e => {
+                                  if (e.target.checked) {
+                                    setSelectedDeleteOutlets(prev => [...prev, o.outletCode]);
+                                  } else {
+                                    setSelectedDeleteOutlets(prev => prev.filter(code => code !== o.outletCode));
+                                  }
+                                }}
+                                className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+                              />
+                              <span className="truncate text-xs font-medium text-slate-800">{o.outletName}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">({o.outletCode})</span>
+                            </label>
+                            <span className="font-bold text-slate-700 text-xs shrink-0 bg-slate-100 px-2 py-0.5 rounded">
+                              {o.qty}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-3 flex items-center justify-between">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setGlobalDeleteSkuModal({ isOpen: false, selectedSku: "" })}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={!globalDeleteSkuModal.selectedSku || deleteSkuMutation.isPending}
+              onClick={() => setDeleteConfirmOpen(true)}
+              className="gap-1.5"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {deleteSkuMutation.isPending ? "Deleting..." : "Delete SKU..."}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete SKU Confirmation Alert Dialog */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Confirm Permanent Deletion of SKU
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-slate-600 space-y-2 pt-1">
+              <p>
+                Are you sure you want to delete SKU <strong className="font-mono text-slate-900">{globalDeleteSkuModal.selectedSku}</strong>
+                {selectedSkuInfo?.description ? ` (${selectedSkuInfo.description})` : ""} from today's active sheet?
+              </p>
+              <div className="p-2.5 bg-red-50 border border-red-200 rounded text-red-800 text-[11px] font-medium">
+                Scope: {selectedDeleteOutlets.length > 0 ? (
+                  <>Removing from <strong>{selectedDeleteOutlets.length}</strong> selected outlet(s)</>
+                ) : (
+                  <>Removing from <strong>ALL {selectedSkuInfo?.outletsCount || selectedSkuInfo?.outlets?.length || 0}</strong> outlet(s), total quantity: <strong>{selectedSkuInfo?.totalQty || 0}</strong></>
+                )}.
+                <br />
+                This action will delete all matching delivery items and cannot be undone.
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteSkuMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              disabled={deleteSkuMutation.isPending}
+              onClick={() => {
+                deleteSkuMutation.mutate({
+                  sheetId: boardSheetId!,
+                  itemCode: globalDeleteSkuModal.selectedSku,
+                  outletCodes: selectedDeleteOutlets.length > 0 ? selectedDeleteOutlets : undefined,
+                });
+              }}
+            >
+              {deleteSkuMutation.isPending ? "Deleting..." : "Yes, Delete SKU"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

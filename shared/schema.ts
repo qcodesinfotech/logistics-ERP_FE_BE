@@ -2368,6 +2368,11 @@ export const dispatchDeliveries = pgTable("dispatch_deliveries", {
   deliveryEndTime: timestamp("delivery_end_time"),
   status: text("status").notNull().default("pending"),
   deliveryType: text("delivery_type").default("regular"), // "regular" or "quick"
+  returnedQty: decimal("returned_qty", { precision: 10, scale: 3 }),
+  returnReason: text("return_reason"),
+  cashCollected: decimal("cash_collected", { precision: 10, scale: 3 }),
+  cashReceiptNo: text("cash_receipt_no"),
+  paymentMethod: text("payment_method"),
   deliveredAt: timestamp("delivered_at"),
   deliveryTime: text("delivery_time"),
   createdAt: timestamp("created_at").defaultNow(),

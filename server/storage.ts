@@ -3980,7 +3980,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; potUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string; toNo?: string; deliveryStartTime?: string; deliveryEndTime?: string }): Promise<any> {
+  async updateDispatchDelivery(dispatchItemId: string, data: { deliveredQty?: string; remainingQty?: string; remark?: string; status?: string; driverId?: string; podUrl?: string; potUrl?: string; temperature?: string; outletId?: string; deliveryTime?: string; toNo?: string; deliveryStartTime?: string; deliveryEndTime?: string; damagedQty?: string; damageReason?: string; returnedQty?: string; returnReason?: string; cashCollected?: string; cashReceiptNo?: string; paymentMethod?: string }): Promise<any> {
     const { toNo, ...deliveryData } = data;
     if (toNo !== undefined) {
       await db.update(dispatchItems)
@@ -8648,6 +8648,11 @@ export class DatabaseStorage implements IStorage {
       remainingQty: dispatchDeliveries.remainingQty,
       damagedQty: dispatchDeliveries.damagedQty,
       damageReason: dispatchDeliveries.damageReason,
+      returnedQty: dispatchDeliveries.returnedQty,
+      returnReason: dispatchDeliveries.returnReason,
+      cashCollected: dispatchDeliveries.cashCollected,
+      cashReceiptNo: dispatchDeliveries.cashReceiptNo,
+      paymentMethod: dispatchDeliveries.paymentMethod,
       remark: dispatchDeliveries.remark,
       podUrl: dispatchDeliveries.podUrl,
       temperature: dispatchDeliveries.temperature,
@@ -9765,6 +9770,13 @@ export class DatabaseStorage implements IStorage {
         requestedQty: r.item.requestedQty,
         deliveredQty: r.delivery?.deliveredQty || r.item.totalDelivered || "0",
         remainingQty: r.delivery?.remainingQty || r.item.remaining || null,
+        damagedQty: r.delivery?.damagedQty || "0",
+        damageReason: r.delivery?.damageReason || null,
+        returnedQty: r.delivery?.returnedQty || "0",
+        returnReason: r.delivery?.returnReason || null,
+        cashCollected: r.delivery?.cashCollected || "0",
+        cashReceiptNo: r.delivery?.cashReceiptNo || null,
+        paymentMethod: r.delivery?.paymentMethod || null,
         weight: r.item.weight,
         storageType: r.item.storageType,
         uom: r.item.uom,
