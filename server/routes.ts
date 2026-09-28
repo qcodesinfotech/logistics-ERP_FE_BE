@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db, ensureDriverTablesSchema } from "./db";
-import { eq, and, or, inArray, desc, isNull, ne } from "drizzle-orm";
+import { eq, and, or, inArray, desc, isNull, ne, sql } from "drizzle-orm";
 import PDFDocument from "pdfkit";
 import * as schema from "@shared/schema";
 import { driverAttendance } from "@shared/schema";
@@ -8157,31 +8157,161 @@ export async function registerRoutes(
   // Supervisor override: move outlet to different zone for this sheet
   app.post("/api/dispatch/overrides", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { sheetId, outletId, storageTypes, storageType, overrideZoneId, overrideTruckId, reason } = req.body;
+      const { sheetId, outletId, outletCode, storageTypes, storageType, overrideZoneId, overrideTruckId, reason } = req.body;
+
+      let resolvedOutletId = outletId;
+      if ((!resolvedOutletId || resolvedOutletId === "null" || resolvedOutletId === "undefined") && outletCode) {
+        const [found] = await db.select().from(schema.outlets)
+          .where(sql`LOWER(TRIM(${schema.outlets.code})) = LOWER(TRIM(${outletCode}))`);
+        if (found) {
+          resolvedOutletId = found.id;
+        } else {
+          const [foundItem] = await db.select().from(schema.dispatchItems)
+            .where(and(eq(schema.dispatchItems.sheetId, sheetId), eq(schema.dispatchItems.outletCode, outletCode)));
+          if (foundItem?.outletId) {
+            resolvedOutletId = foundItem.outletId;
+          } else {
+            const [newOutlet] = await db.insert(schema.outlets).values({
+              name: outletCode,
+              code: outletCode,
+              routeId: overrideZoneId,
+              status: "active"
+            } as any).returning();
+            resolvedOutletId = newOutlet.id;
+          }
+        }
+      }
+
+      const overrideTargetTruck = (overrideTruckId && overrideTruckId !== "any" && overrideTruckId.trim() !== "") ? overrideTruckId.trim() : null;
+
+      const results = [];
       if (Array.isArray(storageTypes) && storageTypes.length > 0) {
-        const results = [];
         for (const st of storageTypes) {
           const result = await storage.createDispatchOverride({
-            sheetId, outletId, storageType: st, overrideZoneId, overrideTruckId, reason, createdBy: req.user?.id
+            sheetId,
+            outletId: resolvedOutletId,
+            outletCode,
+            storageType: st,
+            overrideZoneId,
+            overrideTruckId: overrideTargetTruck || undefined,
+            reason,
+            createdBy: req.user?.id
           });
           results.push(result);
         }
-        res.status(201).json(results);
       } else {
         const result = await storage.createDispatchOverride({
-          sheetId, outletId, storageType: storageType || null, overrideZoneId, overrideTruckId, reason, createdBy: req.user?.id
+          sheetId,
+          outletId: resolvedOutletId,
+          outletCode,
+          storageType: storageType || null,
+          overrideZoneId,
+          overrideTruckId: overrideTargetTruck || undefined,
+          reason,
+          createdBy: req.user?.id
         });
-        res.status(201).json(result);
+        results.push(result);
       }
-    } catch (e) {
+
+      // Sync truck assignments when moving an outlet from an allotted truck
+      try {
+        const allSheetTrucks = await db.select().from(schema.dispatchTruckAssignments)
+          .where(eq(schema.dispatchTruckAssignments.sheetId, sheetId));
+        const sheetTruckIds = allSheetTrucks.map(t => t.id);
+
+        if (sheetTruckIds.length > 0) {
+          const targetStorageTypes = (Array.isArray(storageTypes) && storageTypes.length > 0)
+            ? storageTypes
+            : (storageType ? [storageType] : null);
+
+          if (overrideTargetTruck) {
+            // Reassign outlet to the specified target truck
+            if (targetStorageTypes && targetStorageTypes.length > 0) {
+              for (const st of targetStorageTypes) {
+                await db.delete(schema.dispatchOutletTruckAssignments).where(
+                  and(
+                    inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, sheetTruckIds),
+                    or(
+                      outletCode ? eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode) : sql`false`,
+                      resolvedOutletId ? eq(schema.dispatchOutletTruckAssignments.outletId, resolvedOutletId) : sql`false`
+                    ),
+                    sql`LOWER(${schema.dispatchOutletTruckAssignments.storageType}) = LOWER(${st})`
+                  )
+                );
+                await db.insert(schema.dispatchOutletTruckAssignments).values({
+                  truckAssignmentId: overrideTargetTruck,
+                  outletCode: outletCode || resolvedOutletId,
+                  outletId: resolvedOutletId,
+                  storageType: st,
+                  overrideReason: reason || "Supervisor override move",
+                });
+              }
+            } else {
+              await db.delete(schema.dispatchOutletTruckAssignments).where(
+                and(
+                  inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, sheetTruckIds),
+                  or(
+                    outletCode ? eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode) : sql`false`,
+                    resolvedOutletId ? eq(schema.dispatchOutletTruckAssignments.outletId, resolvedOutletId) : sql`false`
+                  )
+                )
+              );
+              await db.insert(schema.dispatchOutletTruckAssignments).values({
+                truckAssignmentId: overrideTargetTruck,
+                outletCode: outletCode || resolvedOutletId,
+                outletId: resolvedOutletId,
+                overrideReason: reason || "Supervisor override move",
+              });
+            }
+          } else {
+            // Target truck is null ("Any Truck"): Outlet moved away from old truck and route
+            if (targetStorageTypes && targetStorageTypes.length > 0) {
+              for (const st of targetStorageTypes) {
+                await db.delete(schema.dispatchOutletTruckAssignments).where(
+                  and(
+                    inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, sheetTruckIds),
+                    or(
+                      outletCode ? eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode) : sql`false`,
+                      resolvedOutletId ? eq(schema.dispatchOutletTruckAssignments.outletId, resolvedOutletId) : sql`false`
+                    ),
+                    sql`LOWER(${schema.dispatchOutletTruckAssignments.storageType}) = LOWER(${st})`
+                  )
+                );
+              }
+            } else {
+              await db.delete(schema.dispatchOutletTruckAssignments).where(
+                and(
+                  inArray(schema.dispatchOutletTruckAssignments.truckAssignmentId, sheetTruckIds),
+                  or(
+                    outletCode ? eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode) : sql`false`,
+                    resolvedOutletId ? eq(schema.dispatchOutletTruckAssignments.outletId, resolvedOutletId) : sql`false`
+                  )
+                )
+              );
+            }
+          }
+
+          await recalculateTruckCapacities(sheetId);
+        }
+      } catch (truckSyncErr) {
+        console.error("Error syncing truck assignments on override:", truckSyncErr);
+      }
+
+      res.status(201).json(Array.isArray(storageTypes) && storageTypes.length > 0 ? results : results[0]);
+    } catch (e: any) {
       console.error("Create override error:", e);
-      res.status(500).json({ error: "Failed to create zone override" });
+      res.status(500).json({ error: "Failed to create zone override: " + (e?.message || String(e)) });
     }
   });
 
   app.delete("/api/dispatch/overrides/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const [override] = await db.select().from(schema.dispatchOutletZoneOverrides)
+        .where(eq(schema.dispatchOutletZoneOverrides.id, req.params.id));
       await storage.deleteDispatchOverride(req.params.id);
+      if (override?.sheetId) {
+        await recalculateTruckCapacities(override.sheetId);
+      }
       res.sendStatus(204);
     } catch (e) {
       console.error("Delete override error:", e);
@@ -10784,7 +10914,22 @@ export async function registerRoutes(
 
       const limit = capacity < 100 ? capacity * 1000 : capacity;
 
-      if (!force && limit > 0 && usedCapacity + weight > limit) {
+      // Check if this outlet already had weight on this truck to avoid double counting
+      let existingWeightOnThisTruck = 0;
+      if (sheetId) {
+        const existingOnTruck = await db.select().from(schema.dispatchOutletTruckAssignments)
+          .where(and(
+            eq(schema.dispatchOutletTruckAssignments.truckAssignmentId, truckAssignmentId),
+            eq(schema.dispatchOutletTruckAssignments.outletCode, outletCode),
+            storageType ? sql`LOWER(${schema.dispatchOutletTruckAssignments.storageType}) = LOWER(${storageType})` : sql`1=1`
+          ));
+        for (const e of existingOnTruck) {
+          existingWeightOnThisTruck += parseFloat(e.assignedWeight?.toString() || "0");
+        }
+      }
+      const netNewWeight = Math.max(0, weight - existingWeightOnThisTruck);
+
+      if (!force && limit > 0 && usedCapacity + netNewWeight > limit) {
         return res.status(422).json({
           error: `Capacity exceeded: Adding this (${weight.toFixed(0)} Boxes) would exceed ${vehicle?.plateNumber || "truck"}'s capacity of ${limit.toFixed(0)} Boxes. Current load: ${usedCapacity.toFixed(0)} Boxes.`
         });
@@ -10805,45 +10950,41 @@ export async function registerRoutes(
             // If assigning specific storage, only clear the specific storage type, OR clear the "all" assignment if it exists
             conditions.push(
               or(
-                eq(schema.dispatchOutletTruckAssignments.storageType, storageType),
+                sql`LOWER(${schema.dispatchOutletTruckAssignments.storageType}) = LOWER(${storageType})`,
                 isNull(schema.dispatchOutletTruckAssignments.storageType)
               ) as any
             );
-          } else {
-            // If assigning all, clear everything for this outlet
           }
 
           const existing = await db.select().from(schema.dispatchOutletTruckAssignments).where(and(...conditions));
           
           for (const e of existing) {
-            // Reduce old truck's usedCapacity
-            const [oldTruck] = await db.select().from(schema.dispatchTruckAssignments)
-              .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
-            if (oldTruck) {
-              const oldUsed = parseFloat(oldTruck.usedCapacity?.toString() || "0");
-              const oldWeight = parseFloat(e.assignedWeight?.toString() || "0");
-              await db.update(schema.dispatchTruckAssignments)
-                .set({ usedCapacity: Math.max(0, oldUsed - oldWeight).toFixed(3) } as any)
-                .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
-            }
             await db.delete(schema.dispatchOutletTruckAssignments)
               .where(eq(schema.dispatchOutletTruckAssignments.id, e.id));
           }
         }
       }
 
+      // Resolve outletId if possible
+      let resolvedOutletId = req.body.outletId;
+      if (!resolvedOutletId && outletCode) {
+        const [found] = await db.select().from(schema.outlets)
+          .where(sql`LOWER(TRIM(${schema.outlets.code})) = LOWER(TRIM(${outletCode}))`);
+        resolvedOutletId = found?.id || null;
+      }
+
       // Insert new assignment
       await db.insert(schema.dispatchOutletTruckAssignments).values({
         truckAssignmentId,
         outletCode,
+        outletId: resolvedOutletId,
         storageType: storageType || null,
         assignedWeight: weight.toFixed(3),
       });
 
-      // Update truck usedCapacity
-      await db.update(schema.dispatchTruckAssignments)
-        .set({ usedCapacity: (usedCapacity + weight).toFixed(3) } as any)
-        .where(eq(schema.dispatchTruckAssignments.id, truckAssignmentId));
+      if (sheetId) {
+        await recalculateTruckCapacities(sheetId);
+      }
 
       res.json({ success: true });
     } catch (error: any) {
@@ -10910,30 +11051,24 @@ export async function registerRoutes(
       ];
 
       if (storageType) {
-        conditions.push(eq(schema.dispatchOutletTruckAssignments.storageType, storageType));
-      } else {
-        conditions.push(isNull(schema.dispatchOutletTruckAssignments.storageType));
+        conditions.push(sql`LOWER(${schema.dispatchOutletTruckAssignments.storageType}) = LOWER(${storageType})`);
       }
 
       const existing = await db.select().from(schema.dispatchOutletTruckAssignments).where(and(...conditions));
 
       for (const e of existing) {
-        const [truck] = await db.select().from(schema.dispatchTruckAssignments)
-          .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
-        if (truck) {
-          const oldUsed = parseFloat(truck.usedCapacity?.toString() || "0");
-          const w = parseFloat(e.assignedWeight?.toString() || "0");
-          await db.update(schema.dispatchTruckAssignments)
-            .set({ usedCapacity: Math.max(0, oldUsed - w).toFixed(3) } as any)
-            .where(eq(schema.dispatchTruckAssignments.id, e.truckAssignmentId));
-        }
         await db.delete(schema.dispatchOutletTruckAssignments)
           .where(eq(schema.dispatchOutletTruckAssignments.id, e.id));
       }
+
+      if (sheetId) {
+        await recalculateTruckCapacities(sheetId);
+      }
+
       res.json({ success: true });
     } catch (error: any) {
       console.error("Unassign outlet error:", error);
-      res.status(500).json({ error: "Failed to unassign outlet" });
+      res.status(500).json({ error: "Failed to unassign outlet: " + (error?.message || String(error)) });
     }
   });
 

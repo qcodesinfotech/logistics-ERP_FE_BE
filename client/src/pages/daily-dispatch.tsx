@@ -2806,6 +2806,7 @@ export default function DailyDispatchPage() {
     onSuccess: () => {
       toast({ title: "Zone override applied!" });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       setOverrideDialog(null);
     },
@@ -5938,10 +5939,11 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   });
 
   const assignOutletMutation = useMutation({
-    mutationFn: (data: { outletCode: string; truckAssignmentId: string; outletWeight: string; sheetId: string }) =>
+    mutationFn: (data: { outletCode: string; truckAssignmentId: string; outletWeight: string; sheetId: string; storageType?: string; force?: boolean }) =>
       apiRequest("POST", "/api/dispatch/outlets/assign", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       toast({ title: "Outlet assigned to truck!" });
     },
@@ -5949,10 +5951,11 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   });
 
   const unassignOutletMutation = useMutation({
-    mutationFn: (data: { outletCode: string; sheetId: string }) =>
+    mutationFn: (data: { outletCode: string; sheetId: string; storageType?: string }) =>
       apiRequest("DELETE", "/api/dispatch/outlets/assign", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       toast({ title: "Outlet unassigned" });
     },
@@ -5964,6 +5967,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     onSuccess: async (res) => {
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
       const msg = data.overflow?.length > 0
         ? `Allocated ${data.allocated} outlets. ⚠ ${data.overflow.length} outlets couldn't fit any truck.`
@@ -6073,10 +6077,16 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 
     const itemsToAdd = storageType ? outlet.items.filter((i: any) => i.storageType === storageType) : outlet.items;
 
-    if (capCarton > 0 && taItemCount + itemsToAdd.length > capCarton) {
+    const limit = cap < 100 ? cap * 1000 : cap;
+    const isCartonExceeded = capCarton > 0 && (taItemCount + itemsToAdd.length > capCarton);
+    const isWeightExceeded = limit > 0 && (used + weightT > limit);
+
+    if (isCartonExceeded || isWeightExceeded) {
       setPendingAssignment({
         title: "Capacity Exceeded!",
-        description: `Adding ${outlet.outletCode} (${itemsToAdd.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`,
+        description: isCartonExceeded
+          ? `Adding ${outlet.outletCode} (${itemsToAdd.length} boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${capCarton} boxes.\nCurrent load: ${taItemCount} boxes.\n\nDo you want to proceed anyway?`
+          : `Adding ${outlet.outletCode} (${weightT.toFixed(0)} Boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${limit.toFixed(0)} Boxes.\nCurrent load: ${used.toFixed(0)} Boxes.\n\nDo you want to proceed anyway?`,
         payload: {
           outletCode: outlet.outletCode,
           truckAssignmentId: truckAssignId,
@@ -6087,23 +6097,6 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
         }
       });
       return;
-    } else if (capCarton === 0 && cap > 0) {
-      const limit = cap < 100 ? cap * 1000 : cap;
-      if (used + weightT > limit) {
-        setPendingAssignment({
-          title: "Capacity Exceeded!",
-          description: `Adding ${outlet.outletCode} (${weightT.toFixed(0)} Boxes) would exceed ${veh?.plateNumber || 'Truck'}'s limit of ${limit.toFixed(0)} Boxes.\nCurrent load: ${used.toFixed(0)} Boxes.\n\nDo you want to proceed anyway?`,
-          payload: {
-            outletCode: outlet.outletCode,
-            truckAssignmentId: truckAssignId,
-            outletWeight: weightT.toFixed(3),
-            sheetId: boardSheetId!,
-            storageType,
-            force: true
-          }
-        });
-        return;
-      }
     }
 
     assignOutletMutation.mutate({

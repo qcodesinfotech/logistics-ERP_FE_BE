@@ -3882,23 +3882,30 @@ export class DatabaseStorage implements IStorage {
     board["unassigned"] = { zoneId: "unassigned", zoneName: "Unassigned", drivers: [], trucks: [], outlets: {} };
 
     for (const item of items) {
-      const ov = item.outletId ? getOverrideForItem(item.outletId, item.storageType) : null;
+      const effectiveOutletId = item.outletId || outletCodeMap.get(normalizeCode(item.outletCode))?.id;
+      const ov = effectiveOutletId ? getOverrideForItem(effectiveOutletId, item.storageType) : null;
       let tAssignId = (item.outletId ? outletToTruck.get(item.outletId) : null) || outletToTruck.get(item.outletCode) || null;
       if (ov?.overrideTruckId) {
         tAssignId = ov.overrideTruckId;
       }
 
       let effectiveZoneId = "unassigned";
-      const assignedTruck = tAssignId ? truckAssigns.find(t => t.id === tAssignId) : null;
+      let assignedTruck = tAssignId ? truckAssigns.find(t => t.id === tAssignId) : null;
+
+      // If user overrode to a specific route without picking a truck, do not keep the old truck from the old zone
+      if (ov?.overrideZoneId && !ov.overrideTruckId && assignedTruck && assignedTruck.zoneId !== ov.overrideZoneId) {
+        tAssignId = null;
+        assignedTruck = null;
+      }
       
-      if (assignedTruck && assignedTruck.zoneId) {
-        effectiveZoneId = assignedTruck.zoneId;
-      } else if (item.overrideRouteId) {
+      if (item.overrideRouteId) {
         effectiveZoneId = item.overrideRouteId;
-      } else if (ov) {
+      } else if (ov?.overrideZoneId) {
         effectiveZoneId = ov.overrideZoneId;
-      } else if (item.outletId && outletToZone.has(item.outletId)) {
-        effectiveZoneId = outletToZone.get(item.outletId)!;
+      } else if (assignedTruck && assignedTruck.zoneId) {
+        effectiveZoneId = assignedTruck.zoneId;
+      } else if (effectiveOutletId && outletToZone.has(effectiveOutletId)) {
+        effectiveZoneId = outletToZone.get(effectiveOutletId)!;
       } else if (item.routeId) {
         effectiveZoneId = item.routeId;
       }
@@ -4038,15 +4045,38 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async createDispatchOverride(data: { sheetId: string; outletId: string; storageType?: string | null; overrideZoneId: string; overrideTruckId?: string; reason?: string; createdBy?: string }): Promise<any> {
+  async createDispatchOverride(data: { sheetId: string; outletId: string; outletCode?: string; storageType?: string | null; overrideZoneId: string; overrideTruckId?: string; reason?: string; createdBy?: string }): Promise<any> {
     const storageType = (data.storageType && data.storageType !== "all") ? data.storageType.trim() : null;
+
+    let resolvedOutletId = data.outletId;
+    if ((!resolvedOutletId || resolvedOutletId === "null" || resolvedOutletId === "undefined") && data.outletCode) {
+      const [found] = await db.select().from(outlets)
+        .where(sql`LOWER(TRIM(${outlets.code})) = LOWER(TRIM(${data.outletCode}))`);
+      if (found) {
+        resolvedOutletId = found.id;
+      } else {
+        const [foundItem] = await db.select().from(dispatchItems)
+          .where(and(eq(dispatchItems.sheetId, data.sheetId), eq(dispatchItems.outletCode, data.outletCode)));
+        if (foundItem?.outletId) {
+          resolvedOutletId = foundItem.outletId;
+        } else {
+          const [newOutlet] = await db.insert(outlets).values({
+            name: data.outletCode,
+            code: data.outletCode,
+            routeId: data.overrideZoneId,
+            status: "active"
+          } as any).returning();
+          resolvedOutletId = newOutlet.id;
+        }
+      }
+    }
 
     if (storageType) {
       // Remove existing override for same outlet+sheet+storageType
       await db.delete(dispatchOutletZoneOverrides)
         .where(and(
           eq(dispatchOutletZoneOverrides.sheetId, data.sheetId),
-          eq(dispatchOutletZoneOverrides.outletId, data.outletId),
+          eq(dispatchOutletZoneOverrides.outletId, resolvedOutletId),
           sql`LOWER(${dispatchOutletZoneOverrides.storageType}) = LOWER(${storageType})`
         ));
       // Also clear any item-level override for this sheet, outlet and storageType
@@ -4054,19 +4084,25 @@ export class DatabaseStorage implements IStorage {
         .set({ overrideRouteId: null })
         .where(and(
           eq(dispatchItems.sheetId, data.sheetId),
-          eq(dispatchItems.outletId, data.outletId),
+          or(
+            eq(dispatchItems.outletId, resolvedOutletId),
+            data.outletCode ? eq(dispatchItems.outletCode, data.outletCode) : sql`false`
+          ),
           sql`LOWER(${dispatchItems.storageType}) = LOWER(${storageType})`
         ));
     } else {
       // If moving all types, remove all overrides for this outlet+sheet
       await db.delete(dispatchOutletZoneOverrides)
-        .where(and(eq(dispatchOutletZoneOverrides.sheetId, data.sheetId), eq(dispatchOutletZoneOverrides.outletId, data.outletId)));
+        .where(and(eq(dispatchOutletZoneOverrides.sheetId, data.sheetId), eq(dispatchOutletZoneOverrides.outletId, resolvedOutletId)));
       // Also clear item-level overrides for this sheet and outlet
       await db.update(dispatchItems)
         .set({ overrideRouteId: null })
         .where(and(
           eq(dispatchItems.sheetId, data.sheetId),
-          eq(dispatchItems.outletId, data.outletId)
+          or(
+            eq(dispatchItems.outletId, resolvedOutletId),
+            data.outletCode ? eq(dispatchItems.outletCode, data.outletCode) : sql`false`
+          )
         ));
     }
 
@@ -4074,7 +4110,7 @@ export class DatabaseStorage implements IStorage {
 
     const [row] = await db.insert(dispatchOutletZoneOverrides).values({
       sheetId: data.sheetId,
-      outletId: data.outletId,
+      outletId: resolvedOutletId,
       storageType: storageType,
       overrideZoneId: data.overrideZoneId,
       overrideTruckId: truckIdClean,
