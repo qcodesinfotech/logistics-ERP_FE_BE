@@ -951,4 +951,364 @@ export async function exportPendingDeliveriesExcel(deliveries: any[], filenamePr
   window.URL.revokeObjectURL(url);
 }
 
+/**
+ * Export Final End-Of-Day Deliveries List Excel
+ * Reflects all additions, deletions, delivery statuses, returned items, and cash collected.
+ */
+export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenamePrefix: string = "Final_Daily_Deliveries") {
+  if (!deliveries || !deliveries.length) return;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Americana Logistics ERP";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Final_Deliveries", {
+    views: [{ showGridLines: true }]
+  });
+
+  ws.columns = [
+    { header: "SN", key: "sn", width: 6 },
+    { header: "Date", key: "date", width: 13 },
+    { header: "Route", key: "route", width: 16 },
+    { header: "Truck No", key: "truckNo", width: 14 },
+    { header: "Driver", key: "driver", width: 18 },
+    { header: "Outlet Code", key: "outletCode", width: 14 },
+    { header: "Outlet Name", key: "outletName", width: 30 },
+    { header: "TO / GDN", key: "toNo", width: 14 },
+    { header: "Item Code", key: "itemCode", width: 15 },
+    { header: "Description", key: "description", width: 32 },
+    { header: "Storage Type", key: "storageType", width: 13 },
+    { header: "UOM", key: "uom", width: 8 },
+    { header: "Req Qty", key: "requestedQty", width: 11 },
+    { header: "Del Qty", key: "deliveredQty", width: 11 },
+    { header: "Rem Qty", key: "remainingQty", width: 11 },
+    { header: "Ret Qty", key: "returnedQty", width: 11 },
+    { header: "Return Reason", key: "returnReason", width: 22 },
+    { header: "Status", key: "status", width: 13 },
+    { header: "Cash Collected", key: "cashCollected", width: 15 },
+    { header: "Cash Receipt No", key: "cashReceiptNo", width: 16 },
+    { header: "Payment Method", key: "paymentMethod", width: 15 },
+    { header: "Delivered Time", key: "deliveredTime", width: 15 },
+  ];
+
+  // Header row styling
+  const headerRow = ws.getRow(1);
+  headerRow.height = 28;
+  for (let c = 1; c <= 22; c++) {
+    const cell = headerRow.getCell(c);
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: `FF${PALETTE.navyHeader}` }
+    };
+    cell.font = { name: "Calibri", size: 10.5, bold: true, color: { argb: `FF${PALETTE.white}` } };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.border = getThinBorder(PALETTE.borderMedium);
+  }
+
+  let totalReq = 0;
+  let totalDel = 0;
+  let totalRem = 0;
+  let totalRet = 0;
+  let totalCash = 0;
+
+  deliveries.forEach((d: any, idx: number) => {
+    const rNum = idx + 2;
+    const isOdd = idx % 2 === 1;
+    const row = ws.getRow(rNum);
+    row.height = 20;
+
+    const req = Number(d["Requested Qty"] ?? d.requestedQty ?? 0);
+    const del = Number(d["Delivered Qty"] ?? d.deliveredQty ?? 0);
+    const rem = Number(d["Remaining Qty"] ?? d.remainingQty ?? 0);
+    const ret = Number(d["Returned Qty"] ?? d.returnedQty ?? 0);
+    const cash = Number(d["Cash Collected"] ?? d.cashCollected ?? 0);
+
+    totalReq += req;
+    totalDel += del;
+    totalRem += rem;
+    totalRet += ret;
+    totalCash += cash;
+
+    const statusVal = String(d["Status"] || d.status || "PENDING").toUpperCase();
+
+    row.values = [
+      d["SN"] ?? (idx + 1),
+      d["Date"] || "",
+      d["Route"] || "",
+      d["Truck No"] || "Unassigned",
+      d["Driver"] || "Unassigned",
+      d["Outlet Code"] || "",
+      d["Outlet Name"] || "",
+      d["TO / GDN"] || "-",
+      d["Item Code"] || "",
+      d["Description"] || "",
+      d["Storage Type"] || "Dry",
+      d["UOM"] || "CT",
+      req,
+      del,
+      rem,
+      ret,
+      d["Return Reason"] || "-",
+      statusVal,
+      cash > 0 ? cash : "-",
+      d["Cash Receipt No"] || "-",
+      d["Payment Method"] || "-",
+      d["Delivered Time"] || "-"
+    ];
+
+    for (let c = 1; c <= 22; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: "Calibri", size: 10, color: { argb: `FF${PALETTE.textDark}` } };
+      cell.border = getThinBorder(PALETTE.borderLight);
+
+      if (c === 7 || c === 10 || c === 17) {
+        cell.alignment = { vertical: "middle", horizontal: "left" };
+      } else if ([13, 14, 15, 16, 19].includes(c)) {
+        cell.alignment = { vertical: "middle", horizontal: "right" };
+      } else {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+      }
+
+      if (isOdd) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.zebraOdd}` } };
+      }
+
+      if (c === 1) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.softGreen}` } };
+        cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.textDark}` } };
+      }
+
+      // Status pill coloring
+      if (c === 18) {
+        if (statusVal === "DELIVERED") {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2EFDA" } };
+          cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FF1E8449" } };
+        } else if (statusVal === "PARTIAL") {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFDEBD0" } };
+          cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FFB9770E" } };
+        } else if (statusVal === "RETURNED" || statusVal === "CANCELLED") {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFADBD8" } };
+          cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FFC0392B" } };
+        }
+      }
+    }
+  });
+
+  // Summary Row
+  const summaryRowIndex = deliveries.length + 2;
+  const sumRow = ws.getRow(summaryRowIndex);
+  sumRow.height = 24;
+
+  sumRow.getCell(12).value = "TOTAL:";
+  sumRow.getCell(13).value = totalReq;
+  sumRow.getCell(14).value = totalDel;
+  sumRow.getCell(15).value = totalRem;
+  sumRow.getCell(16).value = totalRet;
+  sumRow.getCell(19).value = totalCash > 0 ? totalCash : 0;
+
+  for (let c = 1; c <= 22; c++) {
+    const cell = sumRow.getCell(c);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+    cell.border = {
+      top: { style: "thin", color: { argb: `FF${PALETTE.navyHeader}` } },
+      bottom: { style: "double", color: { argb: `FF${PALETTE.navyHeader}` } },
+      left: { style: "thin", color: { argb: `FF${PALETTE.borderLight}` } },
+      right: { style: "thin", color: { argb: `FF${PALETTE.borderLight}` } },
+    };
+    cell.font = { name: "Calibri", size: 10.5, bold: true, color: { argb: `FF${PALETTE.navyHeader}` } };
+    if ([13, 14, 15, 16, 19].includes(c)) {
+      cell.alignment = { vertical: "middle", horizontal: "right" };
+      cell.numFmt = "#,##0.00";
+    }
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filenamePrefix}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+// =========================================================================================
+// LOADING MONITOR & PENDING TO LOAD SKU REPORT EXPORT
+// =========================================================================================
+export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string, filenamePrefix: string = "Loading_Monitor_Pending_SKU") {
+  if (!skuRows || skuRows.length === 0) return;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Americana Logistics ERP";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Loading_Monitor", {
+    views: [{ showGridLines: true }]
+  });
+
+  // Title block
+  ws.mergeCells("A1:K1");
+  const titleCell = ws.getCell("A1");
+  titleCell.value = `WAREHOUSE LOADING MONITOR & SKU PENDING TO LOAD REPORT - ${dateStr}`;
+  titleCell.font = { name: "Calibri", size: 14, bold: true, color: { argb: "FFFFFFFF" } };
+  titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.navyHeader}` } };
+  titleCell.alignment = { vertical: "middle", horizontal: "center" };
+  ws.getRow(1).height = 30;
+
+  ws.columns = [
+    { header: "SN", key: "sn", width: 6 },
+    { header: "SKU Code", key: "skuCode", width: 16 },
+    { header: "Description", key: "description", width: 34 },
+    { header: "Storage Type", key: "storageType", width: 14 },
+    { header: "UOM", key: "uom", width: 8 },
+    { header: "Total Planned Qty", key: "totalQty", width: 17 },
+    { header: "Loaded / Departed Qty", key: "loadedQty", width: 19 },
+    { header: "Balance Pending to Load", key: "balanceQty", width: 22 },
+    { header: "Progress", key: "progress", width: 12 },
+    { header: "Loading Status", key: "status", width: 16 },
+    { header: "Pending Trucks & Trips", key: "pendingTrucks", width: 28 },
+    { header: "All Truck / Trip Allocations", key: "allTrucks", width: 38 },
+  ];
+
+  // Header row styling
+  const headerRow = ws.getRow(2);
+  headerRow.height = 25;
+  for (let c = 1; c <= 12; c++) {
+    const cell = headerRow.getCell(c);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203764" } };
+    cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FFD9D9D9" } },
+      bottom: { style: "medium", color: { argb: "FF1F4E78" } },
+      left: { style: "thin", color: { argb: "FFD9D9D9" } },
+      right: { style: "thin", color: { argb: "FFD9D9D9" } },
+    };
+  }
+
+  let totalPlanned = 0;
+  let totalLoaded = 0;
+  let totalBalance = 0;
+
+  skuRows.forEach((row, idx) => {
+    const rIdx = idx + 3;
+    const r = ws.getRow(rIdx);
+    r.height = 21;
+
+    totalPlanned += Number(row.totalQty || 0);
+    totalLoaded += Number(row.loadedQty || 0);
+    totalBalance += Number(row.balanceQty || 0);
+
+    const progressPct = row.totalQty > 0 ? Math.round((row.loadedQty / row.totalQty) * 100) : 0;
+
+    r.getCell(1).value = idx + 1;
+    r.getCell(2).value = row.skuCode || "-";
+    r.getCell(3).value = row.description || "";
+    r.getCell(4).value = row.storageType || "Dry";
+    r.getCell(5).value = row.uom || "CT";
+    r.getCell(6).value = Number(row.totalQty || 0);
+    r.getCell(7).value = Number(row.loadedQty || 0);
+    r.getCell(8).value = Number(row.balanceQty || 0);
+    r.getCell(9).value = `${progressPct}%`;
+    r.getCell(10).value = row.status || (row.balanceQty === 0 ? "FULLY LOADED" : row.loadedQty > 0 ? "PARTIALLY LOADED" : "PENDING");
+    r.getCell(11).value = row.pendingTrucks || "-";
+    r.getCell(12).value = row.allTrucks || "-";
+
+    const isEven = idx % 2 === 0;
+    const baseBg = isEven ? "FFFFFFFF" : "FFF8F9FA";
+
+    for (let c = 1; c <= 12; c++) {
+      const cell = r.getCell(c);
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFE0E0E0" } },
+        bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+        left: { style: "thin", color: { argb: "FFE0E0E0" } },
+        right: { style: "thin", color: { argb: "FFE0E0E0" } },
+      };
+      cell.font = { name: "Calibri", size: 9.5 };
+
+      if (c === 1) {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.softGreen}` } };
+      } else if ([6, 7, 8].includes(c)) {
+        cell.alignment = { vertical: "middle", horizontal: "right" };
+        cell.numFmt = "#,##0.00";
+        if (c === 8 && Number(row.balanceQty || 0) > 0) {
+          // Highlight pending balance in amber/orange
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF3CD" } };
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF856404" } };
+        } else if (c === 8 && Number(row.balanceQty || 0) === 0) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD4EDDA" } };
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF155724" } };
+        } else {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseBg } };
+        }
+      } else if ([2, 4, 5, 9, 10].includes(c)) {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseBg } };
+        if (c === 10) {
+          cell.font = {
+            name: "Calibri",
+            size: 9,
+            bold: true,
+            color: { argb: row.balanceQty === 0 ? "FF155724" : row.loadedQty > 0 ? "FF004085" : "FF856404" }
+          };
+        }
+      } else {
+        cell.alignment = { vertical: "middle", horizontal: "left" };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseBg } };
+      }
+    }
+  });
+
+  // Summary Row
+  const summaryRowIndex = skuRows.length + 3;
+  const sumRow = ws.getRow(summaryRowIndex);
+  sumRow.height = 25;
+
+  sumRow.getCell(5).value = "TOTAL:";
+  sumRow.getCell(6).value = totalPlanned;
+  sumRow.getCell(7).value = totalLoaded;
+  sumRow.getCell(8).value = totalBalance;
+  sumRow.getCell(9).value = totalPlanned > 0 ? `${Math.round((totalLoaded / totalPlanned) * 100)}%` : "0%";
+
+  for (let c = 1; c <= 12; c++) {
+    const cell = sumRow.getCell(c);
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+    cell.border = {
+      top: { style: "thin", color: { argb: `FF${PALETTE.navyHeader}` } },
+      bottom: { style: "double", color: { argb: `FF${PALETTE.navyHeader}` } },
+      left: { style: "thin", color: { argb: "FFD9D9D9" } },
+      right: { style: "thin", color: { argb: "FFD9D9D9" } },
+    };
+    cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.navyHeader}` } };
+    if ([6, 7, 8].includes(c)) {
+      cell.alignment = { vertical: "middle", horizontal: "right" };
+      cell.numFmt = "#,##0.00";
+    } else if ([5, 9].includes(c)) {
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    }
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${filenamePrefix}_${dateStr}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
 

@@ -46,10 +46,16 @@ import {
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
-  Layers, RotateCcw, DollarSign, Receipt,
+  Layers, RotateCcw, DollarSign, Receipt, Boxes, CheckSquare,
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
-import { exportCompletedDeliveriesExcel, exportPendingDeliveriesExcel } from "@/lib/customer-excel-export";
+import LoadingMonitorTab from "@/components/loading-monitor-tab";
+import {
+  exportCompletedDeliveriesExcel,
+  exportPendingDeliveriesExcel,
+  exportFinalDailyDeliveriesExcel,
+  exportLoadingMonitorExcel,
+} from "@/lib/customer-excel-export";
 
 // ===== Types =====
 interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; hasDeliveryStarted?: boolean; }
@@ -75,6 +81,8 @@ interface DispatchItem {
     cashCollected?: string | null;
     cashReceiptNo?: string | null;
     paymentMethod?: string | null;
+    deliveredAt?: string | Date | null;
+    deliveryTime?: string | null;
   } | null;
 }
 interface OutletGroup {
@@ -3207,6 +3215,66 @@ export default function DailyDispatchPage() {
     document.body.removeChild(link);
   };
 
+  const handleDownloadFinalDeliveries = async () => {
+    if (!boardData || !boardData.zones || boardData.zones.length === 0) {
+      toast({ title: "No dispatch board data available to export.", variant: "destructive" });
+      return;
+    }
+
+    const rows: any[] = [];
+    let sn = 1;
+
+    for (const zone of boardData.zones) {
+      for (const outlet of (zone.outlets || [])) {
+        const assignedTruck = zone.trucks?.find((t: any) => t.id === outlet.truckAssignmentId);
+        const truckName = assignedTruck?.vehicle?.plateNumber || assignedTruck?.vehicle?.name || "Unassigned";
+        const driverName = assignedTruck?.driver?.name || assignedTruck?.driver?.username || "Unassigned";
+
+        for (const item of (outlet.items || [])) {
+          const del = item.delivery;
+          const reqQty = Number(item.requestedQty || item.weight || 0);
+          const delQty = Number(del?.deliveredQty ?? (del?.status === "delivered" ? reqQty : 0));
+          const remQty = Number(del?.remainingQty ?? (del?.status === "delivered" ? 0 : Math.max(0, reqQty - delQty)));
+          const retQty = Number(del?.returnedQty || 0);
+          const status = del?.status || "pending";
+
+          rows.push({
+            "SN": sn++,
+            "Date": selectedDate,
+            "Route": zone.zoneName,
+            "Truck No": truckName,
+            "Driver": driverName,
+            "Outlet Code": outlet.outletCode,
+            "Outlet Name": outlet.outletName,
+            "TO / GDN": item.toNo || "-",
+            "Item Code": item.itemCode,
+            "Description": item.description || "",
+            "Storage Type": item.storageType || "Dry",
+            "UOM": item.uom || "CT",
+            "Requested Qty": reqQty,
+            "Delivered Qty": delQty,
+            "Remaining Qty": remQty,
+            "Returned Qty": retQty,
+            "Return Reason": del?.returnReason || "-",
+            "Status": status.toUpperCase(),
+            "Cash Collected": Number(del?.cashCollected || 0),
+            "Cash Receipt No": del?.cashReceiptNo || "-",
+            "Payment Method": del?.paymentMethod || "-",
+            "Delivered Time": del?.deliveredAt ? new Date(del.deliveredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (del?.deliveryTime || "-")
+          });
+        }
+      }
+    }
+
+    if (rows.length === 0) {
+      toast({ title: "No delivery items found to export.", variant: "destructive" });
+      return;
+    }
+
+    await exportFinalDailyDeliveriesExcel(rows, `Final_Daily_Deliveries_${selectedDate}`);
+    toast({ title: `Exported ${rows.length} delivery item(s) to Excel!` });
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-57px)] print:h-auto print:block">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 print:block">
@@ -3214,6 +3282,12 @@ export default function DailyDispatchPage() {
           <TabsList className="gap-0.5 flex-nowrap h-auto justify-start w-max min-w-full">
             <TabsTrigger value="board" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><MapPin className="h-3.5 w-3.5" />Dispatch Board</TabsTrigger>
             <TabsTrigger value="trucks" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Truck className="h-3.5 w-3.5" />Truck Planning</TabsTrigger>
+            <TabsTrigger
+              value="loading-monitor"
+              className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap bg-amber-50/80 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 font-semibold border border-amber-200/60 dark:border-amber-800/60 data-[state=active]:bg-amber-600 data-[state=active]:text-white shadow-sm"
+            >
+              <Boxes className="h-3.5 w-3.5" />Loading Monitor
+            </TabsTrigger>
             <TabsTrigger value="pending" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><Package className="h-3.5 w-3.5" />Pending</TabsTrigger>
             <TabsTrigger value="completed" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap"><CheckCircle2 className="h-3.5 w-3.5" />Completed</TabsTrigger>
             <TabsTrigger value="customer-report" className="gap-1.5 text-xs px-3 py-1.5 whitespace-nowrap bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold border border-emerald-200/60 dark:border-emerald-800/60 data-[state=active]:bg-emerald-600 data-[state=active]:text-white">
@@ -3308,6 +3382,16 @@ export default function DailyDispatchPage() {
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5 mr-1 text-red-600" />Delete SKU
+              </Button>
+            )}
+            {boardSheetId && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-emerald-300 text-emerald-700 bg-emerald-50/60 hover:bg-emerald-100/70 hover:text-emerald-800 flex-shrink-0 h-8 text-xs font-medium gap-1.5 shadow-sm"
+                onClick={handleDownloadFinalDeliveries}
+              >
+                <Download className="h-3.5 w-3.5 text-emerald-600" />Download Final Deliveries
               </Button>
             )}
             {boardData && boardData.overrides.length > 0 && (
@@ -3907,6 +3991,22 @@ export default function DailyDispatchPage() {
         {/* ===== TRUCK PLANNING TAB ===== */}
         <TabsContent value="trucks" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
           <TruckPlanningTab boardSheetId={boardSheetId} zones={zones} drivers={drivers} selectedDate={selectedDate} onSelectSheet={(id: string | null) => { setBoardSheetId(id); }} sheets={sheets} />
+        </TabsContent>
+
+        {/* ===== LOADING MONITOR TAB ===== */}
+        <TabsContent value="loading-monitor" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden print:block">
+          <LoadingMonitorTab
+            boardSheetId={boardSheetId}
+            sheetForDate={sheetForDate}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            boardData={boardData}
+            boardLoading={boardLoading}
+            refetchBoard={refetchBoard}
+            clientOptions={clientOptions}
+            boardClientId={boardClientId}
+            setBoardClientId={setBoardClientId}
+          />
         </TabsContent>
 
         {/* ===== PENDING QUANTITIES TAB ===== */}
