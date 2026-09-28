@@ -57,6 +57,16 @@ import {
   exportLoadingMonitorExcel,
 } from "@/lib/customer-excel-export";
 
+export const DISPATCH_STORAGE_OPTIONS = [
+  "Dry",
+  "Chilled",
+  "Frozen",
+  "Ambient",
+  "Packaging",
+  "Cleaning",
+  "Chemical",
+] as const;
+
 // ===== Types =====
 interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; hasDeliveryStarted?: boolean; }
 interface DispatchItem {
@@ -4558,9 +4568,12 @@ export default function DailyDispatchPage() {
                                 }}
                                 className="h-7 text-xs py-0.5 px-2 border rounded-md"
                               >
-                                <option value="Dry">Dry</option>
-                                <option value="Chilled">Chilled</option>
-                                <option value="Frozen">Frozen</option>
+                                {DISPATCH_STORAGE_OPTIONS.map((st) => (
+                                  <option key={st} value={st}>{st}</option>
+                                ))}
+                                {item.storageType && !DISPATCH_STORAGE_OPTIONS.includes(item.storageType as any) && (
+                                  <option value={item.storageType}>{item.storageType}</option>
+                                )}
                               </select>
                             </td>
                             <td className="py-2 px-3">
@@ -4644,11 +4657,12 @@ export default function DailyDispatchPage() {
                     onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
                     className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
                   >
-                    <option value="Dry">Dry</option>
-                    <option value="Chilled">Chilled</option>
-                    <option value="Frozen">Frozen</option>
-                    <option value="Packaging">Packaging</option>
-                    <option value="Cleaning">Cleaning</option>
+                    {DISPATCH_STORAGE_OPTIONS.map((st) => (
+                      <option key={st} value={st}>{st}</option>
+                    ))}
+                    {newItemForm.storageType && !DISPATCH_STORAGE_OPTIONS.includes(newItemForm.storageType as any) && (
+                      <option value={newItemForm.storageType}>{newItemForm.storageType}</option>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -4855,11 +4869,12 @@ export default function DailyDispatchPage() {
                     onChange={e => setNewItemForm(prev => ({ ...prev, storageType: e.target.value }))}
                     className="w-full h-8 border rounded-md px-2 bg-transparent text-xs"
                   >
-                    <option value="Dry">Dry</option>
-                    <option value="Chilled">Chilled</option>
-                    <option value="Frozen">Frozen</option>
-                    <option value="Packaging">Packaging</option>
-                    <option value="Cleaning">Cleaning</option>
+                    {DISPATCH_STORAGE_OPTIONS.map((st) => (
+                      <option key={st} value={st}>{st}</option>
+                    ))}
+                    {newItemForm.storageType && !DISPATCH_STORAGE_OPTIONS.includes(newItemForm.storageType as any) && (
+                      <option value={newItemForm.storageType}>{newItemForm.storageType}</option>
+                    )}
                   </select>
                 </div>
 
@@ -7452,7 +7467,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
   }
 
   // Build filter options
-  const allStorageTypes = new Set<string>(["Ambient", "Chilled", "Frozen", "Dry"]);
+  const allStorageTypes = new Set<string>(["Dry", "Chilled", "Frozen", "Ambient", "Packaging", "Cleaning", "Chemical"]);
   const allRoutes = new Map<string, string>();
   const allOutlets = new Map<string, string>();
   const allDrivers = new Map<string, string>();

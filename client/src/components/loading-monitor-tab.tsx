@@ -244,7 +244,7 @@ export default function LoadingMonitorTab({
     // 3. Process all items
     const skuMap = new Map<string, any>();
     const truckItemsMap = new Map<string, any[]>();
-    const counts = { DRY: 0, CHILLED: 0, FROZEN: 0, AMBIENT: 0 };
+    const counts: Record<string, number> = { DRY: 0, CHILLED: 0, FROZEN: 0, AMBIENT: 0, PACKAGING: 0, CLEANING: 0, CHEMICAL: 0 };
 
     let globalTotalQty = 0;
     let globalLoadedQty = 0;
@@ -255,7 +255,19 @@ export default function LoadingMonitorTab({
       (zone.outlets || []).forEach((outlet: any) => {
         (outlet.items || []).forEach((item: any) => {
           const rawStorage = (item.storageType || "DRY").toUpperCase();
-          const stType = rawStorage.includes("CHILL") ? "CHILLED" : rawStorage.includes("FROZ") ? "FROZEN" : rawStorage.includes("AMB") ? "AMBIENT" : "DRY";
+          const stType = rawStorage.includes("CHILL")
+            ? "CHILLED"
+            : rawStorage.includes("FROZ")
+            ? "FROZEN"
+            : rawStorage.includes("AMB")
+            ? "AMBIENT"
+            : rawStorage.includes("PACK")
+            ? "PACKAGING"
+            : rawStorage.includes("CLEAN")
+            ? "CLEANING"
+            : rawStorage.includes("CHEM")
+            ? "CHEMICAL"
+            : "DRY";
           counts[stType] = (counts[stType] || 0) + 1;
 
           const qty = Number(item.requestedQty || item.weight || 0);
@@ -482,6 +494,9 @@ export default function LoadingMonitorTab({
         if (storageFilter === "CHILLED" && !raw.includes("CHILL")) return false;
         if (storageFilter === "FROZEN" && !raw.includes("FROZ")) return false;
         if (storageFilter === "AMBIENT" && !raw.includes("AMB")) return false;
+        if (storageFilter === "PACKAGING" && !raw.includes("PACK")) return false;
+        if (storageFilter === "CLEANING" && !raw.includes("CLEAN")) return false;
+        if (storageFilter === "CHEMICAL" && !raw.includes("CHEM")) return false;
       }
       if (statusFilter === "pending_only" && sku.balanceQty <= 0) return false;
       if (statusFilter === "fully_loaded" && sku.balanceQty > 0) return false;
@@ -804,6 +819,9 @@ export default function LoadingMonitorTab({
               { id: "CHILLED", label: "Chilled", count: storageCounts.CHILLED },
               { id: "FROZEN", label: "Frozen", count: storageCounts.FROZEN },
               { id: "AMBIENT", label: "Ambient", count: storageCounts.AMBIENT },
+              ...(storageCounts.PACKAGING ? [{ id: "PACKAGING", label: "Packaging", count: storageCounts.PACKAGING }] : []),
+              ...(storageCounts.CLEANING ? [{ id: "CLEANING", label: "Cleaning", count: storageCounts.CLEANING }] : []),
+              ...(storageCounts.CHEMICAL ? [{ id: "CHEMICAL", label: "Chemical", count: storageCounts.CHEMICAL }] : []),
             ].map(st => (
               <button
                 key={st.id}
@@ -934,6 +952,12 @@ export default function LoadingMonitorTab({
                                 ? "bg-cyan-50 text-cyan-800 border-cyan-200"
                                 : sku.storageType?.toUpperCase().includes("FROZ")
                                 ? "bg-blue-50 text-blue-800 border-blue-200"
+                                : sku.storageType?.toUpperCase().includes("PACK")
+                                ? "bg-purple-50 text-purple-800 border-purple-200"
+                                : sku.storageType?.toUpperCase().includes("CLEAN") || sku.storageType?.toUpperCase().includes("CHEM")
+                                ? "bg-rose-50 text-rose-800 border-rose-200"
+                                : sku.storageType?.toUpperCase().includes("AMB")
+                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                                 : "bg-amber-50 text-amber-800 border-amber-200"
                             }`}
                           >
