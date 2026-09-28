@@ -7139,6 +7139,51 @@ export async function registerRoutes(
     }
   });
 
+  // Mobile APK Storage and upload handler
+  const apkStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(process.cwd(), "uploads", "apks");
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+      cb(null, "ERP.apk");
+    }
+  });
+
+  const apkUpload = multer({
+    storage: apkStorage,
+    limits: { fileSize: 150 * 1024 * 1024 }, // 150MB max
+    fileFilter: (req, file, cb) => {
+      if (file.originalname.toLowerCase().endsWith(".apk") || file.mimetype === "application/vnd.android.package-archive" || file.mimetype === "application/octet-stream") {
+        cb(null, true);
+      } else {
+        cb(new Error("Only .apk files are supported."));
+      }
+    }
+  });
+
+  // Mobile APK info check
+  app.get("/api/mobile/apk-info", authMiddleware, (req, res) => {
+    try {
+      const apkPath = path.join(process.cwd(), "uploads", "apks", "ERP.apk");
+      if (fs.existsSync(apkPath)) {
+        const stats = fs.statSync(apkPath);
+        res.json({
+          exists: true,
+          fileName: "ERP.apk",
+          sizeBytes: stats.size,
+          sizeMB: (stats.size / (1024 * 1024)).toFixed(1),
+          lastModified: stats.mtime,
+        });
+      } else {
+        res.json({ exists: false });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Mobile APK direct download
   app.get("/api/mobile/download-apk", (req, res) => {
     const apkPath = path.join(process.cwd(), "uploads", "apks", "ERP.apk");
@@ -7146,6 +7191,38 @@ export async function registerRoutes(
       res.download(apkPath, "ERP.apk");
     } else {
       res.status(404).json({ error: "APK build file not found" });
+    }
+  });
+
+  // Mobile APK direct upload (Admin only)
+  app.post("/api/mobile/upload-apk", authMiddleware, (req, res, next) => {
+    apkUpload.single("apk")(req, res, (err: any) => {
+      if (err) {
+        return res.status(400).json({ error: err.message || "Failed to upload APK" });
+      }
+      next();
+    });
+  }, async (req: AuthRequest, res) => {
+    try {
+      if (req.user?.role !== "admin" && req.user?.role !== "super_admin") {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+      if (!req.file) {
+        return res.status(400).json({ error: "No APK file uploaded" });
+      }
+
+      const stats = fs.statSync(req.file.path);
+      res.json({
+        success: true,
+        message: "APK file uploaded successfully",
+        fileName: "ERP.apk",
+        sizeBytes: stats.size,
+        sizeMB: (stats.size / (1024 * 1024)).toFixed(1),
+        uploadedAt: stats.mtime,
+      });
+    } catch (e: any) {
+      console.error("APK upload error:", e);
+      res.status(500).json({ error: e.message || "Failed to save APK file" });
     }
   });
 

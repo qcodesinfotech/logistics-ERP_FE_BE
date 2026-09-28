@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Save, Bell, Globe, ShieldCheck, Smartphone, Download, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Save, Bell, Globe, ShieldCheck, Smartphone, Download, Upload, RefreshCw, AlertCircle, CheckCircle2, FileText, Loader2 } from "lucide-react";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,6 +18,7 @@ import { apiRequest, getErrorMessage } from "@/lib/queryClient";
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("general");
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Mock settings state
   const [notifications, setNotifications] = useState({
@@ -31,6 +33,15 @@ export default function SettingsPage() {
     queryKey: ["/api/mobile/version-check"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/mobile/version-check?platform=android");
+      return res.json();
+    }
+  });
+
+  // Current APK build file info
+  const { data: apkInfo, refetch: refetchApkInfo } = useQuery<any>({
+    queryKey: ["/api/mobile/apk-info"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/mobile/apk-info");
       return res.json();
     }
   });
@@ -75,6 +86,56 @@ export default function SettingsPage() {
       });
     }
   });
+
+  const uploadApkMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("apk", file);
+      const res = await fetch("/api/mobile/upload-apk", {
+        method: "POST",
+        body: formData,
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("accessToken") || ""}`,
+        },
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to upload APK file");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "APK Uploaded Successfully!",
+        description: `Uploaded ERP.apk (${data.sizeMB} MB). Handheld devices will download this build.`
+      });
+      refetchApkInfo();
+      refetchVersion();
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    onError: (err: any) => {
+      toast({
+        title: "APK Upload Failed",
+        description: getErrorMessage(err),
+        variant: "destructive"
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  });
+
+  const handleApkFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".apk")) {
+      toast({
+        title: "Invalid File Type",
+        description: "Please select an Android package (.apk) file.",
+        variant: "destructive"
+      });
+      return;
+    }
+    uploadApkMutation.mutate(file);
+  };
 
   const handleSave = () => {
     toast({
@@ -263,16 +324,44 @@ export default function SettingsPage() {
                   Enforce immediate app updates upon driver login to keep all handheld devices in operational sync.
                 </CardDescription>
               </div>
-              <a
-                href="/api/mobile/download-apk"
-                target="_blank"
-                rel="noreferrer"
-                download="ERP.apk"
-              >
-                <Button variant="outline" size="sm" className="gap-2">
-                  <Download className="h-4 w-4" /> Download Latest APK
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".apk,application/vnd.android.package-archive"
+                  className="hidden"
+                  onChange={handleApkFileSelected}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-primary/40 hover:bg-primary/5 text-primary"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadApkMutation.isPending}
+                >
+                  {uploadApkMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                      Uploading APK...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" />
+                      Upload New APK
+                    </>
+                  )}
                 </Button>
-              </a>
+                <a
+                  href="/api/mobile/download-apk"
+                  target="_blank"
+                  rel="noreferrer"
+                  download="ERP.apk"
+                >
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Download className="h-4 w-4" /> Download Latest APK
+                  </Button>
+                </a>
+              </div>
             </CardHeader>
             <CardContent className="pt-6 space-y-6">
               {/* Status Banner */}
@@ -282,10 +371,19 @@ export default function SettingsPage() {
                     v{versionForm.versionName}
                   </div>
                   <div>
-                    <div className="font-semibold flex items-center gap-2">
+                    <div className="font-semibold flex items-center gap-2 flex-wrap">
                       Active Release: v{versionForm.versionName} (Build Code: {versionForm.versionCode})
                       {versionForm.forceUpdate && (
                         <Badge className="bg-emerald-600 hover:bg-emerald-700">Mandatory Auto-Update Active</Badge>
+                      )}
+                      {apkInfo?.exists ? (
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[11px] gap-1 font-normal">
+                          <FileText className="h-3 w-3" /> APK: {apkInfo.sizeMB} MB • Updated: {format(new Date(apkInfo.lastModified), "dd MMM, HH:mm")}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[11px] gap-1 font-normal">
+                          <AlertCircle className="h-3 w-3" /> No APK file uploaded
+                        </Badge>
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
@@ -296,7 +394,10 @@ export default function SettingsPage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => refetchVersion()}
+                  onClick={() => {
+                    refetchVersion();
+                    refetchApkInfo();
+                  }}
                   className="gap-1.5 text-xs"
                 >
                   <RefreshCw className="h-3.5 w-3.5" /> Refresh
