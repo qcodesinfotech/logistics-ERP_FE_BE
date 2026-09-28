@@ -62,6 +62,11 @@ export default function LoadingMonitorTab({
     enabled: !!boardSheetId,
   });
 
+  // Fetch routes, vehicles, and drivers master to accurately resolve Route No (e.g. AMC 1, HORECA 1)
+  const { data: routesList = [] } = useQuery<any[]>({ queryKey: ["/api/routes"] });
+  const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
+  const { data: driversList = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
+
   // Quick Truck Departure Mutation
   const updateTruckTimingMutation = useMutation({
     mutationFn: async ({ truckAssignmentId, departTime, loadingStatus }: { truckAssignmentId: string; departTime?: string; loadingStatus?: string }) => {
@@ -158,36 +163,69 @@ export default function LoadingMonitorTab({
       };
     }
 
+    // 0. Build Route, Vehicle and Driver lookup maps
+    const routeMap = new Map<string, string>();
+    (routesList || []).forEach((r: any) => {
+      if (r.id && r.name) routeMap.set(r.id, r.name);
+    });
+    (boardData?.zones || []).forEach((z: any) => {
+      if (z.zoneId && z.zoneName) routeMap.set(z.zoneId, z.zoneName);
+    });
+
+    const vehicleMap = new Map<string, any>();
+    (vehiclesList || []).forEach((v: any) => {
+      if (v.id) vehicleMap.set(v.id, v);
+    });
+
+    const driverMap = new Map<string, string>();
+    (driversList || []).forEach((d: any) => {
+      if (d.id) driverMap.set(d.id, d.name || d.username);
+    });
+
     // 1. Build truck map
     const truckMap = new Map<string, any>();
     const allTrucksList: any[] = [];
     const seenTruckIds = new Set<string>();
 
     (truckData?.trucks || []).forEach((t: any) => {
-      truckMap.set(t.id, t);
+      const rName = routeMap.get(t.zoneId) || t.zoneName || "";
+      const veh = t.vehicle || vehicleMap.get(t.truckId);
+      const drvName = t.driver?.name || t.driver?.username || driverMap.get(t.driverId) || "Unassigned";
+      const enriched = {
+        ...t,
+        routeName: rName,
+        zoneName: rName,
+        vehicle: veh || t.vehicle,
+        driver: { name: drvName },
+        driverName: drvName,
+        tripNumber: t.tripNumber || 1,
+      };
+      truckMap.set(t.id, enriched);
       if (!seenTruckIds.has(t.id)) {
         seenTruckIds.add(t.id);
-        allTrucksList.push(t);
+        allTrucksList.push(enriched);
       }
     });
 
     boardData.zones.forEach((z: any) => {
       (z.trucks || []).forEach((t: any) => {
-        if (!truckMap.has(t.id)) {
-          truckMap.set(t.id, t);
-        } else {
-          const existing = truckMap.get(t.id);
-          truckMap.set(t.id, {
-            ...existing,
-            ...t,
-            vehicle: t.vehicle || existing.vehicle,
-            driver: t.driver || existing.driver,
-            tripNumber: t.tripNumber || existing.tripNumber || 1
-          });
-        }
+        const rName = z.zoneName || routeMap.get(t.zoneId || z.zoneId) || t.zoneName || "";
+        const veh = t.vehicle || vehicleMap.get(t.truckId);
+        const drvName = t.driver?.name || t.driver?.username || driverMap.get(t.driverId) || "Unassigned";
+        const enriched = {
+          ...(truckMap.get(t.id) || t),
+          zoneId: t.zoneId || z.zoneId,
+          zoneName: rName,
+          routeName: rName,
+          vehicle: veh || t.vehicle,
+          driver: { name: drvName },
+          driverName: drvName,
+          tripNumber: t.tripNumber || 1,
+        };
+        truckMap.set(t.id, enriched);
         if (!seenTruckIds.has(t.id)) {
           seenTruckIds.add(t.id);
-          allTrucksList.push(t);
+          allTrucksList.push(enriched);
         }
       });
     });
@@ -212,6 +250,8 @@ export default function LoadingMonitorTab({
     let globalLoadedQty = 0;
 
     boardData.zones.forEach((zone: any) => {
+      const currentRouteName = zone.zoneName || routeMap.get(zone.zoneId) || "Unassigned Route";
+
       (zone.outlets || []).forEach((outlet: any) => {
         (outlet.items || []).forEach((item: any) => {
           const rawStorage = (item.storageType || "DRY").toUpperCase();
@@ -228,6 +268,12 @@ export default function LoadingMonitorTab({
           const tAssignId = directTruckId || storageTruckId || outletTruckId || null;
 
           const truck = tAssignId ? truckMap.get(tAssignId) : null;
+
+          // Propagate route name to truck if missing or generic
+          if (truck && (!truck.routeName || truck.routeName === "Assigned" || truck.routeName === "Unassigned Route")) {
+            truck.routeName = currentRouteName;
+            truck.zoneName = currentRouteName;
+          }
 
           const departed = isTruckDeparted(truck);
           const loaded = isTruckLoaded(truck);
@@ -266,16 +312,18 @@ export default function LoadingMonitorTab({
             skuRecord.loadingQty += qty;
           }
 
-          const truckPlate = truck?.vehicle?.plateNumber || truck?.vehicle?.name || "Unassigned Truck";
+          const veh = truck?.vehicle || vehicleMap.get(truck?.truckId);
+          const rawPlate = veh?.plateNumber || veh?.name;
+          const truckPlate = rawPlate && rawPlate.trim() !== "" ? rawPlate : "Unassigned Truck";
           const tripNum = truck?.tripNumber || 1;
-          const driverName = truck?.driver?.name || truck?.driver?.username || "Unassigned";
+          const driverName = truck?.driver?.name || truck?.driver?.username || driverMap.get(truck?.driverId) || "Unassigned";
 
           skuRecord.allocations.push({
             truckAssignmentId: truck?.id || null,
             truckPlate,
             tripNumber: tripNum,
             driverName,
-            route: zone.zoneName,
+            route: currentRouteName,
             outletCode: outlet.outletCode,
             outletName: outlet.outletName,
             qty,
@@ -301,24 +349,28 @@ export default function LoadingMonitorTab({
             outletCode: outlet.outletCode,
             outletName: outlet.outletName,
             isDeducted,
+            zoneName: currentRouteName,
+            zoneId: zone.zoneId,
           });
         });
       });
     });
 
     const skuList = Array.from(skuMap.values()).map(sku => {
-      // Group pending trucks for this SKU
+      // Group pending trucks for this SKU using Route No + Trip
       const pendingAllocations = sku.allocations.filter((a: any) => deductCriteria === "departed" ? !a.isDeparted : !a.isLoaded);
       const pendingTrucksMap = new Map<string, number>();
       pendingAllocations.forEach((a: any) => {
-        const key = a.truckAssignmentId ? `${a.truckPlate} (Trip ${a.tripNumber})` : "Unassigned";
+        const routeLabel = a.route && a.route !== "Unassigned Route" ? a.route : a.truckPlate;
+        const key = a.truckAssignmentId ? `${routeLabel} (Trip ${a.tripNumber})` : "Unassigned Truck";
         pendingTrucksMap.set(key, (pendingTrucksMap.get(key) || 0) + a.qty);
       });
       const pendingTrucksSummary = Array.from(pendingTrucksMap.entries()).map(([trk, q]) => `${trk}: ${q.toFixed(0)}`).join(", ");
 
       const allTrucksMap = new Map<string, string>();
       sku.allocations.forEach((a: any) => {
-        const key = a.truckAssignmentId ? `${a.truckPlate} (T${a.tripNumber})` : "Unassigned";
+        const routeLabel = a.route && a.route !== "Unassigned Route" ? a.route : a.truckPlate;
+        const key = a.truckAssignmentId ? `${routeLabel} (T${a.tripNumber})` : "Unassigned";
         const st = a.isDeparted ? "Departed" : a.isLoaded ? "Loaded" : a.isLoading ? "Loading" : "Pending";
         allTrucksMap.set(key, st);
       });
@@ -344,13 +396,19 @@ export default function LoadingMonitorTab({
       return a.skuCode.localeCompare(b.skuCode);
     });
 
-    // 4. Build truck list
+    // 4. Build truck list - Route No is the primary identifier (e.g. AMC 1, HORECA 1)
     const truckList = allTrucksList.map((t: any) => {
       const departed = isTruckDeparted(t);
       const loaded = isTruckLoaded(t);
       const loading = isTruckLoading(t);
       const items = truckItemsMap.get(t.id) || [];
       const totalQty = items.reduce((sum: number, it: any) => sum + it.qty, 0);
+
+      // Resolve Route No / Name
+      const itemRoute = items.find((it: any) => it.zoneName && it.zoneName !== "Unassigned Route")?.zoneName;
+      const routeNo = (t.routeName && t.routeName !== "Assigned")
+        ? t.routeName
+        : (routeMap.get(t.zoneId) || itemRoute || t.zoneName || (t.zoneId ? `Route ${t.zoneId}` : "Unassigned Route"));
 
       // SKU summary on this truck
       const skuSummaryMap = new Map<string, { skuCode: string; description: string; uom: string; qty: number }>();
@@ -361,11 +419,19 @@ export default function LoadingMonitorTab({
         skuSummaryMap.get(it.skuCode)!.qty += it.qty;
       });
 
+      const veh = t.vehicle || vehicleMap.get(t.truckId);
+      const rawPlate = veh?.plateNumber || veh?.name;
+      const plateNumber = rawPlate && rawPlate.trim() !== "" ? rawPlate : "Unassigned Truck";
+      const driverName = t.driver?.name || t.driver?.username || driverMap.get(t.driverId) || "Unassigned Driver";
+
       return {
         ...t,
-        plateNumber: t.vehicle?.plateNumber || t.vehicle?.name || "Truck",
-        vehicleName: t.vehicle?.name || "",
-        driverName: t.driver?.name || t.driver?.username || "Unassigned",
+        routeNo,
+        routeName: routeNo,
+        zoneName: routeNo,
+        plateNumber,
+        vehicleName: veh?.name || "",
+        driverName,
         tripNumber: t.tripNumber || 1,
         isDeparted: departed,
         isLoaded: loaded,
@@ -376,8 +442,9 @@ export default function LoadingMonitorTab({
         itemsCount: items.length,
       };
     }).sort((a: any, b: any) => {
-      if (a.tripNumber !== b.tripNumber) return a.tripNumber - b.tripNumber;
-      return a.plateNumber.localeCompare(b.plateNumber);
+      const routeCompare = (a.routeNo || "").localeCompare(b.routeNo || "", undefined, { numeric: true, sensitivity: 'base' });
+      if (routeCompare !== 0) return routeCompare;
+      return (a.tripNumber || 1) - (b.tripNumber || 1);
     });
 
     const globalBalanceQty = Math.max(0, globalTotalQty - globalLoadedQty);
@@ -404,7 +471,7 @@ export default function LoadingMonitorTab({
       },
       storageCounts: counts,
     };
-  }, [boardData, truckData, deductCriteria]);
+  }, [boardData, truckData, deductCriteria, routesList, vehiclesList, driversList]);
 
   // Filtered SKUs
   const filteredSkus = useMemo(() => {
@@ -1066,17 +1133,17 @@ export default function LoadingMonitorTab({
                 <Card key={truck.id} className="border shadow-xs overflow-hidden flex flex-col">
                   <CardHeader className="p-3 bg-slate-50/80 dark:bg-slate-900/60 border-b flex flex-row items-center justify-between space-y-0">
                     <div className="space-y-0.5">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <Truck className="h-4 w-4 text-primary" />
-                        <CardTitle className="text-sm font-bold">
-                          {truck.plateNumber}
+                        <CardTitle className="text-base font-bold text-slate-900 dark:text-slate-100">
+                          {truck.routeNo || truck.routeName || truck.zoneName || "Route"}
                         </CardTitle>
-                        <Badge variant="secondary" className="text-[10px] font-bold h-4 px-1.5">
+                        <Badge variant="secondary" className="text-[10px] font-bold h-5 px-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border">
                           Trip {truck.tripNumber}
                         </Badge>
                       </div>
-                      <CardDescription className="text-[11px]">
-                        Driver: <strong className="text-foreground">{truck.driverName}</strong> · Route: {truck.zoneName || "Assigned"}
+                      <CardDescription className="text-[11px] mt-0.5">
+                        Vehicle: <strong className="text-foreground">{truck.plateNumber && truck.plateNumber !== "Truck" && truck.plateNumber !== "Unassigned Truck" ? truck.plateNumber : "Unassigned"}</strong> · Driver: <strong className="text-foreground">{truck.driverName}</strong>
                       </CardDescription>
                     </div>
 
