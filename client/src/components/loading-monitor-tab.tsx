@@ -113,7 +113,9 @@ export default function LoadingMonitorTab({
     if (!t) return false;
     if (t.isAutoDeparted) return true;
     const s = (t.loadingStatus || "").toLowerCase();
-    if (["dispatched", "departed", "in_transit", "completed"].includes(s)) return true;
+    const st = (t.status || "").toLowerCase();
+    const valid = ["dispatched", "departed", "in_transit", "completed"];
+    if (valid.includes(s) || valid.includes(st)) return true;
     if (t.departTime && t.departTime.trim() !== "" && t.departTime !== "-") return true;
     return false;
   };
@@ -122,7 +124,8 @@ export default function LoadingMonitorTab({
     if (!t) return false;
     if (isTruckDeparted(t)) return true;
     const s = (t.loadingStatus || "").toLowerCase();
-    if (s === "loaded") return true;
+    const st = (t.status || "").toLowerCase();
+    if (s === "loaded" || st === "loaded") return true;
     if (t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-") return true;
     return false;
   };
@@ -131,7 +134,8 @@ export default function LoadingMonitorTab({
     if (!t) return false;
     if (isTruckLoaded(t) || isTruckDeparted(t)) return false;
     const s = (t.loadingStatus || "").toLowerCase();
-    return s === "loading";
+    const st = (t.status || "").toLowerCase();
+    return s === "loading" || st === "loading";
   };
 
   const toggleSkuExpand = (skuKey: string) => {
@@ -235,7 +239,7 @@ export default function LoadingMonitorTab({
       });
     });
 
-    // 2. Build outlet truck map
+    // 2. Build outlet truck map and zone truck maps
     const outletTruckMap = new Map<string, string>();
     (truckData?.outletAssignments || []).forEach((oa: any) => {
       if (oa.outletCode) {
@@ -243,6 +247,20 @@ export default function LoadingMonitorTab({
           outletTruckMap.set(`${oa.outletCode}_${oa.storageType.toUpperCase()}`, oa.truckAssignmentId);
         }
         outletTruckMap.set(oa.outletCode, oa.truckAssignmentId);
+      }
+    });
+
+    const zoneTrucksByZoneId = new Map<string, any[]>();
+    const zoneTrucksByZoneName = new Map<string, any[]>();
+    allTrucksList.forEach(t => {
+      if (t.zoneId) {
+        if (!zoneTrucksByZoneId.has(t.zoneId)) zoneTrucksByZoneId.set(t.zoneId, []);
+        zoneTrucksByZoneId.get(t.zoneId)!.push(t);
+      }
+      const cleanZoneName = (t.zoneName || t.routeName || "").trim().toLowerCase();
+      if (cleanZoneName && cleanZoneName !== "unassigned route" && cleanZoneName !== "assigned") {
+        if (!zoneTrucksByZoneName.has(cleanZoneName)) zoneTrucksByZoneName.set(cleanZoneName, []);
+        zoneTrucksByZoneName.get(cleanZoneName)!.push(t);
       }
     });
 
@@ -256,6 +274,19 @@ export default function LoadingMonitorTab({
 
     boardData.zones.forEach((zone: any) => {
       const currentRouteName = zone.zoneName || routeMap.get(zone.zoneId) || "Unassigned Route";
+      const explicitZoneTrucks = (zone.trucks || []).map((zt: any) => truckMap.get(zt.id) || zt);
+      const idMappedTrucks = zoneTrucksByZoneId.get(zone.zoneId) || [];
+      const nameClean = (zone.zoneName || "").trim().toLowerCase();
+      const nameMappedTrucks = nameClean ? (zoneTrucksByZoneName.get(nameClean) || []) : [];
+
+      const candidateTrucks: any[] = [];
+      const seenCandidateIds = new Set<string>();
+      [...explicitZoneTrucks, ...idMappedTrucks, ...nameMappedTrucks].forEach((t: any) => {
+        if (t && t.id && !seenCandidateIds.has(t.id)) {
+          seenCandidateIds.add(t.id);
+          candidateTrucks.push(truckMap.get(t.id) || t);
+        }
+      });
 
       (zone.outlets || []).forEach((outlet: any) => {
         (outlet.items || []).forEach((item: any) => {
@@ -284,7 +315,34 @@ export default function LoadingMonitorTab({
           const outletTruckId = outlet.truckAssignmentId || outletTruckMap.get(outlet.outletCode);
           const tAssignId = directTruckId || storageTruckId || outletTruckId || null;
 
-          const truck = tAssignId ? truckMap.get(tAssignId) : null;
+          let truck = tAssignId ? truckMap.get(tAssignId) : null;
+
+          // Route-level truck fallback when no explicit outlet assignment
+          if (!truck && candidateTrucks.length > 0) {
+            const storageMatchingTruck = candidateTrucks.find((zt: any) => {
+              const veh = zt.vehicle || vehicleMap.get(zt.truckId);
+              const vehSt = ((veh?.storageType || zt.storageType || "") as string).toUpperCase();
+              if (!vehSt) return false;
+              return (
+                (stType === "FROZEN" && vehSt.includes("FROZ")) ||
+                (stType === "CHILLED" && (vehSt.includes("CHILL") || vehSt.includes("CHILLI"))) ||
+                (stType === "DRY" && vehSt.includes("DRY")) ||
+                (stType === "AMBIENT" && (vehSt.includes("AMB") || vehSt.includes("DRY"))) ||
+                (stType === "PACKAGING" && (vehSt.includes("PACK") || vehSt.includes("DRY") || vehSt.includes("AMB"))) ||
+                (stType === "CLEANING" && (vehSt.includes("CLEAN") || vehSt.includes("DRY") || vehSt.includes("AMB"))) ||
+                (stType === "CHEMICAL" && (vehSt.includes("CHEM") || vehSt.includes("DRY") || vehSt.includes("AMB")))
+              );
+            });
+            truck = storageMatchingTruck || candidateTrucks[0] || null;
+          }
+
+          // If still null, check if item has direct route assignment
+          if (!truck && (item.overrideRouteId || item.routeId)) {
+            const itemRouteTrucks = zoneTrucksByZoneId.get(item.overrideRouteId || item.routeId) || [];
+            if (itemRouteTrucks.length > 0) {
+              truck = itemRouteTrucks[0];
+            }
+          }
 
           // Propagate route name to truck if missing or generic
           if (truck && (!truck.routeName || truck.routeName === "Assigned" || truck.routeName === "Unassigned Route")) {
@@ -292,9 +350,10 @@ export default function LoadingMonitorTab({
             truck.zoneName = currentRouteName;
           }
 
-          const departed = isTruckDeparted(truck);
-          const loaded = isTruckLoaded(truck);
-          const loading = isTruckLoading(truck);
+          const isItemDelivered = item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty;
+          const departed = isTruckDeparted(truck) || isItemDelivered;
+          const loaded = isTruckLoaded(truck) || isItemDelivered;
+          const loading = isTruckLoading(truck) && !isItemDelivered;
 
           const isDeducted = deductCriteria === "departed" ? departed : loaded;
 
@@ -347,7 +406,7 @@ export default function LoadingMonitorTab({
             isDeparted: departed,
             isLoaded: loaded,
             isLoading: loading,
-            loadingStatus: truck ? (departed ? "dispatched" : loaded ? "loaded" : loading ? "loading" : "pending") : "unassigned",
+            loadingStatus: truck ? (departed ? "dispatched" : loaded ? "loaded" : loading ? "loading" : "pending") : (isItemDelivered ? "delivered" : "unassigned"),
             departTime: truck?.departTime || null,
             loadingEndTime: truck?.loadingEndTime || null,
           });
