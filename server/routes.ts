@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, formatTime12h } from "./storage";
 import { db, ensureDriverTablesSchema } from "./db";
 import { eq, and, or, inArray, desc, isNull, ne, sql } from "drizzle-orm";
 import PDFDocument from "pdfkit";
@@ -10237,20 +10237,16 @@ export async function registerRoutes(
         ...(req.body.truckId && !targetRecord.truckId ? { truckId: String(req.body.truckId).trim() } : {}),
       });
 
+      const formattedDepartTime = formatTime12h(depDate);
+
       await storage.createDriverActivity({
         driverId: effectiveDriverId || targetRecord.driverId,
-        notes: `Truck departed store/warehouse premises at ${depDate.toLocaleTimeString()}. Loading duration: ${loadingDurationMinutes} minutes.`,
+        notes: `Truck departed store/warehouse premises at ${formattedDepartTime}. Loading duration: ${loadingDurationMinutes} minutes.`,
       });
 
       // Auto-sync departure time and dispatched status to Daily Dispatch truck assignments
       let syncedTruckAssignments = 0;
       try {
-        let hours = depDate.getHours();
-        const minutes = depDate.getMinutes();
-        const ampm = hours >= 12 ? "PM" : "AM";
-        hours = hours % 12 || 12;
-        const formattedDepartTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
-
         const todayStr = depDate.toLocaleDateString("en-CA");
         const activeSheets = await db.select().from(schema.dispatchSheets)
           .where(or(eq(schema.dispatchSheets.date, todayStr), eq(schema.dispatchSheets.status, "active")));

@@ -67,6 +67,27 @@ export const DISPATCH_STORAGE_OPTIONS = [
   "Chemical",
 ] as const;
 
+export const APP_TIMEZONE = "Asia/Bahrain"; // Arab Standard Time (AST, UTC+3)
+
+export const formatDisplayTimeAST = (timeInput?: string | null): string => {
+  if (!timeInput) return "";
+  const trimmed = timeInput.trim();
+  if (!trimmed || trimmed === "—") return "";
+
+  if (trimmed.includes("T") || (trimmed.includes("-") && trimmed.includes(":")) || trimmed.endsWith("Z")) {
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat("en-US", {
+        timeZone: APP_TIMEZONE,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }).format(d);
+    }
+  }
+  return trimmed;
+};
+
 // ===== Types =====
 interface DispatchSheet { id: string; date: string; clientId: string | null; fileName: string | null; status: string; createdAt: string; hasDeliveryStarted?: boolean; }
 interface DispatchItem {
@@ -976,7 +997,12 @@ function ZoneColumn({
   });
 
   const getNowFormatted = () => {
-    return format(new Date(), "hh:mm a");
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: APP_TIMEZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date());
   };
 
   const handleQuickAction = (action: "start_loading" | "finish_loading" | "dispatch") => {
@@ -1288,7 +1314,7 @@ function ZoneColumn({
                       onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
                       title={primaryTruck.isAutoDeparted ? "Auto-detected by driver premises GPS departure" : "Click to view/edit timings"}
                     >
-                      <Truck className="h-3 w-3" /> Dispatched {primaryTruck.departTime ? `@ ${primaryTruck.departTime}` : ""} {primaryTruck.isAutoDeparted ? "📍" : ""}
+                      <Truck className="h-3 w-3" /> Dispatched {primaryTruck.departTime ? `@ ${formatDisplayTimeAST(primaryTruck.departTime)}` : ""} {primaryTruck.isAutoDeparted ? "📍" : ""}
                     </Badge>
                   ) : primaryTruck?.loadingStatus === "loaded" ? (
                     <Badge 
@@ -1471,15 +1497,15 @@ function ZoneColumn({
                 <div className="grid grid-cols-3 gap-2 text-[11px] text-muted-foreground bg-muted/40 p-2 rounded">
                   <div>
                     <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Start</span>
-                    <span className="font-medium text-foreground">{primaryTruck?.loadingStartTime || "—"}</span>
+                    <span className="font-medium text-foreground">{formatDisplayTimeAST(primaryTruck?.loadingStartTime) || "—"}</span>
                   </div>
                   <div>
                     <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Completed</span>
-                    <span className="font-medium text-foreground">{primaryTruck?.loadingEndTime || "—"}</span>
+                    <span className="font-medium text-foreground">{formatDisplayTimeAST(primaryTruck?.loadingEndTime) || "—"}</span>
                   </div>
                   <div>
                     <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Dispatched</span>
-                    <span className="font-medium text-foreground">{primaryTruck?.departTime || "—"}</span>
+                    <span className="font-medium text-foreground">{formatDisplayTimeAST(primaryTruck?.departTime) || "—"}</span>
                   </div>
                 </div>
                 {/* Quick Action Buttons for Warehouse Supervisor */}

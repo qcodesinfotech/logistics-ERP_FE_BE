@@ -70,7 +70,12 @@ export default function LoadingMonitorTab({
   // Quick Truck Departure Mutation
   const updateTruckTimingMutation = useMutation({
     mutationFn: async ({ truckAssignmentId, departTime, loadingStatus }: { truckAssignmentId: string; departTime?: string; loadingStatus?: string }) => {
-      const formattedNow = format(new Date(), "hh:mm a");
+      const formattedNow = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Bahrain",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }).format(new Date());
       return apiRequest("PATCH", `/api/dispatch/trucks/${truckAssignmentId}/timing`, {
         departTime: departTime || formattedNow,
         loadingStatus: loadingStatus || "dispatched",

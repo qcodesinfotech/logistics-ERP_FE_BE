@@ -149,9 +149,48 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = async (): Promise<void> => {
     try {
       if (accessToken) {
+        // Attempt to capture browser geolocation with a short timeout so logout is never blocked
+        let locationPayload: { latitude?: number; longitude?: number; accuracy?: number; deviceType?: string } = {
+          deviceType: "Web Browser",
+        };
+
+        if (typeof window !== "undefined" && "geolocation" in navigator) {
+          try {
+            const pos = await new Promise<GeolocationPosition | null>((resolve) => {
+              const timer = setTimeout(() => resolve(null), 2000);
+              navigator.geolocation.getCurrentPosition(
+                (p) => {
+                  clearTimeout(timer);
+                  resolve(p);
+                },
+                () => {
+                  clearTimeout(timer);
+                  resolve(null);
+                },
+                { timeout: 2000, maximumAge: 60000, enableHighAccuracy: false }
+              );
+            });
+
+            if (pos?.coords) {
+              locationPayload = {
+                ...locationPayload,
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+                accuracy: pos.coords.accuracy,
+              };
+            }
+          } catch (e) {
+            // Silently proceed
+          }
+        }
+
         await fetch("/api/auth/logout", {
           method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(locationPayload),
           credentials: "include",
         });
       }

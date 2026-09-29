@@ -2089,6 +2089,9 @@ export const userActivityLogs = pgTable("user_activity_logs", {
   action: text("action").notNull(),
   details: text("details"),
   ipAddress: text("ip_address"),
+  latitude: decimal("latitude", { precision: 10, scale: 6 }),
+  longitude: decimal("longitude", { precision: 10, scale: 6 }),
+  locationName: text("location_name"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

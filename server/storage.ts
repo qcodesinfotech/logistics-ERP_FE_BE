@@ -59,28 +59,70 @@ import { sendLeaveRequestNotification } from "./lib/email";
 import { type ScopeParams } from "./auth";
 import { randomUUID } from "crypto";
 
+export const APP_TIMEZONE = "Asia/Bahrain"; // Arab Standard Time (AST, UTC+3)
+
 export const formatTime12h = (timeInput: any): string => {
   if (!timeInput) return "";
-  if (typeof timeInput === "string" && (timeInput.includes("AM") || timeInput.includes("PM"))) {
-    return timeInput;
+
+  // If JavaScript Date object
+  if (timeInput instanceof Date) {
+    if (isNaN(timeInput.getTime())) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: APP_TIMEZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(timeInput);
   }
-  const dateObj = new Date(timeInput);
-  if (isNaN(dateObj.getTime())) {
-    if (typeof timeInput === "string" && timeInput.includes(":")) {
-      const parts = timeInput.split(":");
+
+  if (typeof timeInput === "string") {
+    const trimmed = timeInput.trim();
+    if (!trimmed) return "";
+
+    // If it's an ISO timestamp or date-time string (e.g. 2026-09-29T07:18:00Z)
+    if (trimmed.includes("T") || (trimmed.includes("-") && trimmed.includes(":")) || trimmed.endsWith("Z")) {
+      const d = new Date(trimmed);
+      if (!isNaN(d.getTime())) {
+        return new Intl.DateTimeFormat("en-US", {
+          timeZone: APP_TIMEZONE,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        }).format(d);
+      }
+    }
+
+    // If already has AM or PM
+    if (trimmed.includes("AM") || trimmed.includes("PM")) {
+      return trimmed;
+    }
+
+    // If HH:mm format (e.g. "08:44" or "14:30")
+    if (trimmed.includes(":")) {
+      const parts = trimmed.split(":");
       let h = parseInt(parts[0], 10);
       const m = parseInt(parts[1], 10) || 0;
-      const ampm = h >= 12 ? "PM" : "AM";
-      h = h % 12 || 12;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+      if (!isNaN(h)) {
+        const ampm = h >= 12 ? "PM" : "AM";
+        h = h % 12 || 12;
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+      }
     }
-    return String(timeInput);
+
+    return trimmed;
   }
-  let hours = dateObj.getHours();
-  const minutes = dateObj.getMinutes();
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
+
+  const dateObj = new Date(timeInput);
+  if (!isNaN(dateObj.getTime())) {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: APP_TIMEZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(dateObj);
+  }
+
+  return String(timeInput);
 };
 
 // Storage interface for all CRUD operations
@@ -3812,21 +3854,28 @@ export class DatabaseStorage implements IStorage {
         const updateData: any = {};
 
         if (matchedAtt) {
-          if (!t.reportingTime && matchedAtt.checkInTime) {
-            t.reportingTime = formatTime12h(matchedAtt.checkInTime);
-            updateData.reportingTime = t.reportingTime;
-            needsUpdate = true;
+          if (matchedAtt.checkInTime) {
+            const formattedRep = formatTime12h(matchedAtt.checkInTime);
+            if (!t.reportingTime || t.reportingTime !== formattedRep) {
+              t.reportingTime = formattedRep;
+              updateData.reportingTime = formattedRep;
+              needsUpdate = true;
+            }
           }
 
-          if (!t.departTime && matchedAtt.departureTime) {
-            t.departTime = formatTime12h(matchedAtt.departureTime);
+          if (matchedAtt.departureTime) {
+            const formattedDep = formatTime12h(matchedAtt.departureTime);
+            if (!t.departTime || t.departTime !== formattedDep) {
+              t.departTime = formattedDep;
+              updateData.departTime = formattedDep;
+              needsUpdate = true;
+            }
             (t as any).isAutoDeparted = true;
-            updateData.departTime = t.departTime;
             if (t.loadingStatus === "pending" || t.loadingStatus === "loading" || t.loadingStatus === "loaded") {
               t.loadingStatus = "dispatched";
               updateData.loadingStatus = "dispatched";
+              needsUpdate = true;
             }
-            needsUpdate = true;
           } else if (matchedAtt.departureTime) {
             (t as any).isAutoDeparted = true;
           }
@@ -8925,30 +8974,6 @@ export class DatabaseStorage implements IStorage {
       eDate = options.date;
     }
     const deliveries = await this.getCompletedDeliveries(sDate, eDate);
-
-    const formatTime12h = (timeInput: any): string => {
-      if (!timeInput) return "";
-      if (typeof timeInput === "string" && (timeInput.includes("AM") || timeInput.includes("PM"))) {
-        return timeInput;
-      }
-      const dateObj = new Date(timeInput);
-      if (isNaN(dateObj.getTime())) {
-        if (typeof timeInput === "string" && timeInput.includes(":")) {
-          const parts = timeInput.split(":");
-          let h = parseInt(parts[0], 10);
-          const m = parseInt(parts[1], 10) || 0;
-          const ampm = h >= 12 ? "PM" : "AM";
-          h = h % 12 || 12;
-          return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
-        }
-        return String(timeInput);
-      }
-      let hours = dateObj.getHours();
-      const minutes = dateObj.getMinutes();
-      const ampm = hours >= 12 ? "PM" : "AM";
-      hours = hours % 12 || 12;
-      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${ampm}`;
-    };
 
     // Filter by criteria if provided
     let filtered = deliveries;

@@ -2,8 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { db } from "./db";
-import { users, roles, menus, permissions, employees } from "@shared/schema";
-import { eq, and, or } from "drizzle-orm";
+import { users, roles, menus, permissions, employees, driverAttendance } from "@shared/schema";
+import { eq, and, or, desc, isNull } from "drizzle-orm";
 import { storage } from "./storage";
 
 const JWT_SECRET = process.env.JWT_SECRET || "tt-erp-jwt-secret-key-2024";
@@ -629,12 +629,80 @@ export const registerAuthRoutes = (app: any) => {
     }
   });
 
-  app.post("/api/auth/logout", authMiddleware, async (req: AuthRequest, res: Response) => {
+  app.post("/api/auth/logout", async (req: AuthRequest, res: Response) => {
     try {
-      if (req.user) {
+      // Determine user from req.user (if authMiddleware was run) or decode token directly
+      let user = req.user;
+      const authHeader = req.headers.authorization;
+      if (!user && authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.split(" ")[1];
+        try {
+          user = verifyAccessToken(token) || undefined;
+        } catch (e) {
+          try {
+            const decoded = jwt.decode(token) as AuthUser;
+            if (decoded && decoded.id) user = decoded;
+          } catch (e2) {}
+        }
+      }
+
+      if (user) {
         await db.update(users)
           .set({ refreshToken: null })
-          .where(eq(users.id, req.user.id));
+          .where(eq(users.id, user.id));
+
+        const { latitude, longitude, accuracy, locationName, address, deviceType } = req.body || {};
+        const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress || null;
+
+        const hasCoords = latitude !== undefined && latitude !== null && longitude !== undefined && longitude !== null && !isNaN(Number(latitude)) && !isNaN(Number(longitude));
+        let details = `User logged out`;
+        if (deviceType) details += ` [${deviceType}]`;
+        if (hasCoords) {
+          const lat = parseFloat(String(latitude)).toFixed(6);
+          const lng = parseFloat(String(longitude)).toFixed(6);
+          details += ` at GPS: ${lat}, ${lng} (https://maps.google.com/?q=${lat},${lng})`;
+          if (accuracy) details += ` [±${Math.round(Number(accuracy))}m]`;
+        }
+        if (locationName || address) {
+          details += ` - ${locationName || address}`;
+        }
+
+        try {
+          await storage.createUserActivityLog({
+            userId: user.id,
+            username: user.username || user.name || "Unknown",
+            action: "LOGOUT",
+            details,
+            ipAddress: ip ? String(ip) : null,
+            latitude: hasCoords ? String(latitude) : null,
+            longitude: hasCoords ? String(longitude) : null,
+            locationName: (locationName || address) ? String(locationName || address) : null,
+          });
+        } catch (logErr) {
+          console.warn("Failed to create logout activity log:", logErr);
+        }
+
+        // Also if user is a driver or linked employee, update active open attendance
+        if (hasCoords && (user.role === "driver" || user.employeeId)) {
+          try {
+            const driverId = user.employeeId || user.id;
+            const openAttendance = await db.select()
+              .from(driverAttendance)
+              .where(and(eq(driverAttendance.driverId, driverId), isNull(driverAttendance.checkOutTime)))
+              .orderBy(desc(driverAttendance.createdAt))
+              .limit(1);
+
+            if (openAttendance && openAttendance.length > 0) {
+              await storage.updateDriverAttendance(openAttendance[0].id, {
+                checkOutTime: new Date(),
+                endLatitude: String(latitude),
+                endLongitude: String(longitude),
+              });
+            }
+          } catch (attErr) {
+            console.warn("Failed to update driver attendance on logout:", attErr);
+          }
+        }
       }
       clearRefreshTokenCookie(res);
       res.json({ message: "Logged out successfully" });
