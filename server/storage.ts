@@ -3784,22 +3784,23 @@ export class DatabaseStorage implements IStorage {
     const truckMap = new Map(allTrucks.map(t => [t.id, t]));
 
     // Reconcile truck departure and reporting times with actual driver attendance GPS logs
+    let sheetAttendances: any[] = [];
     try {
       const [sheetRow] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.id, sheetId));
       const sheetDateStr = sheetRow?.date ? (typeof sheetRow.date === 'string' ? sheetRow.date : new Date(sheetRow.date).toLocaleDateString("en-CA")) : new Date().toLocaleDateString("en-CA");
       const allAttendances = await db.select().from(driverAttendance);
-      const sheetAttendances = allAttendances.filter(a => {
+      sheetAttendances = allAttendances.filter(a => {
         const attDate = a.checkInTime ? new Date(a.checkInTime).toLocaleDateString("en-CA") : (a.createdAt ? new Date(a.createdAt).toLocaleDateString("en-CA") : "");
         return attDate === sheetDateStr;
       });
 
       for (const t of truckAssigns) {
+        const veh = truckMap.get(t.truckId);
         const matchedAtt = sheetAttendances.find(a => {
           if (t.driverId && a.driverId === t.driverId) return true;
           if (t.truckId && a.truckId) {
             const aTrk = a.truckId.trim().toLowerCase();
             const tTrk = t.truckId.trim().toLowerCase();
-            const veh = truckMap.get(t.truckId);
             const vehPlate = veh?.plateNumber?.trim().toLowerCase();
             const vehName = veh?.name?.trim().toLowerCase();
             return aTrk === tTrk || (vehPlate && aTrk === vehPlate) || (vehName && aTrk === vehName);
@@ -3807,10 +3808,10 @@ export class DatabaseStorage implements IStorage {
           return false;
         });
 
-        if (matchedAtt) {
-          let needsUpdate = false;
-          const updateData: any = {};
+        let needsUpdate = false;
+        const updateData: any = {};
 
+        if (matchedAtt) {
           if (!t.reportingTime && matchedAtt.checkInTime) {
             t.reportingTime = formatTime12h(matchedAtt.checkInTime);
             updateData.reportingTime = t.reportingTime;
@@ -3830,11 +3831,25 @@ export class DatabaseStorage implements IStorage {
             (t as any).isAutoDeparted = true;
           }
 
-          if (needsUpdate) {
-            await db.update(dispatchTruckAssignments)
-              .set(updateData)
-              .where(eq(dispatchTruckAssignments.id, t.id));
+          // If driver clocked into this truck, synchronize driverId
+          if (matchedAtt.driverId && t.driverId !== matchedAtt.driverId) {
+            t.driverId = matchedAtt.driverId;
+            updateData.driverId = matchedAtt.driverId;
+            needsUpdate = true;
           }
+        }
+
+        // If driverId is still unset and vehicle has assignedDriverId, default to vehicle assigned driver
+        if (!t.driverId && veh?.assignedDriverId) {
+          t.driverId = veh.assignedDriverId;
+          updateData.driverId = veh.assignedDriverId;
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          await db.update(dispatchTruckAssignments)
+            .set(updateData)
+            .where(eq(dispatchTruckAssignments.id, t.id));
         }
       }
     } catch (attSyncErr) {
@@ -3844,7 +3859,9 @@ export class DatabaseStorage implements IStorage {
     // Get all driver names (from both users and employees table)
     const allDriverIds = Array.from(new Set([
       ...allDriverZones.map(dz => dz.driverId),
-      ...truckAssigns.map(t => t.driverId).filter(Boolean) as string[]
+      ...truckAssigns.map(t => t.driverId).filter(Boolean) as string[],
+      ...allTrucks.map(t => t.assignedDriverId).filter(Boolean) as string[],
+      ...sheetAttendances.map(a => a.driverId).filter(Boolean) as string[],
     ]));
     const allUsers = allDriverIds.length > 0 ? await db.select().from(users).where(inArray(users.id, allDriverIds)) : [];
     const allEmployees = allDriverIds.length > 0 ? await db.select().from(employees).where(inArray(employees.id, allDriverIds)) : [];
@@ -3913,17 +3930,26 @@ export class DatabaseStorage implements IStorage {
 
       if (!board[effectiveZoneId]) {
         const zone = zoneMap.get(effectiveZoneId);
-        const driverIds = zoneToDriverIds.get(effectiveZoneId) || [];
+        const configDriverIds = zoneToDriverIds.get(effectiveZoneId) || [];
+        const zoneTrucks = truckAssigns.filter(t => t.zoneId === effectiveZoneId);
+        const truckDriverIds = zoneTrucks.map(t => t.driverId || truckMap.get(t.truckId)?.assignedDriverId).filter(Boolean) as string[];
+        const combinedDriverIds = Array.from(new Set([...configDriverIds, ...truckDriverIds]));
+
         board[effectiveZoneId] = {
           zoneId: effectiveZoneId,
           zoneName: zone?.name || "Unknown Zone",
-          drivers: driverIds.map(id => driverMap.get(id)).filter(Boolean),
-          trucks: truckAssigns.filter(t => t.zoneId === effectiveZoneId).map(t => ({
-             ...t,
-             vehicle: truckMap.get(t.truckId),
-             driver: t.driverId ? driverMap.get(t.driverId) : null,
-             isAutoDeparted: (t as any).isAutoDeparted || false,
-          })),
+          drivers: combinedDriverIds.map(id => driverMap.get(id)).filter(Boolean),
+          trucks: zoneTrucks.map(t => {
+            const veh = truckMap.get(t.truckId);
+            const resolvedDriverId = t.driverId || veh?.assignedDriverId || null;
+            return {
+              ...t,
+              driverId: resolvedDriverId,
+              vehicle: veh,
+              driver: resolvedDriverId ? driverMap.get(resolvedDriverId) : null,
+              isAutoDeparted: (t as any).isAutoDeparted || false,
+            };
+          }),
           outlets: {},
         };
       }
@@ -9462,6 +9488,17 @@ export class DatabaseStorage implements IStorage {
 
       if (assignmentsToInsert.length > 0) {
         await db.insert(dispatchTruckAssignments).values(assignmentsToInsert);
+      }
+
+      // Also ensure existing truck assignments have their driverId populated if currently unset
+      const allVehiclesMap = new Map(zoneVehicles.map(v => [v.id, v]));
+      for (const a of existingAssigns) {
+        const v = allVehiclesMap.get(a.truckId);
+        if (v && v.assignedDriverId && !a.driverId) {
+          await db.update(dispatchTruckAssignments)
+            .set({ driverId: v.assignedDriverId })
+            .where(eq(dispatchTruckAssignments.id, a.id));
+        }
       }
     } catch (err) {
       console.error("autoAssignZoneTrucksToSheet error:", err);

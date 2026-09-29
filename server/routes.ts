@@ -10776,7 +10776,14 @@ export async function registerRoutes(
 
   app.post("/api/dispatch/sheets/:sheetId/trucks", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const truck = await storage.createDispatchTruckAssignment({ ...req.body, sheetId: req.params.sheetId });
+      const data = { ...req.body, sheetId: req.params.sheetId };
+      if (data.truckId && !data.driverId) {
+        const [veh] = await db.select().from(schema.vehicles).where(eq(schema.vehicles.id, data.truckId));
+        if (veh?.assignedDriverId) {
+          data.driverId = veh.assignedDriverId;
+        }
+      }
+      const truck = await storage.createDispatchTruckAssignment(data);
       res.status(201).json(truck);
     } catch (error) {
       console.error("Create truck assignment error:", error);
@@ -10796,7 +10803,14 @@ export async function registerRoutes(
 
   app.patch("/api/dispatch/truck-assignments/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const truck = await storage.updateDispatchTruckAssignment(req.params.id, req.body);
+      const data = { ...req.body };
+      if (data.truckId && !data.driverId) {
+        const [veh] = await db.select().from(schema.vehicles).where(eq(schema.vehicles.id, data.truckId));
+        if (veh?.assignedDriverId) {
+          data.driverId = veh.assignedDriverId;
+        }
+      }
+      const truck = await storage.updateDispatchTruckAssignment(req.params.id, data);
       if (!truck) return res.status(404).json({ error: "Assignment not found" });
       res.json(truck);
     } catch (error) {
@@ -10830,7 +10844,7 @@ export async function registerRoutes(
   app.post("/api/dispatch/sheets/:sheetId/routes/:routeId/timing", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { sheetId, routeId } = req.params;
-      const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes, truckId } = req.body;
+      const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes, truckId, driverId } = req.body;
 
       const existingTrucks = await storage.getDispatchTruckAssignments(sheetId);
       const matched = existingTrucks.find((t: any) => t.zoneId === routeId);
@@ -10843,17 +10857,34 @@ export async function registerRoutes(
         if (reportingTime !== undefined) updateData.reportingTime = reportingTime;
         if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
         if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
-        if (truckId) updateData.truckId = truckId;
+        if (truckId) {
+          updateData.truckId = truckId;
+          if (!driverId && !matched.driverId) {
+            const [veh] = await db.select().from(schema.vehicles).where(eq(schema.vehicles.id, truckId));
+            if (veh?.assignedDriverId) {
+              updateData.driverId = veh.assignedDriverId;
+            }
+          }
+        }
+        if (driverId) updateData.driverId = driverId;
 
         const updated = await storage.updateDispatchTruckAssignment(matched.id, updateData);
         return res.json(updated);
       } else {
         const vehicles = await storage.getVehicles();
         const fallbackTruckId = truckId || vehicles[0]?.id || "unassigned";
+        let defaultDriverId = driverId || null;
+        if (!defaultDriverId && fallbackTruckId) {
+          const veh = vehicles.find((v: any) => v.id === fallbackTruckId);
+          if (veh?.assignedDriverId) {
+            defaultDriverId = veh.assignedDriverId;
+          }
+        }
         const newAssignment = await storage.createDispatchTruckAssignment({
           sheetId,
           zoneId: routeId,
           truckId: fallbackTruckId,
+          driverId: defaultDriverId,
           tripNumber: 1,
           loadingStartTime: loadingStartTime || null,
           loadingEndTime: loadingEndTime || null,
