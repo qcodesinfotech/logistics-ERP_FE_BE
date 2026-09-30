@@ -1153,7 +1153,7 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
   });
 
   // Title block
-  ws.mergeCells("A1:K1");
+  ws.mergeCells("A1:N1");
   const titleCell = ws.getCell("A1");
   titleCell.value = `WAREHOUSE LOADING MONITOR & SKU PENDING TO LOAD REPORT - ${dateStr}`;
   titleCell.font = { name: "Calibri", size: 14, bold: true, color: { argb: "FFFFFFFF" } };
@@ -1168,10 +1168,12 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
     { header: "Storage Type", key: "storageType", width: 14 },
     { header: "UOM", key: "uom", width: 8 },
     { header: "Total Planned Qty", key: "totalQty", width: 17 },
-    { header: "Loaded / Departed Qty", key: "loadedQty", width: 19 },
+    { header: "1. Pending to Load Qty", key: "purePendingQty", width: 20 },
+    { header: "2. Allocated (Loading) Qty", key: "allocatedQty", width: 22 },
+    { header: "3. Loaded & Departed Qty", key: "loadedQty", width: 20 },
     { header: "Balance Pending to Load", key: "balanceQty", width: 22 },
     { header: "Progress", key: "progress", width: 12 },
-    { header: "Loading Status", key: "status", width: 16 },
+    { header: "Loading Status", key: "status", width: 18 },
     { header: "Pending Trucks & Trips", key: "pendingTrucks", width: 28 },
     { header: "All Truck / Trip Allocations", key: "allTrucks", width: 38 },
   ];
@@ -1179,7 +1181,7 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
   // Header row styling
   const headerRow = ws.getRow(2);
   headerRow.height = 25;
-  for (let c = 1; c <= 12; c++) {
+  for (let c = 1; c <= 14; c++) {
     const cell = headerRow.getCell(c);
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF203764" } };
     cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
@@ -1193,6 +1195,8 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
   }
 
   let totalPlanned = 0;
+  let totalPurePending = 0;
+  let totalAllocated = 0;
   let totalLoaded = 0;
   let totalBalance = 0;
 
@@ -1202,6 +1206,8 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
     r.height = 21;
 
     totalPlanned += Number(row.totalQty || 0);
+    totalPurePending += Number(row.purePendingQty || 0);
+    totalAllocated += Number(row.allocatedQty || 0);
     totalLoaded += Number(row.loadedQty || 0);
     totalBalance += Number(row.balanceQty || 0);
 
@@ -1213,17 +1219,19 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
     r.getCell(4).value = row.storageType || "Dry";
     r.getCell(5).value = row.uom || "CT";
     r.getCell(6).value = Number(row.totalQty || 0);
-    r.getCell(7).value = Number(row.loadedQty || 0);
-    r.getCell(8).value = Number(row.balanceQty || 0);
-    r.getCell(9).value = `${progressPct}%`;
-    r.getCell(10).value = row.status || (row.balanceQty === 0 ? "FULLY LOADED" : row.loadedQty > 0 ? "PARTIALLY LOADED" : "PENDING");
-    r.getCell(11).value = row.pendingTrucks || "-";
-    r.getCell(12).value = row.allTrucks || "-";
+    r.getCell(7).value = Number(row.purePendingQty || 0);
+    r.getCell(8).value = Number(row.allocatedQty || 0);
+    r.getCell(9).value = Number(row.loadedQty || 0);
+    r.getCell(10).value = Number(row.balanceQty || 0);
+    r.getCell(11).value = `${progressPct}%`;
+    r.getCell(12).value = row.status || (row.balanceQty === 0 ? "FULLY LOADED" : row.loadedQty > 0 ? "PARTIALLY LOADED" : "PENDING");
+    r.getCell(13).value = row.pendingTrucks || "-";
+    r.getCell(14).value = row.allTrucks || "-";
 
     const isEven = idx % 2 === 0;
     const baseBg = isEven ? "FFFFFFFF" : "FFF8F9FA";
 
-    for (let c = 1; c <= 12; c++) {
+    for (let c = 1; c <= 14; c++) {
       const cell = r.getCell(c);
       cell.border = {
         top: { style: "thin", color: { argb: "FFE0E0E0" } },
@@ -1236,28 +1244,40 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
       if (c === 1) {
         cell.alignment = { vertical: "middle", horizontal: "center" };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.softGreen}` } };
-      } else if ([6, 7, 8].includes(c)) {
+      } else if ([6, 7, 8, 9, 10].includes(c)) {
         cell.alignment = { vertical: "middle", horizontal: "right" };
         cell.numFmt = "#,##0.00";
-        if (c === 8 && Number(row.balanceQty || 0) > 0) {
-          // Highlight pending balance in amber/orange
+        if (c === 7 && Number(row.purePendingQty || 0) > 0) {
+          // Highlight pure pending in amber/orange
           cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF3CD" } };
           cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF856404" } };
-        } else if (c === 8 && Number(row.balanceQty || 0) === 0) {
+        } else if (c === 8 && Number(row.allocatedQty || 0) > 0) {
+          // Highlight allocated in soft blue
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F4FD" } };
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF004085" } };
+        } else if (c === 9 && Number(row.loadedQty || 0) > 0) {
+          // Highlight loaded in soft green
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F8F0" } };
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF155724" } };
+        } else if (c === 10 && Number(row.balanceQty || 0) > 0) {
+          // Highlight remaining balance in light grey/amber
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF8E1" } };
+          cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF856404" } };
+        } else if (c === 10 && Number(row.balanceQty || 0) === 0) {
           cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD4EDDA" } };
           cell.font = { name: "Calibri", size: 9.5, bold: true, color: { argb: "FF155724" } };
         } else {
           cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseBg } };
         }
-      } else if ([2, 4, 5, 9, 10].includes(c)) {
+      } else if ([2, 4, 5, 11, 12].includes(c)) {
         cell.alignment = { vertical: "middle", horizontal: "center" };
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: baseBg } };
-        if (c === 10) {
+        if (c === 12) {
           cell.font = {
             name: "Calibri",
             size: 9,
             bold: true,
-            color: { argb: row.balanceQty === 0 ? "FF155724" : row.loadedQty > 0 ? "FF004085" : "FF856404" }
+            color: { argb: row.balanceQty === 0 ? "FF155724" : row.allocatedQty > 0 ? "FF004085" : row.loadedQty > 0 ? "FF006699" : "FF856404" }
           };
         }
       } else {
@@ -1274,11 +1294,13 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
 
   sumRow.getCell(5).value = "TOTAL:";
   sumRow.getCell(6).value = totalPlanned;
-  sumRow.getCell(7).value = totalLoaded;
-  sumRow.getCell(8).value = totalBalance;
-  sumRow.getCell(9).value = totalPlanned > 0 ? `${Math.round((totalLoaded / totalPlanned) * 100)}%` : "0%";
+  sumRow.getCell(7).value = totalPurePending;
+  sumRow.getCell(8).value = totalAllocated;
+  sumRow.getCell(9).value = totalLoaded;
+  sumRow.getCell(10).value = totalBalance;
+  sumRow.getCell(11).value = totalPlanned > 0 ? `${Math.round((totalLoaded / totalPlanned) * 100)}%` : "0%";
 
-  for (let c = 1; c <= 12; c++) {
+  for (let c = 1; c <= 14; c++) {
     const cell = sumRow.getCell(c);
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
     cell.border = {
@@ -1288,10 +1310,10 @@ export async function exportLoadingMonitorExcel(skuRows: any[], dateStr: string,
       right: { style: "thin", color: { argb: "FFD9D9D9" } },
     };
     cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.navyHeader}` } };
-    if ([6, 7, 8].includes(c)) {
+    if ([6, 7, 8, 9, 10].includes(c)) {
       cell.alignment = { vertical: "middle", horizontal: "right" };
       cell.numFmt = "#,##0.00";
-    } else if ([5, 9].includes(c)) {
+    } else if ([5, 11].includes(c)) {
       cell.alignment = { vertical: "middle", horizontal: "center" };
     }
   }

@@ -1011,6 +1011,8 @@ function ZoneColumn({
       const payload = {
         ...timingForm,
         loadingStartTime: timingForm.loadingStartTime || now,
+        loadingEndTime: "",
+        departTime: "",
         loadingStatus: "loading",
       };
       setTimingForm(payload);
@@ -1019,6 +1021,7 @@ function ZoneColumn({
       const payload = {
         ...timingForm,
         loadingEndTime: now,
+        departTime: "",
         loadingStatus: "loaded",
       };
       setTimingForm(payload);

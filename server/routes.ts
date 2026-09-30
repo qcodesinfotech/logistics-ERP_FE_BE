@@ -10847,10 +10847,10 @@ export async function registerRoutes(
 
       if (matched) {
         const updateData: any = {};
-        if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
-        if (loadingEndTime !== undefined) updateData.loadingEndTime = loadingEndTime;
-        if (departTime !== undefined) updateData.departTime = departTime;
-        if (reportingTime !== undefined) updateData.reportingTime = reportingTime;
+        if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime === "" ? null : loadingStartTime;
+        if (loadingEndTime !== undefined) updateData.loadingEndTime = loadingEndTime === "" ? null : loadingEndTime;
+        if (departTime !== undefined) updateData.departTime = departTime === "" ? null : departTime;
+        if (reportingTime !== undefined) updateData.reportingTime = reportingTime === "" ? null : reportingTime;
         if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
         if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
         if (truckId) {

@@ -87,7 +87,7 @@ const menuGroups: MenuGroup[] = [
       { title: "Zonal Config", url: "/logistics/zones", icon: MapPin },
       { title: "Fleet & Assets", url: "/logistics/fleet", icon: Truck },
       { title: "Driver Allocation", url: "/logistics/driver-allocation", icon: UserCircle },
-      { title: "Driver App Updates", url: "/settings", icon: Smartphone },
+      // { title: "Driver App Updates", url: "/settings", icon: Smartphone },
     ],
   },
   {

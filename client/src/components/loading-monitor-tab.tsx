@@ -50,7 +50,7 @@ export default function LoadingMonitorTab({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [storageFilter, setStorageFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending_only" | "fully_loaded">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending_only" | "allocated" | "fully_loaded">("all");
   const [deductCriteria, setDeductCriteria] = useState<"departed" | "loaded_or_departed">("departed");
   const [viewMode, setViewMode] = useState<"sku" | "truck">("sku");
   const [expandedSkus, setExpandedSkus] = useState<Record<string, boolean>>({});
@@ -111,11 +111,21 @@ export default function LoadingMonitorTab({
 
   const isTruckDeparted = (t: any) => {
     if (!t) return false;
-    if (t.isAutoDeparted) return true;
     const s = (t.loadingStatus || "").toLowerCase();
     const st = (t.status || "").toLowerCase();
+
+    // If truck is currently loading or pending, it has NOT departed under any circumstances
+    if (s === "loading" || st === "loading" || s === "pending" || st === "pending") {
+      return false;
+    }
+    // If deduct criteria is "departed" and truck is marked "loaded", it has NOT departed yet (still on dock)
+    if (deductCriteria === "departed" && (s === "loaded" || st === "loaded")) {
+      return false;
+    }
+
     const valid = ["dispatched", "departed", "in_transit", "completed"];
     if (valid.includes(s) || valid.includes(st)) return true;
+    if (t.isAutoDeparted) return true;
     if (t.departTime && t.departTime.trim() !== "" && t.departTime !== "-") return true;
     return false;
   };
@@ -125,6 +135,7 @@ export default function LoadingMonitorTab({
     if (isTruckDeparted(t)) return true;
     const s = (t.loadingStatus || "").toLowerCase();
     const st = (t.status || "").toLowerCase();
+    if (s === "loading" || st === "loading" || s === "pending" || st === "pending") return false;
     if (s === "loaded" || st === "loaded") return true;
     if (t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-") return true;
     return false;
@@ -132,10 +143,13 @@ export default function LoadingMonitorTab({
 
   const isTruckLoading = (t: any) => {
     if (!t) return false;
-    if (isTruckLoaded(t) || isTruckDeparted(t)) return false;
+    if (isTruckDeparted(t)) return false;
     const s = (t.loadingStatus || "").toLowerCase();
     const st = (t.status || "").toLowerCase();
-    return s === "loading" || st === "loading";
+    if (s === "loading" || st === "loading") return true;
+    if (s === "loaded" || st === "loaded") return true; // on dock loaded, waiting to depart is allocated
+    if (t.loadingStartTime && t.loadingStartTime.trim() !== "" && t.loadingStartTime !== "-") return true;
+    return false;
   };
 
   const toggleSkuExpand = (skuKey: string) => {
@@ -167,8 +181,24 @@ export default function LoadingMonitorTab({
       return {
         skuList: [],
         truckList: [],
-        globalTotals: { totalQty: 0, loadedQty: 0, balanceQty: 0, progressPct: 0, totalTrucks: 0, departedTrucks: 0, loadingTrucks: 0, pendingTrucks: 0, totalSkus: 0, pendingSkusCount: 0 },
-        storageCounts: { DRY: 0, CHILLED: 0, FROZEN: 0, AMBIENT: 0 },
+        globalTotals: {
+          totalQty: 0,
+          loadedQty: 0,
+          allocatedQty: 0,
+          purePendingQty: 0,
+          balanceQty: 0,
+          progressPct: 0,
+          allocatedPct: 0,
+          totalTrucks: 0,
+          departedTrucks: 0,
+          loadingTrucks: 0,
+          pendingTrucks: 0,
+          totalSkus: 0,
+          pendingSkusCount: 0,
+          allocatedSkusCount: 0,
+          fullyLoadedSkusCount: 0,
+        },
+        storageCounts: { DRY: 0, CHILLED: 0, FROZEN: 0, AMBIENT: 0, PACKAGING: 0, CLEANING: 0, CHEMICAL: 0 } as Record<string, number>,
       };
     }
 
@@ -271,6 +301,8 @@ export default function LoadingMonitorTab({
 
     let globalTotalQty = 0;
     let globalLoadedQty = 0;
+    let globalAllocatedQty = 0;
+    let globalPendingQty = 0;
 
     boardData.zones.forEach((zone: any) => {
       const currentRouteName = zone.zoneName || routeMap.get(zone.zoneId) || "Unassigned Route";
@@ -353,12 +385,16 @@ export default function LoadingMonitorTab({
           const isItemDelivered = item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty;
           const departed = isTruckDeparted(truck) || isItemDelivered;
           const loaded = isTruckLoaded(truck) || isItemDelivered;
-          const loading = isTruckLoading(truck) && !isItemDelivered;
+          const loading = !departed && isTruckLoading(truck);
 
           const isDeducted = deductCriteria === "departed" ? departed : loaded;
 
           if (isDeducted) {
             globalLoadedQty += qty;
+          } else if (loading) {
+            globalAllocatedQty += qty;
+          } else {
+            globalPendingQty += qty;
           }
 
           // SKU key
@@ -371,6 +407,8 @@ export default function LoadingMonitorTab({
               uom: item.uom || "CT",
               totalQty: 0,
               loadedQty: 0,
+              allocatedQty: 0,
+              purePendingQty: 0,
               balanceQty: 0,
               loadingQty: 0,
               allocations: [],
@@ -383,9 +421,12 @@ export default function LoadingMonitorTab({
             skuRecord.loadedQty += qty;
           } else {
             skuRecord.balanceQty += qty;
-          }
-          if (loading) {
-            skuRecord.loadingQty += qty;
+            if (loading) {
+              skuRecord.allocatedQty = (skuRecord.allocatedQty || 0) + qty;
+              skuRecord.loadingQty = (skuRecord.loadingQty || 0) + qty;
+            } else {
+              skuRecord.purePendingQty = (skuRecord.purePendingQty || 0) + qty;
+            }
           }
 
           const veh = truck?.vehicle || vehicleMap.get(truck?.truckId);
@@ -406,9 +447,11 @@ export default function LoadingMonitorTab({
             isDeparted: departed,
             isLoaded: loaded,
             isLoading: loading,
+            category: departed ? "departed" : loading ? "allocated" : "pending",
             loadingStatus: truck ? (departed ? "dispatched" : loaded ? "loaded" : loading ? "loading" : "pending") : (isItemDelivered ? "delivered" : "unassigned"),
             departTime: truck?.departTime || null,
             loadingEndTime: truck?.loadingEndTime || null,
+            loadingStartTime: truck?.loadingStartTime || null,
           });
 
           // Populate truckItemsMap
@@ -447,24 +490,39 @@ export default function LoadingMonitorTab({
       sku.allocations.forEach((a: any) => {
         const routeLabel = a.route && a.route !== "Unassigned Route" ? a.route : a.truckPlate;
         const key = a.truckAssignmentId ? `${routeLabel} (T${a.tripNumber})` : "Unassigned";
-        const st = a.isDeparted ? "Departed" : a.isLoaded ? "Loaded" : a.isLoading ? "Loading" : "Pending";
+        const st = a.isDeparted ? "Departed" : a.isLoading ? "Loading (Allocated)" : a.isLoaded ? "Loaded" : "Pending";
         allTrucksMap.set(key, st);
       });
       const allTrucksSummary = Array.from(allTrucksMap.entries()).map(([k, s]) => `${k} [${s}]`).join(", ");
 
-      const status = sku.balanceQty === 0 ? "FULLY LOADED" : sku.loadedQty > 0 ? "PARTIALLY LOADED" : "PENDING";
+      const isFullyDeparted = sku.balanceQty === 0;
+      const isAllocated = (sku.allocatedQty || 0) > 0;
+      const isPending = (sku.purePendingQty || 0) > 0;
+
+      const status = isFullyDeparted
+        ? "FULLY LOADED"
+        : (isAllocated && !isPending)
+        ? "ALLOCATED"
+        : isAllocated
+        ? "PARTIALLY ALLOCATED"
+        : sku.loadedQty > 0
+        ? "PARTIALLY LOADED"
+        : "PENDING";
 
       return {
         ...sku,
         totalQty: Math.round(sku.totalQty * 100) / 100,
+        allocatedQty: Math.round((sku.allocatedQty || 0) * 100) / 100,
+        purePendingQty: Math.round((sku.purePendingQty || 0) * 100) / 100,
         loadedQty: Math.round(sku.loadedQty * 100) / 100,
         balanceQty: Math.max(0, Math.round(sku.balanceQty * 100) / 100),
-        loadingQty: Math.round(sku.loadingQty * 100) / 100,
+        loadingQty: Math.round((sku.loadingQty || 0) * 100) / 100,
         pendingTrucksSummary,
         allTrucksSummary,
         pendingTrucksList: Array.from(pendingTrucksMap.keys()),
         status,
         progressPct: sku.totalQty > 0 ? Math.round((sku.loadedQty / sku.totalQty) * 100) : 0,
+        allocatedPct: sku.totalQty > 0 ? Math.round(((sku.allocatedQty || 0) / sku.totalQty) * 100) : 0,
       };
     }).sort((a, b) => {
       if (a.balanceQty > 0 && b.balanceQty === 0) return -1;
@@ -525,10 +583,13 @@ export default function LoadingMonitorTab({
 
     const globalBalanceQty = Math.max(0, globalTotalQty - globalLoadedQty);
     const globalProgressPct = globalTotalQty > 0 ? Math.round((globalLoadedQty / globalTotalQty) * 100) : 0;
+    const globalAllocatedPct = globalTotalQty > 0 ? Math.round((globalAllocatedQty / globalTotalQty) * 100) : 0;
     const departedTrucks = truckList.filter((t: any) => t.isDeparted).length;
     const loadingTrucks = truckList.filter((t: any) => t.isLoading).length;
-    const pendingTrucks = truckList.filter((t: any) => !t.isDeparted && !t.isLoaded && !t.isLoading).length;
-    const pendingSkusCount = skuList.filter(s => s.balanceQty > 0).length;
+    const pendingTrucks = truckList.filter((t: any) => !t.isDeparted && !t.isLoading).length;
+    const pendingSkusCount = skuList.filter(s => (s.purePendingQty || 0) > 0).length;
+    const allocatedSkusCount = skuList.filter(s => (s.allocatedQty || 0) > 0).length;
+    const fullyLoadedSkusCount = skuList.filter(s => s.balanceQty === 0).length;
 
     return {
       skuList,
@@ -536,14 +597,19 @@ export default function LoadingMonitorTab({
       globalTotals: {
         totalQty: Math.round(globalTotalQty * 100) / 100,
         loadedQty: Math.round(globalLoadedQty * 100) / 100,
+        allocatedQty: Math.round(globalAllocatedQty * 100) / 100,
+        purePendingQty: Math.round(globalPendingQty * 100) / 100,
         balanceQty: Math.round(globalBalanceQty * 100) / 100,
         progressPct: globalProgressPct,
+        allocatedPct: globalAllocatedPct,
         totalTrucks: truckList.length,
         departedTrucks,
         loadingTrucks,
         pendingTrucks,
         totalSkus: skuList.length,
         pendingSkusCount,
+        allocatedSkusCount,
+        fullyLoadedSkusCount,
       },
       storageCounts: counts,
     };
@@ -562,7 +628,8 @@ export default function LoadingMonitorTab({
         if (storageFilter === "CLEANING" && !raw.includes("CLEAN")) return false;
         if (storageFilter === "CHEMICAL" && !raw.includes("CHEM")) return false;
       }
-      if (statusFilter === "pending_only" && sku.balanceQty <= 0) return false;
+      if (statusFilter === "pending_only" && (sku.purePendingQty || 0) <= 0) return false;
+      if (statusFilter === "allocated" && (sku.allocatedQty || 0) <= 0) return false;
       if (statusFilter === "fully_loaded" && sku.balanceQty > 0) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase().trim();
@@ -580,6 +647,24 @@ export default function LoadingMonitorTab({
     });
   }, [skuList, storageFilter, statusFilter, searchQuery]);
 
+  // Filtered Trucks for Trucks & Trips View
+  const filteredTrucks = useMemo(() => {
+    return truckList.filter((t: any) => {
+      if (statusFilter === "pending_only" && (t.isDeparted || t.isLoading)) return false;
+      if (statusFilter === "allocated" && !t.isLoading) return false;
+      if (statusFilter === "fully_loaded" && !t.isDeparted) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesPlate = (t.plateNumber || "").toLowerCase().includes(q);
+        const matchesDriver = (t.driverName || "").toLowerCase().includes(q);
+        const matchesRoute = (t.routeNo || t.routeName || "").toLowerCase().includes(q);
+        const matchesSkus = t.skus.some((s: any) => s.skuCode.toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q));
+        if (!matchesPlate && !matchesDriver && !matchesRoute && !matchesSkus) return false;
+      }
+      return true;
+    });
+  }, [truckList, statusFilter, searchQuery]);
+
   // Export Excel
   const handleExportExcel = async () => {
     if (skuList.length === 0) {
@@ -592,6 +677,8 @@ export default function LoadingMonitorTab({
       storageType: s.storageType,
       uom: s.uom,
       totalQty: s.totalQty,
+      purePendingQty: s.purePendingQty || 0,
+      allocatedQty: s.allocatedQty || 0,
       loadedQty: s.loadedQty,
       balanceQty: s.balanceQty,
       status: s.status,
@@ -755,13 +842,13 @@ export default function LoadingMonitorTab({
         </div>
       </div>
 
-      {/* KPI Cards Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 px-6 py-3 bg-white dark:bg-card border-b">
+      {/* KPI Cards Row - 3 Categories Display */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 px-6 py-3 bg-white dark:bg-card border-b">
         {/* Card 1: Total Dispatch Qty */}
         <Card className="border shadow-none bg-slate-50/60 dark:bg-slate-900/40 p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Scheduled Qty</span>
-            <div className="h-7 w-7 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Scheduled</span>
+            <div className="h-7 w-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600">
               <Package className="h-3.5 w-3.5" />
             </div>
           </div>
@@ -776,10 +863,68 @@ export default function LoadingMonitorTab({
           </p>
         </Card>
 
-        {/* Card 2: Loaded & Departed Qty */}
+        {/* Card 2: 1. Pending to Load */}
+        <Card className={`border shadow-none p-3 transition-colors ${
+          globalTotals.purePendingQty > 0
+            ? "bg-amber-50/60 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800"
+            : "bg-slate-50 dark:bg-slate-900/40"
+        }`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1">
+              <Hourglass className="h-3.5 w-3.5 text-amber-600" />
+              1. Pending to Load
+            </span>
+            <div className={`h-7 w-7 rounded-full flex items-center justify-center ${
+              globalTotals.purePendingQty > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+            }`}>
+              {globalTotals.purePendingQty > 0 ? <Clock className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+            </div>
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className={`text-xl font-bold ${
+              globalTotals.purePendingQty > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-600"
+            }`}>
+              {globalTotals.purePendingQty.toLocaleString()}
+            </span>
+            <span className="text-xs text-muted-foreground font-medium">Cartons / Units</span>
+          </div>
+          <p className="text-[11px] text-amber-800/80 dark:text-amber-400 mt-0.5">
+            {globalTotals.pendingSkusCount > 0 ? `${globalTotals.pendingSkusCount} SKU(s) waiting for dock loading` : "No pending queue"}
+          </p>
+        </Card>
+
+        {/* Card 3: 2. Allocated (Loading in Progress) */}
+        <Card className={`border shadow-none p-3 transition-colors ${
+          globalTotals.allocatedQty > 0
+            ? "bg-blue-50/60 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800"
+            : "bg-slate-50 dark:bg-slate-900/40"
+        }`}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-blue-800 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1">
+              <Boxes className="h-3.5 w-3.5 text-blue-600" />
+              2. Allocated (Loading)
+            </span>
+            <div className="h-7 w-7 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600">
+              <RefreshCw className={`h-3.5 w-3.5 ${globalTotals.allocatedQty > 0 ? "animate-spin" : ""}`} />
+            </div>
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-xl font-bold text-blue-700 dark:text-blue-300">
+              {globalTotals.allocatedQty.toLocaleString()}
+            </span>
+            <Badge variant="outline" className="bg-blue-100/70 text-blue-800 border-blue-300 text-[10px] h-4 px-1.5 font-medium">
+              {globalTotals.loadingTrucks} Truck(s) on Dock
+            </Badge>
+          </div>
+          <p className="text-[11px] text-blue-800/80 dark:text-blue-400 mt-0.5">
+            {globalTotals.allocatedSkusCount > 0 ? `${globalTotals.allocatedSkusCount} SKU(s) currently being loaded` : "No active loading on dock"}
+          </p>
+        </Card>
+
+        {/* Card 4: 3. Loaded & Departed Qty */}
         <Card className="border shadow-none bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-900/50 p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">Loaded & Departed</span>
+            <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">3. Loaded & Departed</span>
             <div className="h-7 w-7 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center text-emerald-600">
               <CheckCircle2 className="h-3.5 w-3.5" />
             </div>
@@ -788,7 +933,7 @@ export default function LoadingMonitorTab({
             <span className="text-xl font-bold text-emerald-700 dark:text-emerald-300">
               {globalTotals.loadedQty.toLocaleString()}
             </span>
-            <Badge variant="outline" className="bg-emerald-100/70 text-emerald-800 border-emerald-300 text-[10px] h-4 px-1.5">
+            <Badge variant="outline" className="bg-emerald-100/70 text-emerald-800 border-emerald-300 text-[10px] h-4 px-1.5 font-medium">
               {globalTotals.progressPct}% Deducted
             </Badge>
           </div>
@@ -797,37 +942,7 @@ export default function LoadingMonitorTab({
           </p>
         </Card>
 
-        {/* Card 3: Balance Pending to Load */}
-        <Card className={`border shadow-none p-3 transition-colors ${
-          globalTotals.balanceQty > 0
-            ? "bg-amber-50/60 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800"
-            : "bg-slate-50 dark:bg-slate-900/40"
-        }`}>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1">
-              <Boxes className="h-3.5 w-3.5 text-amber-600" />
-              Balance Pending to Load
-            </span>
-            <div className={`h-7 w-7 rounded-full flex items-center justify-center ${
-              globalTotals.balanceQty > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-            }`}>
-              {globalTotals.balanceQty > 0 ? <Hourglass className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
-            </div>
-          </div>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className={`text-xl font-bold ${
-              globalTotals.balanceQty > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-600"
-            }`}>
-              {globalTotals.balanceQty.toLocaleString()}
-            </span>
-            <span className="text-xs text-muted-foreground font-medium">Cartons / Units</span>
-          </div>
-          <p className="text-[11px] text-amber-800/80 dark:text-amber-400 mt-0.5">
-            {globalTotals.pendingSkusCount > 0 ? `${globalTotals.pendingSkusCount} SKU(s) waiting for truck completion` : "All SKUs completely loaded!"}
-          </p>
-        </Card>
-
-        {/* Card 4: Truck Departure Progress */}
+        {/* Card 5: Truck Departure Progress */}
         <Card className="border shadow-none bg-sky-50/40 dark:bg-sky-950/20 border-sky-200/60 dark:border-sky-900/50 p-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-sky-800 dark:text-sky-300 uppercase tracking-wider">Trucks & Trips</span>
@@ -901,20 +1016,27 @@ export default function LoadingMonitorTab({
             ))}
           </div>
 
-          {/* Status Filter */}
+          {/* Status Filter Tabs - Showing all 3 categories */}
           <div className="flex items-center gap-1 border-l pl-2 text-xs">
             <span className="text-[10px] text-muted-foreground uppercase font-semibold mr-1">Status:</span>
             {[
               { id: "all", label: "All SKUs" },
-              { id: "pending_only", label: `Pending Balance (${globalTotals.pendingSkusCount})` },
-              { id: "fully_loaded", label: "Fully Loaded" },
+              { id: "pending_only", label: `Pending to Load (${globalTotals.pendingSkusCount})` },
+              { id: "allocated", label: `Allocated (${globalTotals.allocatedSkusCount})` },
+              { id: "fully_loaded", label: `Loaded & Departed (${globalTotals.fullyLoadedSkusCount})` },
             ].map(sf => (
               <button
                 key={sf.id}
                 onClick={() => setStatusFilter(sf.id as any)}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors ${
                   statusFilter === sf.id
-                    ? "bg-amber-600 text-white shadow-sm"
+                    ? sf.id === "allocated"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : sf.id === "fully_loaded"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : sf.id === "pending_only"
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-sm"
                     : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
                 }`}
               >
@@ -968,12 +1090,20 @@ export default function LoadingMonitorTab({
                   <TableHead className="min-w-[200px] font-semibold">Item Description</TableHead>
                   <TableHead className="w-24 text-center font-semibold">Storage</TableHead>
                   <TableHead className="w-16 text-center font-semibold">UOM</TableHead>
-                  <TableHead className="w-28 text-right font-semibold">Planned Qty</TableHead>
-                  <TableHead className="w-32 text-right font-semibold">Loaded / Departed</TableHead>
-                  <TableHead className="w-36 text-right font-semibold bg-amber-50/50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200">
+                  <TableHead className="w-24 text-right font-semibold">Planned Qty</TableHead>
+                  <TableHead className="w-28 text-right font-semibold bg-amber-50/50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200">
                     Pending to Load
                   </TableHead>
-                  <TableHead className="min-w-[200px] font-semibold">Pending Trucks & Trips</TableHead>
+                  <TableHead className="w-28 text-right font-semibold bg-blue-50/50 dark:bg-blue-950/20 text-blue-900 dark:text-blue-200">
+                    Allocated (Loading)
+                  </TableHead>
+                  <TableHead className="w-32 text-right font-semibold bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200">
+                    Loaded & Departed
+                  </TableHead>
+                  <TableHead className="w-28 text-right font-semibold text-slate-700 dark:text-slate-300">
+                    Balance Pending
+                  </TableHead>
+                  <TableHead className="min-w-[180px] font-semibold">Pending Trucks & Trips</TableHead>
                   <TableHead className="w-28 text-center font-semibold">Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1034,7 +1164,32 @@ export default function LoadingMonitorTab({
                         <TableCell className="text-right font-mono font-bold">
                           {sku.totalQty.toLocaleString()}
                         </TableCell>
-                        <TableCell className="text-right">
+                        {/* 1. Pending to Load */}
+                        <TableCell className="text-right bg-amber-50/40 dark:bg-amber-950/15">
+                          <span
+                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${
+                              (sku.purePendingQty || 0) > 0
+                                ? "bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-900/60 dark:text-amber-100 dark:border-amber-700"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {(sku.purePendingQty || 0).toLocaleString()}
+                          </span>
+                        </TableCell>
+                        {/* 2. Allocated (Loading) */}
+                        <TableCell className="text-right bg-blue-50/40 dark:bg-blue-950/15">
+                          <span
+                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${
+                              (sku.allocatedQty || 0) > 0
+                                ? "bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-900/60 dark:text-blue-100 dark:border-blue-700 font-semibold"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {(sku.allocatedQty || 0).toLocaleString()}
+                          </span>
+                        </TableCell>
+                        {/* 3. Loaded & Departed */}
+                        <TableCell className="text-right bg-emerald-50/30 dark:bg-emerald-950/10">
                           <div className="flex flex-col items-end">
                             <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400">
                               {sku.loadedQty.toLocaleString()}
@@ -1044,11 +1199,12 @@ export default function LoadingMonitorTab({
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right bg-amber-50/40 dark:bg-amber-950/15">
+                        {/* Total Balance Pending */}
+                        <TableCell className="text-right">
                           <span
                             className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${
-                              hasPendingBalance
-                                ? "bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-900/60 dark:text-amber-100 dark:border-amber-700"
+                              sku.balanceQty > 0
+                                ? "bg-slate-100 text-slate-800 border border-slate-300 dark:bg-slate-800 dark:text-slate-200"
                                 : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
                             }`}
                           >
@@ -1079,8 +1235,12 @@ export default function LoadingMonitorTab({
                             className={`text-[10px] h-5 px-1.5 font-semibold ${
                               sku.balanceQty === 0
                                 ? "bg-emerald-600 text-white"
-                                : sku.loadedQty > 0
+                                : (sku.allocatedQty || 0) > 0 && (sku.purePendingQty || 0) === 0
                                 ? "bg-blue-600 text-white"
+                                : (sku.allocatedQty || 0) > 0
+                                ? "bg-indigo-600 text-white"
+                                : sku.loadedQty > 0
+                                ? "bg-sky-600 text-white"
                                 : "bg-amber-500 text-white"
                             }`}
                           >
@@ -1092,7 +1252,7 @@ export default function LoadingMonitorTab({
                       {/* Expanded Truck Allocation Details */}
                       {isExpanded && (
                         <TableRow className="bg-slate-50/70 dark:bg-slate-900/40 hover:bg-slate-50/70 border-b">
-                          <TableCell colSpan={11} className="p-3 pl-12">
+                          <TableCell colSpan={13} className="p-3 pl-12">
                             <div className="bg-white dark:bg-card border rounded-md p-3 space-y-2.5 shadow-xs">
                               <div className="flex items-center justify-between border-b pb-2">
                                 <div className="flex items-center gap-2">
@@ -1106,8 +1266,9 @@ export default function LoadingMonitorTab({
                                 </div>
                                 <span className="text-[11px] text-muted-foreground">
                                   Total Qty: <strong className="text-foreground">{sku.totalQty} {sku.uom}</strong> ·
-                                  Departed: <strong className="text-emerald-600">{sku.loadedQty}</strong> ·
-                                  Pending: <strong className="text-amber-600">{sku.balanceQty}</strong>
+                                  Pending: <strong className="text-amber-600">{sku.purePendingQty || 0}</strong> ·
+                                  Allocated: <strong className="text-blue-600">{sku.allocatedQty || 0}</strong> ·
+                                  Departed: <strong className="text-emerald-600">{sku.loadedQty}</strong>
                                 </span>
                               </div>
 
@@ -1215,7 +1376,7 @@ export default function LoadingMonitorTab({
         ) : (
           /* TRUCK & TRIP LOAD MONITOR VIEW */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {truckList.map((truck: any) => {
+            {filteredTrucks.map((truck: any) => {
               const isExpanded = !!expandedTrucks[truck.id];
               return (
                 <Card key={truck.id} className="border shadow-xs overflow-hidden flex flex-col">
