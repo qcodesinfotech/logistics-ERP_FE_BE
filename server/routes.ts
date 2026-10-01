@@ -7622,6 +7622,118 @@ export async function registerRoutes(
     }
   });
 
+  // Bulk upload outlets with lat/long and customer linking
+  app.post("/api/outlets/bulk", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+    try {
+      const { outlets: rawOutlets } = req.body;
+      if (!Array.isArray(rawOutlets) || rawOutlets.length === 0) {
+        return res.status(400).json({ error: "outlets array is required" });
+      }
+
+      const allClients = await storage.getClients();
+      const allRoutes = await storage.getRoutes();
+      const existingOutlets = await storage.getOutlets();
+
+      const normalize = (s: any) => String(s || "").trim().toLowerCase().replace(/^0+/, "");
+      
+      const clientMap = new Map<string, any>();
+      for (const c of allClients) {
+        if (c.id) clientMap.set(c.id, c);
+        if (c.name) clientMap.set(normalize(c.name), c);
+        if (c.customerCode) clientMap.set(normalize(c.customerCode), c);
+      }
+
+      const routeMap = new Map<string, any>();
+      for (const r of allRoutes) {
+        if (r.id) routeMap.set(r.id, r);
+        if (r.name) routeMap.set(normalize(r.name), r);
+      }
+
+      const outletCodeMap = new Map<string, any>();
+      for (const o of existingOutlets) {
+        if (o.code) outletCodeMap.set(normalize(o.code), o);
+        if (o.id) outletCodeMap.set(o.id, o);
+      }
+
+      let createdCount = 0;
+      let updatedCount = 0;
+      const errors: string[] = [];
+
+      for (let i = 0; i < rawOutlets.length; i++) {
+        const row = rawOutlets[i];
+        try {
+          const outletName = (row.name || row.outletName || "").trim();
+          const outletCode = (row.code || row.outletCode || "").trim();
+          if (!outletName && !outletCode) {
+            continue;
+          }
+
+          // Match customer
+          let resolvedClientId = row.clientId || null;
+          if (!resolvedClientId && (row.customerName || row.customer || row.customerCode)) {
+            const custKey = normalize(row.customerName || row.customer || row.customerCode);
+            resolvedClientId = clientMap.get(custKey)?.id || null;
+          }
+
+          // Match route/zone
+          let resolvedRouteId = row.routeId || null;
+          if (!resolvedRouteId && (row.zone || row.zoneName || row.route || row.routeName)) {
+            const zKey = normalize(row.zone || row.zoneName || row.route || row.routeName);
+            resolvedRouteId = routeMap.get(zKey)?.id || null;
+          }
+
+          const normCode = normalize(outletCode);
+          const existing = normCode ? outletCodeMap.get(normCode) : null;
+
+          const outletPayload: any = {
+            name: outletName || existing?.name || `Outlet ${outletCode}`,
+            code: outletCode || existing?.code,
+            address: row.address !== undefined ? String(row.address) : (existing?.address || null),
+            latitude: row.latitude !== undefined && row.latitude !== "" ? String(row.latitude) : (existing?.latitude || null),
+            longitude: row.longitude !== undefined && row.longitude !== "" ? String(row.longitude) : (existing?.longitude || null),
+            contactPerson: row.contactPerson || row.contact_person || existing?.contactPerson || null,
+            contactPhone: row.contactPhone || row.contact_phone || row.phone || existing?.contactPhone || null,
+            phone: row.phone || row.contactPhone || existing?.phone || null,
+            email: row.email || existing?.email || null,
+            clientId: resolvedClientId || existing?.clientId || null,
+            routeId: resolvedRouteId || existing?.routeId || null,
+            status: row.status || existing?.status || "active",
+          };
+
+          if (existing) {
+            await storage.updateOutlet(existing.id, outletPayload);
+            if (resolvedRouteId) {
+              await storage.assignOutletZones(existing.id, [resolvedRouteId]);
+            }
+            updatedCount++;
+          } else {
+            const created = await storage.createOutlet(outletPayload);
+            if (resolvedRouteId) {
+              await storage.assignOutletZones(created.id, [resolvedRouteId]);
+            }
+            if (created.code) {
+              outletCodeMap.set(normalize(created.code), created);
+            }
+            createdCount++;
+          }
+        } catch (rowErr: any) {
+          errors.push(`Row ${i + 1}: ${rowErr?.message || String(rowErr)}`);
+        }
+      }
+
+      res.json({
+        success: true,
+        created: createdCount,
+        updated: updatedCount,
+        total: createdCount + updatedCount,
+        errors,
+      });
+    } catch (error: any) {
+      console.error("Bulk upload outlets error:", error);
+      res.status(500).json({ error: "Failed to bulk upload outlets: " + (error?.message || String(error)) });
+    }
+  });
+
   app.patch("/api/outlets/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
     try {
       const { zoneIds, ...data } = req.body;

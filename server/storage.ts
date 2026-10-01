@@ -3307,9 +3307,11 @@ export class DatabaseStorage implements IStorage {
     const newId = randomUUID();
     const outletCode = data.code || `CUST-${newId.substring(0, 8).toUpperCase()}`;
 
-    // Also create matching client record to keep them in lockstep
+    // Also create matching client record to keep them in lockstep, linking parent if provided
     await db.insert(clients).values({
       id: newId,
+      parentClientId: data.clientId || null,
+      brandId: data.brandId || null,
       name: data.name,
       tradeName: data.name,
       customerCode: outletCode,
@@ -3318,6 +3320,8 @@ export class DatabaseStorage implements IStorage {
       contactPerson: data.contactPerson || "",
       billingAddress: data.address || "",
       deliveryAddress: data.address || "",
+      latitude: data.latitude || null,
+      longitude: data.longitude || null,
       area: "Default Area",
       city: "Default City",
       country: "Bahrain",
@@ -3333,7 +3337,7 @@ export class DatabaseStorage implements IStorage {
     const [outlet] = await db.insert(outlets).values({
       ...data,
       id: newId,
-      clientId: newId,
+      clientId: data.clientId || newId,
       code: outletCode,
     } as any).returning();
     
@@ -4009,10 +4013,17 @@ export class DatabaseStorage implements IStorage {
         const fallbackOutlet = outletCodeMap.get(normalizeCode(item.outletCode));
         const resolvedName = outlet?.name || fallbackOutlet?.name || item.outletCode;
 
+        const matchedOutlet = outlet || fallbackOutlet;
         board[effectiveZoneId].outlets[outletKey] = {
           outletId: item.outletId || fallbackOutlet?.id || null,
           outletCode: item.outletCode,
           outletName: resolvedName,
+          address: matchedOutlet?.address || null,
+          latitude: matchedOutlet?.latitude || null,
+          longitude: matchedOutlet?.longitude || null,
+          phone: matchedOutlet?.phone || null,
+          contactPerson: matchedOutlet?.contactPerson || null,
+          clientId: matchedOutlet?.clientId || null,
           isOverridden,
           overrideZoneId: isOverridden ? (ov?.overrideZoneId || item.overrideRouteId || null) : null,
           truckAssignmentId: tAssignId,

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import * as XLSX from "xlsx";
 import {
-  Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon, Eye
+  Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon, Eye,
+  Upload, Download, FileSpreadsheet, Building2, Navigation, Layers
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -174,9 +176,14 @@ export default function RoutesPage() {
   // Outlet state
   const [selectedRouteFilter, setSelectedRouteFilter] = useState<string>("all");
   const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>("all");
+  const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>("all");
   const [outletDialog, setOutletDialog] = useState<{ open: boolean; editing?: Outlet }>({ open: false });
   const [deleteOutletId, setDeleteOutletId] = useState<string | null>(null);
   const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [parsedRows, setParsedRows] = useState<any[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ---- Queries ----
   const { data: brands = [], isLoading: brandsLoading } = useQuery<Brand[]>({
@@ -403,12 +410,134 @@ export default function RoutesPage() {
     }
   };
 
+  const bulkUploadMutation = useMutation({
+    mutationFn: (outlets: any[]) => apiRequest("POST", "/api/outlets/bulk", { outlets }),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
+      toast({
+        title: "Outlets Uploaded Successfully",
+        description: `Imported ${data.created || 0} new outlets, updated ${data.updated || 0} existing outlets.`,
+      });
+      setBulkUploadOpen(false);
+      setBulkFile(null);
+      setParsedRows([]);
+    },
+    onError: (err) => {
+      toast({ title: "Bulk upload failed", description: getErrorMessage(err), variant: "destructive" });
+    }
+  });
+
+  const downloadSampleTemplate = () => {
+    const templateData = [
+      {
+        "Outlet Code": "FI-SEEF-01",
+        "Outlet Name": "Food Innovation - Seef Branch",
+        "Customer Name": "Food Innovation",
+        "Parent Account": "HORECA",
+        "Route / Zone": "Manama North",
+        "Latitude": "26.2412",
+        "Longitude": "50.5364",
+        "Address": "Road 2819, Block 428, Seef District",
+        "Contact Person": "Ahmed Al-Sayed",
+        "Contact Phone": "+973 3912 3456",
+        "Status": "active"
+      },
+      {
+        "Outlet Code": "FI-JUF-02",
+        "Outlet Name": "Food Innovation - Juffair Branch",
+        "Customer Name": "Food Innovation",
+        "Parent Account": "HORECA",
+        "Route / Zone": "Manama South",
+        "Latitude": "26.2155",
+        "Longitude": "50.6050",
+        "Address": "Building 450, Road 2408, Juffair",
+        "Contact Person": "Mohammed Hassan",
+        "Contact Phone": "+973 3923 4567",
+        "Status": "active"
+      },
+      {
+        "Outlet Code": "FI-RIF-03",
+        "Outlet Name": "Food Innovation - Riffa Branch",
+        "Customer Name": "Food Innovation",
+        "Parent Account": "HORECA",
+        "Route / Zone": "Southern Zone",
+        "Latitude": "26.1280",
+        "Longitude": "50.5550",
+        "Address": "Avenue 41, East Riffa",
+        "Contact Person": "Ali Redha",
+        "Contact Phone": "+973 3934 5678",
+        "Status": "active"
+      },
+      {
+        "Outlet Code": "FI-MUH-04",
+        "Outlet Name": "Food Innovation - Muharraq Branch",
+        "Customer Name": "Food Innovation",
+        "Parent Account": "HORECA",
+        "Route / Zone": "Muharraq Zone",
+        "Latitude": "26.2570",
+        "Longitude": "50.6120",
+        "Address": "Airport Road, Muharraq",
+        "Contact Person": "Yousif Kamal",
+        "Contact Phone": "+973 3945 6789",
+        "Status": "active"
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Outlets");
+    XLSX.writeFile(wb, "Outlets_Location_Upload_Template.xlsx");
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkFile(file);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        const data = XLSX.utils.sheet_to_json(ws);
+        
+        const formatted = data.map((row: any) => ({
+          code: String(row["Outlet Code"] || row["Code"] || row["outlet_code"] || row["outletCode"] || "").trim(),
+          name: String(row["Outlet Name"] || row["Name"] || row["outlet_name"] || row["outletName"] || "").trim(),
+          customerName: String(row["Customer Name"] || row["Customer"] || row["Client"] || row["customer_name"] || "").trim(),
+          parentAccount: String(row["Parent Account"] || row["Parent Customer"] || row["parent_client"] || "").trim(),
+          zoneName: String(row["Route / Zone"] || row["Route"] || row["Zone"] || row["zone"] || "").trim(),
+          latitude: String(row["Latitude"] || row["Lat"] || row["lat"] || "").trim(),
+          longitude: String(row["Longitude"] || row["Long"] || row["Lng"] || row["long"] || row["lng"] || "").trim(),
+          address: String(row["Address"] || row["Delivery Address"] || row["address"] || "").trim(),
+          contactPerson: String(row["Contact Person"] || row["contact_person"] || "").trim(),
+          contactPhone: String(row["Contact Phone"] || row["Phone"] || row["phone"] || "").trim(),
+          status: String(row["Status"] || "active").toLowerCase().trim(),
+        }));
+
+        setParsedRows(formatted);
+      } catch (err: any) {
+        toast({ title: "Failed to read Excel file", description: err.message, variant: "destructive" });
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const filteredOutlets = (Array.isArray(outletsList) ? outletsList : [])
     .filter((o) => !o.isVendor)
     .filter((o) => {
       let match = true;
       if (selectedRouteFilter !== "all" && o.routeId !== selectedRouteFilter) match = false;
       if (selectedBrandFilter !== "all" && o.brandId !== selectedBrandFilter) match = false;
+      if (selectedCustomerFilter !== "all") {
+        const outletClient = clients.find(c => c.id === o.clientId);
+        const matchesDirect = o.clientId === selectedCustomerFilter;
+        const matchesParent = outletClient?.parentClientId === selectedCustomerFilter;
+        if (!matchesDirect && !matchesParent) match = false;
+      }
       return match;
     });
 
@@ -611,38 +740,81 @@ export default function RoutesPage() {
             {/* Filters */}
             <Card className="border-dashed">
               <CardContent className="p-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                  <div className="flex items-center gap-2 flex-1 w-full max-w-sm">
-                    <RouteIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <Select value={selectedRouteFilter} onValueChange={setSelectedRouteFilter}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="All Routes" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Routes</SelectItem>
-                        {routes.map((r) => (
-                          <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3 flex-1 w-full">
+                    {/* Customer Filter (with parent-child hierarchy) */}
+                    <div className="flex items-center gap-2 min-w-[220px] flex-1">
+                      <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <Select value={selectedCustomerFilter} onValueChange={setSelectedCustomerFilter}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="All Customers (Parent / Child)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Customers</SelectItem>
+                          {clients.filter(c => !c.parentClientId).map((parent) => {
+                            const children = clients.filter(c => c.parentClientId === parent.id);
+                            return (
+                              <div key={parent.id}>
+                                <SelectItem value={parent.id} className="font-semibold text-primary">
+                                  🏢 {parent.name} (Parent Account)
+                                </SelectItem>
+                                {children.map(child => (
+                                  <SelectItem key={child.id} value={child.id} className="pl-6 text-sm">
+                                    ↳ {child.name}
+                                  </SelectItem>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Route Filter */}
+                    <div className="flex items-center gap-2 min-w-[180px] flex-1">
+                      <RouteIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <Select value={selectedRouteFilter} onValueChange={setSelectedRouteFilter}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="All Routes" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Routes</SelectItem>
+                          {routes.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Brand Filter */}
+                    <div className="flex items-center gap-2 min-w-[180px] flex-1">
+                      <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <Select value={selectedBrandFilter} onValueChange={setSelectedBrandFilter}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="All Brands" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Brands</SelectItem>
+                          {brands.map((b) => (
+                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-1 w-full max-w-sm">
-                    <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <Select value={selectedBrandFilter} onValueChange={setSelectedBrandFilter}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="All Brands" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Brands</SelectItem>
-                        {brands.map((b) => (
-                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+
+                  <div className="flex items-center gap-2 shrink-0 w-full lg:w-auto justify-end">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setBulkUploadOpen(true)} 
+                      className="gap-2 border-primary/40 hover:bg-primary/5 text-primary"
+                    >
+                      <Upload className="h-4 w-4" /> Import Excel
+                    </Button>
+                    <Button onClick={() => openOutletDialog()} className="gap-2">
+                      <Plus className="h-4 w-4" /> Add Outlet
+                    </Button>
                   </div>
-                  <Button onClick={() => openOutletDialog()} className="gap-2 shrink-0 ml-auto">
-                    <Plus className="h-4 w-4" /> Add Outlet
-                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -675,8 +847,9 @@ export default function RoutesPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Outlet Name</TableHead>
+                        <TableHead>Customer / Parent</TableHead>
                         <TableHead>Route / Brand</TableHead>
-                        <TableHead>Code</TableHead>
+                        <TableHead>Code & Location</TableHead>
                         <TableHead>Phone / Contact</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
@@ -686,6 +859,8 @@ export default function RoutesPage() {
                       {filteredOutlets.map((outlet) => {
                         const route = routes.find(r => r.id === outlet.routeId);
                         const brand = brands.find(b => b.id === outlet.brandId);
+                        const client = clients.find(c => c.id === outlet.clientId);
+                        const parentClient = client?.parentClientId ? clients.find(c => c.id === client.parentClientId) : null;
                         
                         return (
                           <TableRow key={outlet.id} className="hover:bg-accent/30 transition-colors">
@@ -694,14 +869,41 @@ export default function RoutesPage() {
                               {outlet.address && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{outlet.address}</div>}
                             </TableCell>
                             <TableCell>
+                              {client ? (
+                                <div>
+                                  <div className="text-sm font-medium flex items-center gap-1">
+                                    <Building2 className="h-3 w-3 text-muted-foreground" />
+                                    <span>{client.name}</span>
+                                  </div>
+                                  {parentClient && (
+                                    <div className="text-[11px] text-primary/80 mt-0.5">
+                                      ↳ Parent: <span className="font-semibold">{parentClient.name}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
                               {route && <div className="text-sm font-medium">{route.name}</div>}
                               {brand && <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Globe className="h-3 w-3"/> {brand.name}</div>}
                               {!route && !brand && <span className="text-muted-foreground">—</span>}
                             </TableCell>
                             <TableCell>
-                              {outlet.code ? (
-                                <Badge variant="outline" className="font-mono text-xs">{outlet.code}</Badge>
-                              ) : "—"}
+                              <div className="space-y-1">
+                                {outlet.code ? (
+                                  <Badge variant="outline" className="font-mono text-xs">{outlet.code}</Badge>
+                                ) : null}
+                                {outlet.latitude && outlet.longitude ? (
+                                  <div className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
+                                    <Navigation className="h-3 w-3 shrink-0" />
+                                    <span>{Number(outlet.latitude).toFixed(4)}, {Number(outlet.longitude).toFixed(4)}</span>
+                                  </div>
+                                ) : (
+                                  <div className="text-[11px] text-muted-foreground">No GPS</div>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <div className="text-sm">{outlet.phone || outlet.contactPhone || "—"}</div>
@@ -1111,6 +1313,108 @@ export default function RoutesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ==================== BULK UPLOAD DIALOG ==================== */}
+      <Dialog open={bulkUploadOpen} onOpenChange={setBulkUploadOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              Import Outlets & Geolocations (Excel)
+            </DialogTitle>
+            <DialogDescription>
+              Upload an Excel (.xlsx/.csv) sheet containing outlet details, customer mappings, and GPS coordinates.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-4 py-2">
+            <div className="flex items-center justify-between p-3 bg-muted/40 rounded-lg border">
+              <div>
+                <p className="text-sm font-medium">Need the standard spreadsheet format?</p>
+                <p className="text-xs text-muted-foreground">Download our pre-filled template with sample HORECA / Food Innovation rows.</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={downloadSampleTemplate} className="gap-2 shrink-0">
+                <Download className="h-4 w-4" /> Download Template
+              </Button>
+            </div>
+
+            {/* Dropzone */}
+            <div 
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-primary/30 hover:border-primary/60 rounded-xl p-8 text-center cursor-pointer transition-colors bg-primary/5 flex flex-col items-center justify-center gap-2"
+            >
+              <Upload className="h-8 w-8 text-primary/70 animate-pulse" />
+              <div className="text-sm font-semibold">
+                {bulkFile ? bulkFile.name : "Click or drag & drop to choose Excel file"}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Supported formats: .xlsx, .xls, .csv
+              </p>
+              <input 
+                ref={fileInputRef} 
+                type="file" 
+                accept=".xlsx,.xls,.csv" 
+                onChange={handleFileUpload} 
+                className="hidden" 
+              />
+            </div>
+
+            {/* Preview Table */}
+            {parsedRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">Preview ({parsedRows.length} outlets ready to import)</span>
+                  <span>Review details before saving</span>
+                </div>
+                <div className="border rounded-md max-h-56 overflow-auto">
+                  <Table>
+                    <TableHeader className="bg-muted/50 sticky top-0 text-xs">
+                      <TableRow>
+                        <TableHead>Code</TableHead>
+                        <TableHead>Outlet Name</TableHead>
+                        <TableHead>Customer</TableHead>
+                        <TableHead>Route / Zone</TableHead>
+                        <TableHead>GPS (Lat, Long)</TableHead>
+                        <TableHead>Address</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="text-xs">
+                      {parsedRows.slice(0, 10).map((r, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="font-mono font-medium">{r.code || "—"}</TableCell>
+                          <TableCell className="font-medium">{r.name}</TableCell>
+                          <TableCell>{r.customerName || "—"}</TableCell>
+                          <TableCell>{r.zoneName || "—"}</TableCell>
+                          <TableCell className="font-mono">
+                            {r.latitude && r.longitude ? `${r.latitude}, ${r.longitude}` : <span className="text-muted-foreground">No GPS</span>}
+                          </TableCell>
+                          <TableCell className="max-w-[150px] truncate" title={r.address}>{r.address || "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {parsedRows.length > 10 && (
+                  <p className="text-[11px] text-muted-foreground text-center">... and {parsedRows.length - 10} more rows</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-3 mt-2 flex items-center justify-between">
+            <Button variant="ghost" onClick={() => { setBulkUploadOpen(false); setBulkFile(null); setParsedRows([]); }}>
+              Cancel
+            </Button>
+            <Button 
+              disabled={parsedRows.length === 0 || bulkUploadMutation.isPending}
+              onClick={() => bulkUploadMutation.mutate(parsedRows)}
+              className="gap-2"
+            >
+              {bulkUploadMutation.isPending ? "Importing..." : `Import ${parsedRows.length} Outlets`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
