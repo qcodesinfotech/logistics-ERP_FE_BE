@@ -3795,7 +3795,13 @@ export class DatabaseStorage implements IStorage {
     const allOutlets = await db.select().from(outlets);
     const outletMap = new Map(allOutlets.map(o => [o.id, o]));
     const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
-    const outletCodeMap = new Map(allOutlets.map(o => [normalizeCode(o.code || ""), o]));
+    const outletCodeMap = new Map<string, any>();
+    for (const o of allOutlets) {
+      const code = normalizeCode(o.code || "");
+      if (!outletCodeMap.has(code) || (o.latitude && o.longitude && !outletCodeMap.get(code)?.latitude)) {
+        outletCodeMap.set(code, o);
+      }
+    }
 
     // Get zone assignments for all outlets (using routeId directly)
     const outletToZone = new Map<string, string>();
@@ -4014,13 +4020,15 @@ export class DatabaseStorage implements IStorage {
         const resolvedName = outlet?.name || fallbackOutlet?.name || item.outletCode;
 
         const matchedOutlet = outlet || fallbackOutlet;
+        const resolvedLat = (outlet?.latitude && outlet.latitude !== "") ? outlet.latitude : (fallbackOutlet?.latitude || null);
+        const resolvedLng = (outlet?.longitude && outlet.longitude !== "") ? outlet.longitude : (fallbackOutlet?.longitude || null);
         board[effectiveZoneId].outlets[outletKey] = {
           outletId: item.outletId || fallbackOutlet?.id || null,
           outletCode: item.outletCode,
           outletName: resolvedName,
           address: matchedOutlet?.address || null,
-          latitude: matchedOutlet?.latitude || null,
-          longitude: matchedOutlet?.longitude || null,
+          latitude: resolvedLat,
+          longitude: resolvedLng,
           phone: matchedOutlet?.phone || null,
           contactPerson: matchedOutlet?.contactPerson || null,
           clientId: matchedOutlet?.clientId || null,
