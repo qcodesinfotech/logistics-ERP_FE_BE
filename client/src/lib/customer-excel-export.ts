@@ -968,6 +968,7 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
 
   ws.columns = [
     { header: "SN", key: "sn", width: 6 },
+    { header: "Stop #", key: "sequence", width: 9 },
     { header: "Date", key: "date", width: 13 },
     { header: "Route", key: "route", width: 16 },
     { header: "Truck No", key: "truckNo", width: 14 },
@@ -994,7 +995,7 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
   // Header row styling
   const headerRow = ws.getRow(1);
   headerRow.height = 28;
-  for (let c = 1; c <= 22; c++) {
+  for (let c = 1; c <= 23; c++) {
     const cell = headerRow.getCell(c);
     cell.fill = {
       type: "pattern",
@@ -1034,6 +1035,7 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
 
     row.values = [
       d["SN"] ?? (idx + 1),
+      d["Stop #"] ?? d["Sequence"] ?? d.sequence ?? "-",
       d["Date"] || "",
       d["Route"] || "",
       d["Truck No"] || "Unassigned",
@@ -1057,14 +1059,14 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
       d["Delivered Time"] || "-"
     ];
 
-    for (let c = 1; c <= 22; c++) {
+    for (let c = 1; c <= 23; c++) {
       const cell = row.getCell(c);
       cell.font = { name: "Calibri", size: 10, color: { argb: `FF${PALETTE.textDark}` } };
       cell.border = getThinBorder(PALETTE.borderLight);
 
-      if (c === 7 || c === 10 || c === 17) {
+      if (c === 8 || c === 11 || c === 18) {
         cell.alignment = { vertical: "middle", horizontal: "left" };
-      } else if ([13, 14, 15, 16, 19].includes(c)) {
+      } else if ([14, 15, 16, 17, 20].includes(c)) {
         cell.alignment = { vertical: "middle", horizontal: "right" };
       } else {
         cell.alignment = { vertical: "middle", horizontal: "center" };
@@ -1074,13 +1076,13 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.zebraOdd}` } };
       }
 
-      if (c === 1) {
+      if (c === 1 || c === 2) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${PALETTE.softGreen}` } };
         cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: `FF${PALETTE.textDark}` } };
       }
 
       // Status pill coloring
-      if (c === 18) {
+      if (c === 19) {
         if (statusVal === "DELIVERED") {
           cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2EFDA" } };
           cell.font = { name: "Calibri", size: 10, bold: true, color: { argb: "FF1E8449" } };
@@ -1100,14 +1102,14 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
   const sumRow = ws.getRow(summaryRowIndex);
   sumRow.height = 24;
 
-  sumRow.getCell(12).value = "TOTAL:";
-  sumRow.getCell(13).value = totalReq;
-  sumRow.getCell(14).value = totalDel;
-  sumRow.getCell(15).value = totalRem;
-  sumRow.getCell(16).value = totalRet;
-  sumRow.getCell(19).value = totalCash > 0 ? totalCash : 0;
+  sumRow.getCell(13).value = "TOTAL:";
+  sumRow.getCell(14).value = totalReq;
+  sumRow.getCell(15).value = totalDel;
+  sumRow.getCell(16).value = totalRem;
+  sumRow.getCell(17).value = totalRet;
+  sumRow.getCell(20).value = totalCash > 0 ? totalCash : 0;
 
-  for (let c = 1; c <= 22; c++) {
+  for (let c = 1; c <= 23; c++) {
     const cell = sumRow.getCell(c);
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
     cell.border = {
@@ -1117,7 +1119,7 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
       right: { style: "thin", color: { argb: `FF${PALETTE.borderLight}` } },
     };
     cell.font = { name: "Calibri", size: 10.5, bold: true, color: { argb: `FF${PALETTE.navyHeader}` } };
-    if ([13, 14, 15, 16, 19].includes(c)) {
+    if ([14, 15, 16, 17, 20].includes(c)) {
       cell.alignment = { vertical: "middle", horizontal: "right" };
       cell.numFmt = "#,##0.00";
     }

@@ -933,7 +933,7 @@ const getCompletedDeliveryNotesCount = (outletsList: any[]) => {
 function ZoneColumn({
   zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
   onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails, onManageItems,
-  onQuickComplete, onRevertDelivery, initialZoneData,
+  onQuickComplete, onRevertDelivery, initialZoneData, onDownloadDeliveries,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
@@ -949,6 +949,7 @@ function ZoneColumn({
   onQuickComplete?: (item: DispatchItem) => void;
   onRevertDelivery?: (item: DispatchItem) => void;
   initialZoneData?: ZoneGroup;
+  onDownloadDeliveries?: (zoneId: string) => void;
 }) {
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
@@ -1352,6 +1353,19 @@ function ZoneColumn({
               <Badge className={`${initialDeliveredQty === initialTotalQty && initialTotalQty > 0 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-primary/10 text-primary"} border text-xs`}>
                 {formattedInitialDeliveredQty}/{formattedInitialTotalQty} ({initialCompletionPercentage}%)
               </Badge>
+              {onDownloadDeliveries && !isUnassigned && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDownloadDeliveries(zone.zoneId);
+                  }}
+                  className="h-7 w-7 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center transition-colors"
+                  title="Download final deliveries for this route (Excel)"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => {
@@ -2443,6 +2457,9 @@ export default function DailyDispatchPage() {
   const [summarySearchQuery, setSummarySearchQuery] = useState("");
   const [pivotSearchQuery, setPivotSearchQuery] = useState("");
 
+  const [downloadDeliveriesModalOpen, setDownloadDeliveriesModalOpen] = useState(false);
+  const [selectedRouteForDownload, setSelectedRouteForDownload] = useState<string>("all");
+
   const [boardRouteFilter, setBoardRouteFilter] = useState("all");
   const [boardOutletFilter, setBoardOutletFilter] = useState("all");
   const [boardDriverFilter, setBoardDriverFilter] = useState("all");
@@ -3254,17 +3271,30 @@ export default function DailyDispatchPage() {
     document.body.removeChild(link);
   };
 
-  const handleDownloadFinalDeliveries = async () => {
+  const handleDownloadFinalDeliveries = async (targetRouteId?: string) => {
     if (!boardData || !boardData.zones || boardData.zones.length === 0) {
       toast({ title: "No dispatch board data available to export.", variant: "destructive" });
+      return;
+    }
+
+    const routeToExport = targetRouteId !== undefined ? targetRouteId : selectedRouteForDownload;
+    const targetZones = routeToExport === "all"
+      ? boardData.zones.filter((z: any) => z.zoneId !== "unassigned" || (z.outlets && z.outlets.length > 0))
+      : boardData.zones.filter((z: any) => String(z.zoneId) === String(routeToExport));
+
+    if (targetZones.length === 0) {
+      toast({ title: "Selected route not found in dispatch board.", variant: "destructive" });
       return;
     }
 
     const rows: any[] = [];
     let sn = 1;
 
-    for (const zone of boardData.zones) {
-      for (const outlet of (zone.outlets || [])) {
+    for (const zone of targetZones) {
+      const outlets = zone.outlets || [];
+      for (let outletIdx = 0; outletIdx < outlets.length; outletIdx++) {
+        const outlet = outlets[outletIdx];
+        const stopNumber = outletIdx + 1;
         const assignedTruck = zone.trucks?.find((t: any) => t.id === outlet.truckAssignmentId);
         const truckName = assignedTruck?.vehicle?.plateNumber || assignedTruck?.vehicle?.name || "Unassigned";
         const driverName = assignedTruck?.driver?.name || assignedTruck?.driver?.username || "Unassigned";
@@ -3279,6 +3309,7 @@ export default function DailyDispatchPage() {
 
           rows.push({
             "SN": sn++,
+            "Stop #": stopNumber,
             "Date": selectedDate,
             "Route": zone.zoneName,
             "Truck No": truckName,
@@ -3310,8 +3341,13 @@ export default function DailyDispatchPage() {
       return;
     }
 
-    await exportFinalDailyDeliveriesExcel(rows, `Final_Daily_Deliveries_${selectedDate}`);
-    toast({ title: `Exported ${rows.length} delivery item(s) to Excel!` });
+    const cleanRouteName = routeToExport === "all"
+      ? "All_Routes"
+      : (targetZones[0]?.zoneName || "Route").replace(/[^a-zA-Z0-9_-]/g, "_");
+
+    await exportFinalDailyDeliveriesExcel(rows, `Final_Daily_Deliveries_${cleanRouteName}_${selectedDate}`);
+    toast({ title: `Exported ${rows.length} delivery item(s) (${routeToExport === "all" ? "All Routes" : targetZones[0]?.zoneName}) to Excel!` });
+    setDownloadDeliveriesModalOpen(false);
   };
 
   return (
@@ -3428,7 +3464,7 @@ export default function DailyDispatchPage() {
                 size="sm"
                 variant="outline"
                 className="border-emerald-300 text-emerald-700 bg-emerald-50/60 hover:bg-emerald-100/70 hover:text-emerald-800 flex-shrink-0 h-8 text-xs font-medium gap-1.5 shadow-sm"
-                onClick={handleDownloadFinalDeliveries}
+                onClick={() => setDownloadDeliveriesModalOpen(true)}
               >
                 <Download className="h-3.5 w-3.5 text-emerald-600" />Download Final Deliveries
               </Button>
@@ -3747,6 +3783,7 @@ export default function DailyDispatchPage() {
                           onQuickComplete={handleQuickComplete}
                           onRevertDelivery={handleRevert}
                           initialZoneData={boardData.zones.find(z => z.zoneId === zone.zoneId)}
+                          onDownloadDeliveries={(zoneId) => handleDownloadFinalDeliveries(zoneId)}
                         />
                       ));
                   })()}
@@ -5534,6 +5571,165 @@ export default function DailyDispatchPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Download Final Deliveries Modal */}
+      <Dialog open={downloadDeliveriesModalOpen} onOpenChange={setDownloadDeliveriesModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+              <Download className="h-5 w-5 text-emerald-600" />
+              Download Final Deliveries
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Export daily deliveries to Excel with the updated delivery sequence (Stop #1, Stop #2...). Select whether to download all routes combined or a specific route.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Export Scope</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={selectedRouteForDownload === "all" ? "default" : "outline"}
+                  size="sm"
+                  className={cn(
+                    "h-10 text-xs font-medium justify-center gap-1.5",
+                    selectedRouteForDownload === "all" && "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  )}
+                  onClick={() => setSelectedRouteForDownload("all")}
+                >
+                  <Layers className="h-4 w-4" />
+                  All Routes
+                </Button>
+                <Button
+                  type="button"
+                  variant={selectedRouteForDownload !== "all" ? "default" : "outline"}
+                  size="sm"
+                  className={cn(
+                    "h-10 text-xs font-medium justify-center gap-1.5",
+                    selectedRouteForDownload !== "all" && "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  )}
+                  onClick={() => {
+                    if (selectedRouteForDownload === "all") {
+                      const firstValidZone = boardData?.zones?.find((z: any) => z.zoneId !== "unassigned" && z.outlets?.length > 0) || boardData?.zones?.[0];
+                      if (firstValidZone) {
+                        setSelectedRouteForDownload(String(firstValidZone.zoneId));
+                      }
+                    }
+                  }}
+                >
+                  <MapPin className="h-4 w-4" />
+                  Individual Route
+                </Button>
+              </div>
+            </div>
+
+            {selectedRouteForDownload !== "all" && (
+              <div className="space-y-2 animate-in fade-in-50 duration-200">
+                <Label className="text-xs font-semibold">Select Route</Label>
+                <Select
+                  value={selectedRouteForDownload}
+                  onValueChange={(val) => setSelectedRouteForDownload(val)}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Choose a route..." />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-64">
+                    {boardData?.zones
+                      ?.filter((z: any) => z.outlets?.length > 0)
+                      ?.map((z: any) => {
+                        const truck = z.trucks?.[0];
+                        const driverInfo = truck?.driver?.name ? `(${truck.driver.name})` : "";
+                        return (
+                          <SelectItem key={z.zoneId} value={String(z.zoneId)} className="text-xs">
+                            <span className="font-medium">{z.zoneName}</span>
+                            <span className="text-muted-foreground ml-1.5">
+                              · {z.outlets.length} stops {driverInfo}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Selection Summary Card */}
+            {(() => {
+              const isAll = selectedRouteForDownload === "all";
+              const targetZones = isAll
+                ? (boardData?.zones || []).filter((z: any) => z.outlets?.length > 0)
+                : (boardData?.zones || []).filter((z: any) => String(z.zoneId) === String(selectedRouteForDownload));
+
+              const totalRoutes = targetZones.length;
+              const totalStops = targetZones.reduce((acc: number, z: any) => acc + (z.outlets?.length || 0), 0);
+              const totalItems = targetZones.reduce((acc: number, z: any) => {
+                return acc + (z.outlets || []).reduce((iAcc: number, o: any) => iAcc + (o.items?.length || 0), 0);
+              }, 0);
+              const totalQty = targetZones.reduce((acc: number, z: any) => {
+                return acc + (z.outlets || []).reduce((iAcc: number, o: any) => {
+                  return iAcc + (o.items || []).reduce((qAcc: number, it: any) => qAcc + Number(it.requestedQty || it.weight || 0), 0);
+                }, 0);
+              }, 0);
+
+              const selectedZone = !isAll ? targetZones[0] : null;
+              const primaryTruck = selectedZone?.trucks?.[0];
+
+              return (
+                <div className="rounded-lg border bg-slate-50/60 dark:bg-slate-900/40 p-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-semibold text-slate-800 dark:text-slate-200">
+                    <span>{isAll ? "Consolidated Export Summary" : `${selectedZone?.zoneName || "Route"} Summary`}</span>
+                    <Badge variant="outline" className="text-[10px] bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 border-emerald-300">
+                      Sequence (Stop #) Included
+                    </Badge>
+                  </div>
+                  {!isAll && primaryTruck && (
+                    <div className="text-[11px] text-muted-foreground space-y-0.5 pt-0.5">
+                      <div><span className="font-medium text-foreground">Truck:</span> {primaryTruck.vehicle?.plateNumber || primaryTruck.vehicle?.name || "Unassigned"}</div>
+                      <div><span className="font-medium text-foreground">Driver:</span> {primaryTruck.driver?.name || "Unassigned"}</div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2 pt-1 border-t text-center">
+                    <div className="bg-white dark:bg-slate-800 p-1.5 rounded border border-slate-100 dark:border-slate-700">
+                      <div className="text-[10px] text-muted-foreground">{isAll ? "Routes" : "Stops"}</div>
+                      <div className="font-bold text-slate-800 dark:text-slate-100">{isAll ? totalRoutes : totalStops}</div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-1.5 rounded border border-slate-100 dark:border-slate-700">
+                      <div className="text-[10px] text-muted-foreground">{isAll ? "Total Stops" : "Items"}</div>
+                      <div className="font-bold text-slate-800 dark:text-slate-100">{isAll ? totalStops : totalItems}</div>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-1.5 rounded border border-slate-100 dark:border-slate-700">
+                      <div className="text-[10px] text-muted-foreground">Total Qty</div>
+                      <div className="font-bold text-emerald-600 dark:text-emerald-400">{Math.round(totalQty * 100) / 100}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDownloadDeliveriesModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-medium"
+              onClick={() => handleDownloadFinalDeliveries(selectedRouteForDownload)}
+            >
+              <Download className="h-4 w-4" />
+              Download Excel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
