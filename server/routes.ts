@@ -11536,6 +11536,8 @@ export async function registerRoutes(
         status: schema.dispatchDeliveries.status,
         deliveredAt: schema.dispatchDeliveries.deliveredAt,
         deliveryTime: schema.dispatchDeliveries.deliveryTime,
+        deliveryStartTime: schema.dispatchDeliveries.deliveryStartTime,
+        deliveryEndTime: schema.dispatchDeliveries.deliveryEndTime,
         itemCode: schema.dispatchItems.itemCode,
         description: schema.dispatchItems.description,
         requestedQty: schema.dispatchItems.requestedQty,
@@ -11587,10 +11589,18 @@ export async function registerRoutes(
             storageType,
             deliveredAt: row.deliveredAt,
             deliveryTime: row.deliveryTime,
+            deliveryStartTime: row.deliveryStartTime,
+            deliveryEndTime: row.deliveryEndTime,
             remark: row.remark,
             podUrls: row.podUrl ? row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [],
             items: [],
           };
+        }
+        if (row.deliveryStartTime && !grouped[groupKey].deliveryStartTime) {
+          grouped[groupKey].deliveryStartTime = row.deliveryStartTime;
+        }
+        if (row.deliveryEndTime && !grouped[groupKey].deliveryEndTime) {
+          grouped[groupKey].deliveryEndTime = row.deliveryEndTime;
         }
         if (row.deliveredAt && !grouped[groupKey].deliveredAt) {
           grouped[groupKey].deliveredAt = row.deliveredAt;
@@ -11662,10 +11672,12 @@ export async function registerRoutes(
 
       // Draw table headers
       let y = doc.y;
-      doc.font("Helvetica-Bold").fillColor("#374151").fontSize(10).text("Outlet", 40, y);
-      doc.font("Helvetica").text("Storage Type", 200, y);
-      doc.text("Delivered At", 320, y);
-      doc.text("Items Status", 440, y);
+      doc.font("Helvetica-Bold").fillColor("#374151").fontSize(8.5).text("Outlet", 40, y);
+      doc.font("Helvetica").text("Storage", 175, y);
+      doc.text("Check In", 240, y);
+      doc.text("Check Out", 310, y);
+      doc.text("Completion", 380, y);
+      doc.text("Status", 470, y);
       doc.moveDown(0.5);
 
       doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
@@ -11674,30 +11686,37 @@ export async function registerRoutes(
       // Draw table rows
       for (const del of deliveriesList) {
         const outletText = `${del.outletName} (${del.outletCode})`;
-        doc.font("Helvetica").fontSize(9);
-        const outletHeight = doc.heightOfString(outletText, { width: 150 });
+        doc.font("Helvetica").fontSize(8.5);
+        const outletHeight = doc.heightOfString(outletText, { width: 130 });
         const rowHeight = Math.max(outletHeight, 14);
 
         y = doc.y;
         if (y + rowHeight > 730) {
           doc.addPage();
           y = doc.y;
-          doc.fillColor("#374151").fontSize(9).text("Outlet", 40, y);
-          doc.text("Storage Type", 200, y);
-          doc.text("Delivered At", 320, y);
-          doc.text("Items Status", 440, y);
+          doc.fillColor("#374151").fontSize(8.5).text("Outlet", 40, y);
+          doc.text("Storage", 175, y);
+          doc.text("Check In", 240, y);
+          doc.text("Check Out", 310, y);
+          doc.text("Completion", 380, y);
+          doc.text("Status", 470, y);
           y += 14;
           doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
           y += 6;
         }
 
-        doc.fillColor("#1F2937").fontSize(9).text(outletText, 40, y, { width: 150 });
-        doc.text(del.storageType, 200, y, { width: 110 });
-        doc.text(`${del.deliveryTime || "Recorded"}`, 320, y, { width: 110 });
+        const startTimeStr = del.deliveryStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveryStartTime)) : "-";
+        const endTimeStr = del.deliveryEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveryEndTime)) : (del.deliveredAt ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveredAt)) : "-");
+
+        doc.fillColor("#1F2937").fontSize(8).text(outletText, 40, y, { width: 130 });
+        doc.text(del.storageType, 175, y, { width: 60 });
+        doc.text(startTimeStr, 240, y, { width: 65 });
+        doc.text(endTimeStr, 310, y, { width: 65 });
+        doc.text(`${del.deliveryTime || "Recorded"}`, 380, y, { width: 85 });
         
         const allCompleted = del.items.length > 0 && del.items.every((it: any) => it.status === "delivered" && parseFloat(it.deliveredQty || "0") >= parseFloat(it.requestedQty || it.weight || "0") && parseFloat(it.remainingQty || "0") === 0);
         const statusLabel = allCompleted ? "COMPLETED" : "FAILED / PARTIAL";
-        doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 440, y, { width: 100 });
+        doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 470, y, { width: 80 });
 
         y += rowHeight + 6;
         doc.y = y;
@@ -11711,9 +11730,19 @@ export async function registerRoutes(
         doc.fillColor("#4B5563").fontSize(11).text(`Storage Type: ${del.storageType} | Route: ${routeName}`);
         doc.moveDown(1);
 
+        const rawStartTime = del.deliveryStartTime;
+        const rawEndTime = del.deliveryEndTime;
+        const startTimeStr = rawStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawStartTime)) : "N/A";
+        const endTimeStr = rawEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawEndTime)) : (del.deliveredAt ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveredAt)) : "N/A");
+
         doc.fillColor("#1F2937").fontSize(10);
-        doc.text(`Delivery Time: ${del.deliveryTime || "N/A"}`);
-        doc.text(`Remarks: ${del.remark || "None"}`);
+        let detailY = doc.y;
+        doc.text(`Check-In Time: ${startTimeStr}`, 40, detailY);
+        doc.text(`Check-Out Time: ${endTimeStr}`, 300, detailY);
+        detailY += 15;
+        doc.text(`Completion Time: ${del.deliveryTime || "N/A"}`, 40, detailY);
+        doc.text(`Remarks: ${del.remark || "None"}`, 300, detailY);
+        doc.y = detailY + 15;
         doc.moveDown(1.5);
 
         // Group items by TO Number
@@ -12014,17 +12043,21 @@ export async function registerRoutes(
         doc.text(`Delivery Date: ${toFirstRow?.deliveredAt ? formatToDDMMYYYY(toFirstRow.deliveredAt) : (firstRow?.deliveredAt ? formatToDDMMYYYY(firstRow.deliveredAt) : "Today")}`, 300, currentY);
         
         currentY += 15;
-        doc.text(`Delivery Time: ${toFirstRow?.deliveryTime || firstRow?.deliveryTime || "N/A"}`, 40, currentY);
-        if (requiresTemp) {
-          doc.text(`Temperature: ${toFirstRow?.temperature || firstRow?.temperature || "N/A"}`, 300, currentY);
-          
-          currentY += 15;
-          const rawStartTime = toFirstRow?.deliveryStartTime || firstRow?.deliveryStartTime;
-          const rawEndTime = toFirstRow?.deliveryEndTime || firstRow?.deliveryEndTime;
-          const startTimeStr = rawStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawStartTime)) : "N/A";
-          const endTimeStr = rawEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawEndTime)) : "N/A";
-          doc.text(`Delivery Start Time: ${startTimeStr}`, 40, currentY);
-          doc.text(`Delivery End Time: ${endTimeStr}`, 300, currentY);
+        const rawStartTime = toFirstRow?.deliveryStartTime || firstRow?.deliveryStartTime;
+        const rawEndTime = toFirstRow?.deliveryEndTime || firstRow?.deliveryEndTime;
+        const startTimeStr = rawStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawStartTime)) : "N/A";
+        const endTimeStr = rawEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawEndTime)) : (toFirstRow?.deliveredAt ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(toFirstRow.deliveredAt)) : "N/A");
+
+        doc.text(`Check-In Time: ${startTimeStr}`, 40, currentY);
+        doc.text(`Check-Out Time: ${endTimeStr}`, 300, currentY);
+
+        currentY += 15;
+        doc.text(`Completion Time: ${toFirstRow?.deliveryTime || firstRow?.deliveryTime || "N/A"}`, 40, currentY);
+        const tempVal = toFirstRow?.temperature || firstRow?.temperature;
+        if (tempVal) {
+          doc.text(`Temperature: ${tempVal}°C`, 300, currentY);
+        } else {
+          doc.text(`Temperature: N/A`, 300, currentY);
         }
         
         currentY += 15;

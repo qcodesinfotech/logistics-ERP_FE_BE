@@ -114,6 +114,8 @@ interface DispatchItem {
     paymentMethod?: string | null;
     deliveredAt?: string | Date | null;
     deliveryTime?: string | null;
+    deliveryStartTime?: string | Date | null;
+    deliveryEndTime?: string | Date | null;
   } | null;
 }
 interface OutletGroup {
@@ -7818,8 +7820,11 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
       "Cases Handled": Number(d.deliveredQty || d.requestedQty || 0),
       "Reporting Time [1]": d.reportingTime || "10:45 AM",
       "Depart Time [2]": d.departTime || "11:15 AM",
-      "Drop Start Time [3]": d.deliveryStartTime ? safeFormatDate(d.deliveryStartTime, "hh:mm a") : "01:20 PM",
-      "Drop End Time [4]": d.deliveryEndTime ? safeFormatDate(d.deliveryEndTime, "hh:mm a") : (d.deliveredAt ? safeFormatDate(d.deliveredAt, "hh:mm a") : "01:35 PM"),
+      "Check-In Time [3]": d.deliveryStartTime ? safeFormatDate(d.deliveryStartTime, "hh:mm a") : "-",
+      "Check-Out Time [4]": d.deliveryEndTime ? safeFormatDate(d.deliveryEndTime, "hh:mm a") : (d.deliveredAt ? safeFormatDate(d.deliveredAt, "hh:mm a") : "-"),
+      "Drop Start Time [3]": d.deliveryStartTime ? safeFormatDate(d.deliveryStartTime, "hh:mm a") : "-",
+      "Drop End Time [4]": d.deliveryEndTime ? safeFormatDate(d.deliveryEndTime, "hh:mm a") : (d.deliveredAt ? safeFormatDate(d.deliveredAt, "hh:mm a") : "-"),
+      "Completion Time": d.deliveryTime || (d.deliveredAt ? safeFormatDate(d.deliveredAt, "hh:mm a") : "-"),
       "Driver": d.driverName,
       "Status": d.status
     }));
@@ -8019,19 +8024,37 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                                     <Badge variant="outline" className="bg-white text-[10px] h-4 whitespace-nowrap flex-shrink-0">
                                       {new Set(outlet.items.map((i: any) => i.toNo || i.id).filter(Boolean)).size} DNs · {outlet.items.length} Items (Qty: {formattedDelQty} / {formattedReqQty})
                                     </Badge>
-                                    {outlet.pods.size > 0 && (() => {
-                                      const uniqueDates = Array.from(new Set(
-                                        Array.from(outlet.pods.values())
-                                          .filter(Boolean)
-                                          .map((d: any) => safeFormatDate(d, "dd MMM yyyy, HH:mm"))
-                                          .filter(Boolean)
-                                      ));
-                                      return uniqueDates.map((dt, i) => (
-                                        <span key={i} className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
-                                          <Clock className="h-3 w-3 flex-shrink-0" />
-                                          {dt}
-                                        </span>
-                                      ));
+                                    {(() => {
+                                      const startItem = outlet.items.find((i: any) => i.deliveryStartTime);
+                                      const endItem = outlet.items.find((i: any) => i.deliveryEndTime);
+                                      const delItem = outlet.items.find((i: any) => i.deliveredAt || i.deliveryTime);
+                                      
+                                      const checkIn = startItem?.deliveryStartTime ? safeFormatDate(startItem.deliveryStartTime, "hh:mm a") : null;
+                                      const checkOut = endItem?.deliveryEndTime ? safeFormatDate(endItem.deliveryEndTime, "hh:mm a") : (delItem?.deliveredAt ? safeFormatDate(delItem.deliveredAt, "hh:mm a") : null);
+                                      const completion = delItem?.deliveryTime || (delItem?.deliveredAt ? safeFormatDate(delItem.deliveredAt, "hh:mm a") : null);
+
+                                      return (
+                                        <div className="flex items-center gap-1.5 flex-nowrap flex-shrink-0">
+                                          {checkIn && (
+                                            <span className="flex items-center gap-1 text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0" title="Check-In (Arrival) Time">
+                                              <Clock className="h-3 w-3 flex-shrink-0 text-blue-600" />
+                                              In: {checkIn}
+                                            </span>
+                                          )}
+                                          {checkOut && (
+                                            <span className="flex items-center gap-1 text-[10px] font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0" title="Check-Out (Departure) Time">
+                                              <Clock className="h-3 w-3 flex-shrink-0 text-purple-600" />
+                                              Out: {checkOut}
+                                            </span>
+                                          )}
+                                          {completion && (
+                                            <span className="flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0" title="Completion Time">
+                                              <CheckCircle2 className="h-3 w-3 flex-shrink-0 text-emerald-600" />
+                                              Completed: {completion}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
                                     })()}
                                     <div className="flex-1" />
                                     {outlet.pods.size > 0 && (

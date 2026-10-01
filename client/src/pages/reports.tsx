@@ -1852,7 +1852,9 @@ export default function Reports() {
 
   const renderDriverDeliveryReport = () => {
     const csvData = driverDeliveriesReport.map(item => ({
-      Timestamp: item.deliveredAt ? format(new Date(item.deliveredAt), "yyyy-MM-dd hh:mm a") : "-",
+      "Check-In Time": item.deliveryStartTime ? format(new Date(item.deliveryStartTime), "hh:mm a") : "-",
+      "Check-Out Time": item.deliveryEndTime ? format(new Date(item.deliveryEndTime), "hh:mm a") : (item.deliveredAt ? format(new Date(item.deliveredAt), "hh:mm a") : "-"),
+      "Completion Time": item.deliveredAt ? format(new Date(item.deliveredAt), "yyyy-MM-dd hh:mm a") : (item.deliveryTime || "-"),
       Driver: item.driverName,
       Zone: item.zoneName || "-",
       Outlet: `${item.outletName} (${item.outletCode})`,
@@ -1873,7 +1875,9 @@ export default function Reports() {
       const totalDmg = driverDeliveriesReport.reduce((sum, item) => sum + parseFloat(item.damagedQty || "0"), 0);
 
       csvData.push({
-        Timestamp: "TOTALS",
+        "Check-In Time": "",
+        "Check-Out Time": "",
+        "Completion Time": "TOTALS",
         Driver: "",
         Zone: "",
         Outlet: "",
@@ -1967,7 +1971,9 @@ export default function Reports() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Delivery Timestamp</TableHead>
+                  <TableHead>Check-In</TableHead>
+                  <TableHead>Check-Out</TableHead>
+                  <TableHead>Completion</TableHead>
                   <TableHead>Driver Name</TableHead>
                   <TableHead>Zone/Route</TableHead>
                   <TableHead>Outlet</TableHead>
@@ -1990,7 +1996,13 @@ export default function Reports() {
                       key={row.id}
                       className={hasRemaining ? "bg-amber-50/80 hover:bg-amber-100/80 dark:bg-amber-950/20 dark:hover:bg-amber-950/30 transition-colors font-semibold" : ""}
                     >
-                      <TableCell className="font-mono text-xs">
+                      <TableCell className="font-mono text-xs whitespace-nowrap text-blue-700 font-medium">
+                        {row.deliveryStartTime ? format(new Date(row.deliveryStartTime), "hh:mm a") : "-"}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap text-purple-700 font-medium">
+                        {row.deliveryEndTime ? format(new Date(row.deliveryEndTime), "hh:mm a") : (row.deliveredAt ? format(new Date(row.deliveredAt), "hh:mm a") : "-")}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
                         {row.deliveredAt ? format(new Date(row.deliveredAt), "yyyy-MM-dd hh:mm a") : "-"}
                         {row.deliveryTime ? ` (${row.deliveryTime})` : ""}
                       </TableCell>
@@ -2028,7 +2040,7 @@ export default function Reports() {
                 })}
                 {driverDeliveriesReport.length > 0 && (
                   <TableRow className="bg-slate-100 font-bold hover:bg-slate-100 dark:bg-slate-800">
-                    <TableCell colSpan={5} className="text-right">Totals:</TableCell>
+                    <TableCell colSpan={7} className="text-right">Totals:</TableCell>
                     <TableCell className="text-right font-mono">
                       {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.requestedQty || row.weight || "0"), 0).toFixed(3)}
                     </TableCell>
@@ -2046,7 +2058,7 @@ export default function Reports() {
                 )}
                 {driverDeliveriesReport.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                       No delivery logs found.
                     </TableCell>
                   </TableRow>

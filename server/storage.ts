@@ -9055,8 +9055,8 @@ export class DatabaseStorage implements IStorage {
           temperature: d.temperature || "",
           reportingTime: d.reportingTime || "10:45 AM",
           departTime: d.departTime || "11:15 AM",
-          dropStartTime: formatTime12h(d.deliveryStartTime) || "01:20 PM",
-          dropEndTime: formatTime12h(d.deliveryEndTime || d.deliveredAt) || "01:35 PM",
+          dropStartTime: formatTime12h(d.deliveryStartTime) || "-",
+          dropEndTime: formatTime12h(d.deliveryEndTime || d.deliveredAt) || "-",
           items: [],
           sequence: d.sequence || 1,
         });
@@ -9070,10 +9070,10 @@ export class DatabaseStorage implements IStorage {
       if (d.temperature && (!stop.temperature || stop.temperature === "")) {
         stop.temperature = d.temperature;
       }
-      if (d.deliveryStartTime && (!stop.dropStartTime || stop.dropStartTime === "01:20 PM")) {
+      if (d.deliveryStartTime && (!stop.dropStartTime || stop.dropStartTime === "-")) {
         stop.dropStartTime = formatTime12h(d.deliveryStartTime);
       }
-      if (d.deliveryEndTime && (!stop.dropEndTime || stop.dropEndTime === "01:35 PM")) {
+      if (d.deliveryEndTime && (!stop.dropEndTime || stop.dropEndTime === "-")) {
         stop.dropEndTime = formatTime12h(d.deliveryEndTime);
       }
     }
