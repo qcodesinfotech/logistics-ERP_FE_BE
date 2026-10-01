@@ -4111,12 +4111,23 @@ export class DatabaseStorage implements IStorage {
       hour12: true
     }).format(new Date());
 
+    let finalStartTime = deliveryData.deliveryStartTime ? new Date(deliveryData.deliveryStartTime) : undefined;
+    let finalEndTime = deliveryData.deliveryEndTime ? new Date(deliveryData.deliveryEndTime) : undefined;
+
+    // Rule: Auto check-in is 2 min after reaching outlet; Check out is 2 min after uploading POD
+    if (!finalStartTime && (deliveryData.status === "delivered" || deliveryData.status === "partial" || deliveryData.podUrl)) {
+      finalStartTime = new Date(Date.now() - 2 * 60 * 1000);
+    }
+    if (!finalEndTime && (deliveryData.status === "delivered" || deliveryData.status === "partial" || deliveryData.podUrl)) {
+      finalEndTime = new Date(Date.now() + 2 * 60 * 1000);
+    }
+
     const finalDeliveryData = {
       ...deliveryData,
       deliveryTime: arabianDeliveryTime,
       outletId: resolvedOutletId,
-      deliveryStartTime: deliveryData.deliveryStartTime ? new Date(deliveryData.deliveryStartTime) : undefined,
-      deliveryEndTime: deliveryData.deliveryEndTime ? new Date(deliveryData.deliveryEndTime) : undefined,
+      deliveryStartTime: finalStartTime,
+      deliveryEndTime: finalEndTime,
     };
 
     if (finalDeliveryData.status === "pending") {
