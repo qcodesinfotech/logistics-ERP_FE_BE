@@ -989,13 +989,14 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
     { header: "Cash Collected", key: "cashCollected", width: 15 },
     { header: "Cash Receipt No", key: "cashReceiptNo", width: 16 },
     { header: "Payment Method", key: "paymentMethod", width: 15 },
-    { header: "Delivered Time", key: "deliveredTime", width: 15 },
+    { header: "Outlet Reporting Time", key: "outletReportingTime", width: 22 },
+    { header: "Outlet Departure Time", key: "outletDepartureTime", width: 22 },
   ];
 
   // Header row styling
   const headerRow = ws.getRow(1);
   headerRow.height = 28;
-  for (let c = 1; c <= 23; c++) {
+  for (let c = 1; c <= 24; c++) {
     const cell = headerRow.getCell(c);
     cell.fill = {
       type: "pattern",
@@ -1056,10 +1057,11 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
       cash > 0 ? cash : "-",
       d["Cash Receipt No"] || "-",
       d["Payment Method"] || "-",
-      d["Delivered Time"] || "-"
+      d["Outlet Reporting Time"] ?? d["Reporting Time"] ?? d.outletReportingTime ?? "-",
+      d["Outlet Departure Time"] ?? d["Departure Time"] ?? d["Delivered Time"] ?? d.outletDepartureTime ?? d.deliveredTime ?? "-"
     ];
 
-    for (let c = 1; c <= 23; c++) {
+    for (let c = 1; c <= 24; c++) {
       const cell = row.getCell(c);
       cell.font = { name: "Calibri", size: 10, color: { argb: `FF${PALETTE.textDark}` } };
       cell.border = getThinBorder(PALETTE.borderLight);
@@ -1109,7 +1111,7 @@ export async function exportFinalDailyDeliveriesExcel(deliveries: any[], filenam
   sumRow.getCell(17).value = totalRet;
   sumRow.getCell(20).value = totalCash > 0 ? totalCash : 0;
 
-  for (let c = 1; c <= 23; c++) {
+  for (let c = 1; c <= 24; c++) {
     const cell = sumRow.getCell(c);
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
     cell.border = {

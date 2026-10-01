@@ -3299,6 +3299,24 @@ export default function DailyDispatchPage() {
         const truckName = assignedTruck?.vehicle?.plateNumber || assignedTruck?.vehicle?.name || "Unassigned";
         const driverName = assignedTruck?.driver?.name || assignedTruck?.driver?.username || "Unassigned";
 
+        // Outlet-level timestamps fallback if some items don't have individual timestamps
+        const outletReportingTimeRaw = outlet.items?.find((i: any) => i.delivery?.deliveryStartTime)?.delivery?.deliveryStartTime;
+        const outletDepartureTimeRaw = outlet.items?.find((i: any) => i.delivery?.deliveryEndTime)?.delivery?.deliveryEndTime
+          || outlet.items?.find((i: any) => i.delivery?.deliveredAt)?.delivery?.deliveredAt
+          || outlet.items?.find((i: any) => i.delivery?.deliveryTime)?.delivery?.deliveryTime;
+
+        const formatTimeVal = (val: any) => {
+          if (!val) return "-";
+          if (typeof val === "string" && (val.includes("AM") || val.includes("PM"))) return val;
+          try {
+            const d = new Date(val);
+            if (!isNaN(d.getTime())) {
+              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+          } catch (e) {}
+          return String(val);
+        };
+
         for (const item of (outlet.items || [])) {
           const del = item.delivery;
           const reqQty = Number(item.requestedQty || item.weight || 0);
@@ -3306,6 +3324,9 @@ export default function DailyDispatchPage() {
           const remQty = Number(del?.remainingQty ?? (del?.status === "delivered" ? 0 : Math.max(0, reqQty - delQty)));
           const retQty = Number(del?.returnedQty || 0);
           const status = del?.status || "pending";
+
+          const repTime = formatTimeVal(del?.deliveryStartTime || outletReportingTimeRaw);
+          const depTime = formatTimeVal(del?.deliveryEndTime || del?.deliveredAt || del?.deliveryTime || outletDepartureTimeRaw);
 
           rows.push({
             "SN": sn++,
@@ -3330,7 +3351,9 @@ export default function DailyDispatchPage() {
             "Cash Collected": Number(del?.cashCollected || 0),
             "Cash Receipt No": del?.cashReceiptNo || "-",
             "Payment Method": del?.paymentMethod || "-",
-            "Delivered Time": del?.deliveredAt ? new Date(del.deliveredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (del?.deliveryTime || "-")
+            "Outlet Reporting Time": repTime,
+            "Outlet Departure Time": depTime,
+            "Delivered Time": depTime,
           });
         }
       }
