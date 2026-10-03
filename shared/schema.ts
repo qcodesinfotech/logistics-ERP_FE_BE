@@ -720,6 +720,7 @@ export const clients = pgTable("clients", {
 
 export const routes = pgTable("routes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientId: varchar("client_id"),
   name: text("name").notNull(),
   description: text("description"),
   companyId: varchar("company_id"),
@@ -2378,6 +2379,10 @@ export const dispatchDeliveries = pgTable("dispatch_deliveries", {
   paymentMethod: text("payment_method"),
   deliveredAt: timestamp("delivered_at"),
   deliveryTime: text("delivery_time"),
+  deliveryLatitude: text("delivery_latitude"),
+  deliveryLongitude: text("delivery_longitude"),
+  supervisorBypassId: varchar("supervisor_bypass_id"),
+  supervisorBypassReason: text("supervisor_bypass_reason"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 import {
   Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon, Eye,
-  Upload, Download, FileSpreadsheet, Building2, Navigation, Layers
+  Upload, Download, FileSpreadsheet, Building2, Navigation, Layers, Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,7 @@ interface Brand {
 
 interface RouteType {
   id: string;
+  clientId?: string;
   name: string;
   description?: string;
   status: string;
@@ -86,6 +87,7 @@ const brandSchema = z.object({
 
 const routeSchema = z.object({
   name: z.string().min(1, "Route name is required"),
+  clientId: z.string().optional().nullable().or(z.literal("")),
   description: z.string().optional(),
   status: z.enum(["active", "inactive"]).default("active"),
 });
@@ -170,10 +172,12 @@ export default function RoutesPage() {
   const [deleteBrandId, setDeleteBrandId] = useState<string | null>(null);
 
   // Route state
+  const [selectedRouteCustomerFilter, setSelectedRouteCustomerFilter] = useState<string>("all");
   const [routeDialog, setRouteDialog] = useState<{ open: boolean; editing?: RouteType }>({ open: false });
   const [deleteRouteId, setDeleteRouteId] = useState<string | null>(null);
 
   // Outlet state
+  const [searchOutletText, setSearchOutletText] = useState<string>("");
   const [selectedRouteFilter, setSelectedRouteFilter] = useState<string>("all");
   const [selectedBrandFilter, setSelectedBrandFilter] = useState<string>("all");
   const [selectedCustomerFilter, setSelectedCustomerFilter] = useState<string>("all");
@@ -272,18 +276,24 @@ export default function RoutesPage() {
   // ---- Route Form ----
   const routeForm = useForm<RouteFormData>({
     resolver: zodResolver(routeSchema),
-    defaultValues: { name: "", description: "", status: "active" },
+    defaultValues: { name: "", clientId: "", description: "", status: "active" },
   });
 
   const openRouteDialog = (route?: RouteType) => {
     if (route) {
       routeForm.reset({
         name: route.name,
+        clientId: route.clientId || "",
         description: route.description || "",
         status: route.status as "active" | "inactive",
       });
     } else {
-      routeForm.reset({ name: "", description: "", status: "active" });
+      routeForm.reset({
+        name: "",
+        clientId: selectedRouteCustomerFilter !== "all" ? selectedRouteCustomerFilter : "",
+        description: "",
+        status: "active",
+      });
     }
     setRouteDialog({ open: true, editing: route });
   };
@@ -538,8 +548,29 @@ export default function RoutesPage() {
         const matchesParent = outletClient?.parentClientId === selectedCustomerFilter;
         if (!matchesDirect && !matchesParent) match = false;
       }
+      if (searchOutletText.trim()) {
+        const q = searchOutletText.trim().toLowerCase();
+        const matchesName = o.name?.toLowerCase().includes(q);
+        const matchesCode = o.code?.toLowerCase().includes(q);
+        const matchesPhone = o.phone?.toLowerCase().includes(q);
+        const matchesAddress = o.address?.toLowerCase().includes(q);
+        const matchesContact = o.contactPerson?.toLowerCase().includes(q);
+        if (!matchesName && !matchesCode && !matchesPhone && !matchesAddress && !matchesContact) {
+          match = false;
+        }
+      }
       return match;
     });
+
+  const filteredRoutes = routes.filter((r) => {
+    if (selectedRouteCustomerFilter !== "all") {
+      const routeClient = clients.find(c => c.id === r.clientId);
+      const matchesDirect = r.clientId === selectedRouteCustomerFilter;
+      const matchesParent = routeClient?.parentClientId === selectedRouteCustomerFilter;
+      if (!matchesDirect && !matchesParent) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -579,10 +610,36 @@ export default function RoutesPage() {
               <div>
                 <CardTitle>Routes</CardTitle>
                 <CardDescription>
-                  Manage delivery routes
+                  Manage delivery routes ({filteredRoutes.length} route{filteredRoutes.length !== 1 ? "s" : ""})
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 min-w-[220px]">
+                  <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <Select value={selectedRouteCustomerFilter} onValueChange={setSelectedRouteCustomerFilter}>
+                    <SelectTrigger className="w-[240px]">
+                      <SelectValue placeholder="All Customers" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Customers</SelectItem>
+                      {clients.filter(c => !c.parentClientId).map((parent) => {
+                        const children = clients.filter(c => c.parentClientId === parent.id);
+                        return (
+                          <div key={parent.id}>
+                            <SelectItem value={parent.id} className="font-semibold text-primary">
+                              🏢 {parent.name}
+                            </SelectItem>
+                            {children.map(child => (
+                              <SelectItem key={child.id} value={child.id} className="pl-6 text-sm">
+                                ↳ {child.name}
+                              </SelectItem>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button onClick={() => openRouteDialog()} className="gap-2">
                   <Plus className="h-4 w-4" /> Add Route
                 </Button>
@@ -591,10 +648,10 @@ export default function RoutesPage() {
             <CardContent className="p-0">
               {routesLoading ? (
                 <div className="p-10 text-center text-muted-foreground">Loading routes...</div>
-              ) : routes.length === 0 ? (
+              ) : filteredRoutes.length === 0 ? (
                 <div className="p-16 flex flex-col items-center gap-3 text-muted-foreground">
                   <RouteIcon className="h-10 w-10 opacity-30" />
-                  <p className="text-sm">No routes yet. Add your first route to get started.</p>
+                  <p className="text-sm">No routes found matching the selected customer.</p>
                   <Button variant="outline" onClick={() => openRouteDialog()} className="gap-2 mt-1">
                     <Plus className="h-4 w-4" /> Add Route
                   </Button>
@@ -604,45 +661,59 @@ export default function RoutesPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Route Name</TableHead>
+                      <TableHead>Customer</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {routes.map((route) => (
-                      <TableRow key={route.id} className="hover:bg-accent/30 transition-colors">
-                        <TableCell className="font-semibold">{route.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{route.description || "—"}</TableCell>
-                        <TableCell>
-                          <Badge
-                            className={route.status === "active"
-                              ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
-                          >
-                            {route.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost" size="sm"
-                              onClick={() => { setSelectedRouteFilter(route.id); setActiveTab("outlets"); }}
-                              className="gap-1 text-xs"
+                    {filteredRoutes.map((route) => {
+                      const client = clients.find(c => c.id === route.clientId);
+                      return (
+                        <TableRow key={route.id} className="hover:bg-accent/30 transition-colors">
+                          <TableCell className="font-semibold">{route.name}</TableCell>
+                          <TableCell>
+                            {client ? (
+                              <Badge variant="outline" className="font-medium bg-primary/5 text-primary border-primary/20">
+                                <Building2 className="h-3 w-3 mr-1" />
+                                {client.name}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{route.description || "—"}</TableCell>
+                          <TableCell>
+                            <Badge
+                              className={route.status === "active"
+                                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                                : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}
                             >
-                              <MapPin className="h-3.5 w-3.5" /> View Outlets
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => openRouteDialog(route)}>
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
-                              onClick={() => setDeleteRouteId(route.id)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                              {route.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost" size="sm"
+                                onClick={() => { setSelectedRouteFilter(route.id); setActiveTab("outlets"); }}
+                                className="gap-1 text-xs"
+                              >
+                                <MapPin className="h-3.5 w-3.5" /> View Outlets
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => openRouteDialog(route)}>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive"
+                                onClick={() => setDeleteRouteId(route.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -801,6 +872,17 @@ export default function RoutesPage() {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {/* Search Input for Outlets */}
+                    <div className="relative flex-1 min-w-[220px]">
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search outlets (name, code, address)..."
+                        value={searchOutletText}
+                        onChange={(e) => setSearchOutletText(e.target.value)}
+                        className="pl-8"
+                      />
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 w-full lg:w-auto justify-end">
@@ -956,6 +1038,33 @@ export default function RoutesPage() {
                 <FormItem>
                   <FormLabel>Route Name *</FormLabel>
                   <FormControl><Input placeholder="e.g. Muscat Route A" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={routeForm.control} name="clientId" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Customer</FormLabel>
+                  <Select onValueChange={(val) => field.onChange(val === "none" ? "" : val)} value={field.value || "none"}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select Customer" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="none">No Customer (General)</SelectItem>
+                      {clients.filter(c => !c.parentClientId).map((parent) => {
+                        const children = clients.filter(c => c.parentClientId === parent.id);
+                        return (
+                          <div key={parent.id}>
+                            <SelectItem value={parent.id} className="font-semibold text-primary">
+                              🏢 {parent.name}
+                            </SelectItem>
+                            {children.map(child => (
+                              <SelectItem key={child.id} value={child.id} className="pl-6 text-sm">
+                                ↳ {child.name}
+                              </SelectItem>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )} />

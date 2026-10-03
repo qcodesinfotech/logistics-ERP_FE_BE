@@ -600,16 +600,27 @@ function MoveOverrideDialog({
               </SelectContent>
             </Select>
           </div>
-          {zoneId && availableTrucks.length > 0 && (
+          {zoneId && (
             <div className="space-y-2">
-              <Label>Target Truck (optional)</Label>
+              <Label>Target Truck / Trip (optional)</Label>
               <Select value={truckId || "any"} onValueChange={(v) => setTruckId(v === "any" ? "" : v)}>
-                <SelectTrigger><SelectValue placeholder="Any Truck" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Any Truck / Unassigned" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="any">Any Truck</SelectItem>
-                  {availableTrucks.map(t => (
-                    <SelectItem key={t.id} value={t.id}>{t.vehicle?.plateNumber || t.vehicle?.name || "Truck"}</SelectItem>
-                  ))}
+                  <SelectItem value="any">Any Truck / Unassigned</SelectItem>
+                  <SelectItem value="trip_2" className="text-amber-600 font-medium">
+                    + Allocate as Trip 2 (Waiting for Truck)
+                  </SelectItem>
+                  {availableTrucks.map(t => {
+                    const plate = t.vehicle?.plateNumber || t.vehicle?.name || "Truck";
+                    const isDeparted = Boolean(t.departTime && t.departTime.trim() !== "" && t.departTime !== "-");
+                    const isLoaded = Boolean(t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-");
+                    const statusTag = isDeparted ? "Departed" : isLoaded ? "Loaded" : "Pending";
+                    return (
+                      <SelectItem key={t.id} value={t.id}>
+                        {plate} (Trip {t.tripNumber || 1} · {statusTag})
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

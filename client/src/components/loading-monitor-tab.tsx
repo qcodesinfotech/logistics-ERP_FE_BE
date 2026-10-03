@@ -349,9 +349,19 @@ export default function LoadingMonitorTab({
 
           let truck = tAssignId ? truckMap.get(tAssignId) : null;
 
-          // Route-level truck fallback when no explicit outlet assignment
+          // If the truck assigned belongs to another zone that differs from current zone, ignore it
+          if (truck && truck.zoneId && zone.zoneId && zone.zoneId !== "unassigned" && truck.zoneId !== zone.zoneId) {
+            truck = null;
+          }
+
+          // Route-level truck fallback when no explicit outlet assignment:
+          // ONLY match trucks belonging to the current zone!
           if (!truck && candidateTrucks.length > 0) {
-            const storageMatchingTruck = candidateTrucks.find((zt: any) => {
+            // Prioritize active or pending trucks that have NOT departed or finished loading
+            const activeCandidateTrucks = candidateTrucks.filter((zt: any) => !isTruckDeparted(zt) && !isTruckLoaded(zt));
+            const truckPool = activeCandidateTrucks.length > 0 ? activeCandidateTrucks : candidateTrucks;
+
+            const storageMatchingTruck = truckPool.find((zt: any) => {
               const veh = zt.vehicle || vehicleMap.get(zt.truckId);
               const vehSt = ((veh?.storageType || zt.storageType || "") as string).toUpperCase();
               if (!vehSt) return false;
@@ -365,14 +375,13 @@ export default function LoadingMonitorTab({
                 (stType === "CHEMICAL" && (vehSt.includes("CHEM") || vehSt.includes("DRY") || vehSt.includes("AMB")))
               );
             });
-            truck = storageMatchingTruck || candidateTrucks[0] || null;
-          }
 
-          // If still null, check if item has direct route assignment
-          if (!truck && (item.overrideRouteId || item.routeId)) {
-            const itemRouteTrucks = zoneTrucksByZoneId.get(item.overrideRouteId || item.routeId) || [];
-            if (itemRouteTrucks.length > 0) {
-              truck = itemRouteTrucks[0];
+            // If all trucks in candidateTrucks have already departed/loaded and this item is not delivered,
+            // DO NOT attach to a departed truck! Keep truck = null (unassigned awaiting next trip).
+            if (activeCandidateTrucks.length > 0 || item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty) {
+              truck = storageMatchingTruck || truckPool[0] || null;
+            } else {
+              truck = null;
             }
           }
 
@@ -383,9 +392,19 @@ export default function LoadingMonitorTab({
           }
 
           const isItemDelivered = item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty;
-          const departed = isTruckDeparted(truck) || isItemDelivered;
-          const loaded = isTruckLoaded(truck) || isItemDelivered;
-          const loading = !departed && isTruckLoading(truck);
+          let departed = isTruckDeparted(truck) || isItemDelivered;
+          let loaded = isTruckLoaded(truck) || isItemDelivered;
+
+          // Safety guard: If truck is Trip 1 and already departed/loaded, but this item is undelivered
+          // and was moved/overridden to this route (allocated for Trip 2 / waiting for truck),
+          // it must NOT be marked as loaded on the departed Trip 1 truck!
+          if (!isItemDelivered && truck && (truck.tripNumber === 1 || !truck.tripNumber) && (departed || loaded)) {
+            if (outlet.isOverridden || outlet.overrideZoneId) {
+              departed = false;
+              loaded = false;
+            }
+          }
+          const loading = !departed && !loaded && isTruckLoading(truck);
 
           const isDeducted = deductCriteria === "departed" ? departed : loaded;
 
@@ -480,8 +499,8 @@ export default function LoadingMonitorTab({
       const pendingAllocations = sku.allocations.filter((a: any) => deductCriteria === "departed" ? !a.isDeparted : !a.isLoaded);
       const pendingTrucksMap = new Map<string, number>();
       pendingAllocations.forEach((a: any) => {
-        const routeLabel = a.route && a.route !== "Unassigned Route" ? a.route : a.truckPlate;
-        const key = a.truckAssignmentId ? `${routeLabel} (Trip ${a.tripNumber})` : "Unassigned Truck";
+        const routeLabel = a.route && a.route !== "Unassigned Route" ? a.route : (a.truckPlate && a.truckPlate !== "Unassigned Truck" ? a.truckPlate : "Unassigned Route");
+        const key = a.truckAssignmentId ? `${routeLabel} (Trip ${a.tripNumber})` : routeLabel;
         pendingTrucksMap.set(key, (pendingTrucksMap.get(key) || 0) + a.qty);
       });
       const pendingTrucksSummary = Array.from(pendingTrucksMap.entries()).map(([trk, q]) => `${trk}: ${q.toFixed(0)}`).join(", ");

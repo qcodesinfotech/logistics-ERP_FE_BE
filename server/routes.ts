@@ -7516,7 +7516,8 @@ export async function registerRoutes(
   // Routes
   app.get("/api/routes", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
     try {
-      const routes = await storage.getRoutes();
+      const clientId = req.query.clientId as string | undefined;
+      const routes = await storage.getRoutes(clientId);
       const isAdmin = req.user?.role === "admin" || req.user?.role === "super_admin";
       const isSupervisor = !isAdmin && (req.user?.role === "supervisor" || req.user?.role?.toLowerCase().includes("supervisor"));
       if (isSupervisor && req.user?.id) {
@@ -7942,9 +7943,11 @@ export async function registerRoutes(
         const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
         const rawCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
         const norm = normalizeOutletCode(rawCode);
+        const existingInGeneric = norm ? genericOutletCodeMap.get(norm) : null;
         const hasExisting = norm && (
           clientOutletCodeMap.has(`${cKey}:${norm}`) ||
-          (parentClientId ? clientOutletCodeMap.has(`${parentClientId}:${norm}`) : false)
+          (parentClientId ? clientOutletCodeMap.has(`${parentClientId}:${norm}`) : false) ||
+          Boolean(existingInGeneric)
         );
 
         if (norm && !hasExisting) {
@@ -7967,6 +7970,16 @@ export async function registerRoutes(
           } catch {
             // Safe ignore in case of race condition
           }
+        } else if (norm && existingInGeneric) {
+          if (!existingInGeneric.clientId && clientId) {
+            try {
+              await db.update(schema.outlets)
+                .set({ clientId })
+                .where(eq(schema.outlets.id, existingInGeneric.id));
+              existingInGeneric.clientId = clientId;
+            } catch {}
+          }
+          clientOutletCodeMap.set(`${cKey}:${norm}`, existingInGeneric);
         }
       }
 
@@ -8180,6 +8193,61 @@ export async function registerRoutes(
     }
   });
 
+  function calculateDistanceKmHelper(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  // Verify supervisor / super admin bypass credentials for off-location deliveries
+  app.post("/api/dispatch/verify-supervisor-bypass", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { username, password, reason } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: "Username and password are required" });
+      }
+
+      const bcryptLib = await import("bcrypt");
+      const [foundUser] = await db.select().from(schema.users).where(
+        sql`LOWER(TRIM(${schema.users.username})) = LOWER(TRIM(${username}))`
+      );
+
+      if (!foundUser || !foundUser.password) {
+        return res.status(401).json({ success: false, error: "Invalid username or password" });
+      }
+
+      const isValid = await bcryptLib.default.compare(password, foundUser.password);
+      if (!isValid) {
+        return res.status(401).json({ success: false, error: "Invalid username or password" });
+      }
+
+      const role = (foundUser.role || "").toLowerCase();
+      const isAuthorized = role === "super_admin" || role === "admin" || role === "supervisor" || role.includes("supervisor") || role === "manager";
+      if (!isAuthorized) {
+        return res.status(403).json({ success: false, error: "User is not authorized as a supervisor or super admin" });
+      }
+
+      res.json({
+        success: true,
+        supervisorId: foundUser.id,
+        supervisorName: foundUser.name || foundUser.username,
+        role: foundUser.role,
+        reason: reason || "Authorized off-location delivery"
+      });
+    } catch (error: any) {
+      console.error("Supervisor bypass verification error:", error);
+      res.status(500).json({ success: false, error: "Failed to verify supervisor authorization" });
+    }
+  });
+
   // Update delivery status for a dispatch item
   app.patch("/api/dispatch/items/:id/delivery", authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -8193,6 +8261,94 @@ export async function registerRoutes(
         const todayStr = new Date().toLocaleDateString("en-CA");
         if (dispatchSheet.date > todayStr) {
           return res.status(400).json({ error: "Cannot record deliveries for a future date" });
+        }
+      }
+
+      // Geofence Location Lock enforcement:
+      // If delivery is marked as delivered or partial, drivers must be within 350m of outlet location
+      // unless authorized by a supervisor or super admin.
+      if (req.body.status === "delivered" || req.body.status === "partial") {
+        const callerRole = (req.user?.role || "").toLowerCase();
+        const isPrivileged = callerRole === "super_admin" || callerRole === "admin" || callerRole === "supervisor" || callerRole.includes("supervisor") || callerRole === "manager";
+
+        if (!isPrivileged) {
+          // Resolve outlet
+          let outlet: any = null;
+          if (dispatchItem.outletId) {
+            const [found] = await db.select().from(schema.outlets).where(eq(schema.outlets.id, dispatchItem.outletId));
+            outlet = found;
+          }
+          if (!outlet && dispatchItem.outletCode) {
+            const norm = (dispatchItem.outletCode || "").trim().toLowerCase().replace(/^0+/, "");
+            const [found] = await db.select().from(schema.outlets).where(
+              sql`LOWER(REGEXP_REPLACE(${schema.outlets.code}, '^0+', '')) = ${norm}`
+            );
+            outlet = found;
+          }
+
+          const outletLat = parseFloat(outlet?.latitude || "");
+          const outletLon = parseFloat(outlet?.longitude || "");
+          const hasOutletCoords = !isNaN(outletLat) && !isNaN(outletLon) && outletLat !== 0 && outletLon !== 0;
+
+          if (hasOutletCoords) {
+            const driverLat = parseFloat(req.body.driverLatitude || req.body.deliveryLatitude || req.body.latitude || "");
+            const driverLon = parseFloat(req.body.driverLongitude || req.body.deliveryLongitude || req.body.longitude || "");
+            const hasDriverCoords = !isNaN(driverLat) && !isNaN(driverLon);
+
+            const distanceKm = hasDriverCoords ? calculateDistanceKmHelper(driverLat, driverLon, outletLat, outletLon) : null;
+            const isWithinGeofence = distanceKm !== null && distanceKm <= 0.35; // 350 meters
+
+            if (!isWithinGeofence) {
+              // Location check failed! Check if supervisor authorization is provided.
+              const { supervisorUsername, supervisorPassword, supervisorBypassId, supervisorReason } = req.body;
+              let supervisorApproved = false;
+              let supervisorUser: any = null;
+
+              if (supervisorUsername && supervisorPassword) {
+                const bcryptLib = await import("bcrypt");
+                const [sup] = await db.select().from(schema.users).where(
+                  sql`LOWER(TRIM(${schema.users.username})) = LOWER(TRIM(${supervisorUsername}))`
+                );
+                if (sup && sup.password) {
+                  const isValid = await bcryptLib.default.compare(supervisorPassword, sup.password);
+                  if (isValid) {
+                    const r = (sup.role || "").toLowerCase();
+                    if (r === "super_admin" || r === "admin" || r === "supervisor" || r.includes("supervisor") || r === "manager") {
+                      supervisorApproved = true;
+                      supervisorUser = sup;
+                    }
+                  }
+                }
+              } else if (supervisorBypassId) {
+                const [sup] = await db.select().from(schema.users).where(eq(schema.users.id, supervisorBypassId));
+                if (sup) {
+                  const r = (sup.role || "").toLowerCase();
+                  if (r === "super_admin" || r === "admin" || r === "supervisor" || r.includes("supervisor") || r === "manager") {
+                    supervisorApproved = true;
+                    supervisorUser = sup;
+                  }
+                }
+              }
+
+              if (!supervisorApproved) {
+                const distM = distanceKm !== null ? Math.round(distanceKm * 1000) : null;
+                const distDesc = distM !== null ? `${distM}m away` : "location not detected";
+                return res.status(403).json({
+                  error: `Delivery locked: You are outside the outlet location (${distDesc}). Only a supervisor or super admin can give permission to complete this delivery.`,
+                  code: "LOCATION_LOCKED",
+                  outletName: outlet?.name || dispatchItem.outletCode,
+                  distanceMeters: distM,
+                  distanceKm: distanceKm !== null ? Number(distanceKm.toFixed(2)) : null,
+                });
+              }
+
+              // Supervisor authorized off-location delivery
+              req.body.supervisorBypassId = supervisorUser.id;
+              req.body.supervisorBypassReason = supervisorReason || "Authorized off-location delivery";
+              const supTag = `[Supervisor Bypass: Approved by ${supervisorUser.name || supervisorUser.username}${supervisorReason ? ' - Reason: ' + supervisorReason : ''}]`;
+              req.body.remark = req.body.remark ? `${req.body.remark} ${supTag}` : supTag;
+            }
+          }
         }
       }
 
@@ -8294,7 +8450,38 @@ export async function registerRoutes(
         }
       }
 
-      const overrideTargetTruck = (overrideTruckId && overrideTruckId !== "any" && overrideTruckId.trim() !== "") ? overrideTruckId.trim() : null;
+      let overrideTargetTruck = (overrideTruckId && overrideTruckId !== "any" && overrideTruckId.trim() !== "") ? overrideTruckId.trim() : null;
+
+      // Handle explicit Trip 2 allocation request
+      if (overrideTargetTruck === "trip_2" || overrideTargetTruck === "trip_2_new") {
+        const [existingTrip2] = await db.select().from(schema.dispatchTruckAssignments).where(
+          and(
+            eq(schema.dispatchTruckAssignments.sheetId, sheetId),
+            eq(schema.dispatchTruckAssignments.zoneId, overrideZoneId),
+            eq(schema.dispatchTruckAssignments.tripNumber, 2)
+          )
+        );
+        if (existingTrip2) {
+          overrideTargetTruck = existingTrip2.id;
+        } else {
+          const [trip1] = await db.select().from(schema.dispatchTruckAssignments).where(
+            and(
+              eq(schema.dispatchTruckAssignments.sheetId, sheetId),
+              eq(schema.dispatchTruckAssignments.zoneId, overrideZoneId),
+              eq(schema.dispatchTruckAssignments.tripNumber, 1)
+            )
+          );
+          const newTrip2 = await storage.createDispatchTruckAssignment({
+            sheetId,
+            zoneId: overrideZoneId,
+            truckId: trip1?.truckId || undefined,
+            driverId: trip1?.driverId || undefined,
+            tripNumber: 2,
+            loadingStatus: "pending",
+          });
+          overrideTargetTruck = newTrip2.id;
+        }
+      }
 
       const results = [];
       if (Array.isArray(storageTypes) && storageTypes.length > 0) {
