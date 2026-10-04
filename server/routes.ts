@@ -8471,15 +8471,17 @@ export async function registerRoutes(
               eq(schema.dispatchTruckAssignments.tripNumber, 1)
             )
           );
-          const newTrip2 = await storage.createDispatchTruckAssignment({
-            sheetId,
-            zoneId: overrideZoneId,
-            truckId: trip1?.truckId || undefined,
-            driverId: trip1?.driverId || undefined,
-            tripNumber: 2,
-            loadingStatus: "pending",
-          });
-          overrideTargetTruck = newTrip2.id;
+          if (trip1?.truckId) {
+            const newTrip2 = await storage.createDispatchTruckAssignment({
+              sheetId,
+              zoneId: overrideZoneId,
+              truckId: trip1.truckId,
+              driverId: trip1?.driverId || undefined,
+              tripNumber: 2,
+              loadingStatus: "pending",
+            });
+            overrideTargetTruck = newTrip2.id;
+          }
         }
       }
 

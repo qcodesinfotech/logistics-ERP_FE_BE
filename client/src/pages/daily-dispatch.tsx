@@ -617,7 +617,7 @@ function MoveOverrideDialog({
                     const statusTag = isDeparted ? "Departed" : isLoaded ? "Loaded" : "Pending";
                     return (
                       <SelectItem key={t.id} value={t.id}>
-                        {plate} (Trip {t.tripNumber || 1} · {statusTag})
+                        {plate} (Trip {(t as any).tripNumber || 1} · {statusTag})
                       </SelectItem>
                     );
                   })}

@@ -376,12 +376,16 @@ export default function LoadingMonitorTab({
               );
             });
 
-            // If all trucks in candidateTrucks have already departed/loaded and this item is not delivered,
-            // DO NOT attach to a departed truck! Keep truck = null (unassigned awaiting next trip).
-            if (activeCandidateTrucks.length > 0 || item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty) {
-              truck = storageMatchingTruck || truckPool[0] || null;
-            } else {
+            const isItemDelivered = item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty;
+            const isOverriddenItem = Boolean(outlet.isOverridden || outlet.overrideZoneId || item.overrideRouteId);
+
+            // If this item was overridden/moved to this route, and all candidate trucks in this route
+            // have already departed/loaded (e.g. Trip 1 already departed, awaiting Trip 2 truck),
+            // DO NOT attach to the departed truck! Keep truck = null (unassigned awaiting next trip).
+            if (isOverriddenItem && activeCandidateTrucks.length === 0 && !isItemDelivered) {
               truck = null;
+            } else {
+              truck = storageMatchingTruck || truckPool[0] || candidateTrucks[0] || null;
             }
           }
 
@@ -399,7 +403,7 @@ export default function LoadingMonitorTab({
           // and was moved/overridden to this route (allocated for Trip 2 / waiting for truck),
           // it must NOT be marked as loaded on the departed Trip 1 truck!
           if (!isItemDelivered && truck && (truck.tripNumber === 1 || !truck.tripNumber) && (departed || loaded)) {
-            if (outlet.isOverridden || outlet.overrideZoneId) {
+            if (outlet.isOverridden || outlet.overrideZoneId || item.overrideRouteId) {
               departed = false;
               loaded = false;
             }
