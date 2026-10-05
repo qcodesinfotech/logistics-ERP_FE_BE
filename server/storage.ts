@@ -718,6 +718,19 @@ export interface IStorage {
   updateFmcgInvoice(id: string, data: Partial<InsertFmcgInvoice>, items?: InsertFmcgInvoiceItem[]): Promise<FmcgInvoice>;
 
   getAdvancedPendingDeliveries(filters?: any): Promise<any[]>;
+  transferPendingDeliveries(params: {
+    itemIds: string[];
+    targetDate: string;
+    targetRouteId?: string;
+    remark?: string;
+    userId?: string;
+    username?: string;
+  }): Promise<{
+    success: boolean;
+    transferredCount: number;
+    targetDate: string;
+    targetSheetId: string;
+  }>;
 
   // Brand/Outlet Invoices
   getBrandInvoices(brandId?: string, outletId?: string): Promise<BrandInvoice[]>;
@@ -10186,6 +10199,150 @@ export class DatabaseStorage implements IStorage {
 
   async markPendingCarriedForward(id: string): Promise<void> {
     await db.update(dispatchPendingQuantities).set({ isCarriedForward: true } as any).where(eq(dispatchPendingQuantities.id, id));
+  }
+
+  async transferPendingDeliveries(params: {
+    itemIds: string[];
+    targetDate: string;
+    targetRouteId?: string;
+    remark?: string;
+    userId?: string;
+    username?: string;
+  }): Promise<{
+    success: boolean;
+    transferredCount: number;
+    targetDate: string;
+    targetSheetId: string;
+  }> {
+    const { itemIds, targetDate, targetRouteId, remark, username = "Supervisor" } = params;
+
+    if (!itemIds || itemIds.length === 0) {
+      throw new Error("No items selected for transfer");
+    }
+
+    // 1. Fetch source items along with their source sheet
+    const sourceItems = await db.select({
+      item: dispatchItems,
+      sheet: dispatchSheets,
+    })
+    .from(dispatchItems)
+    .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
+    .where(inArray(dispatchItems.id, itemIds));
+
+    if (sourceItems.length === 0) {
+      throw new Error("None of the specified items were found");
+    }
+
+    // 2. Fetch existing deliveries to compute actual remaining quantity
+    const existingDeliveries = await db.select()
+      .from(dispatchDeliveries)
+      .where(inArray(dispatchDeliveries.dispatchItemId, itemIds));
+    const deliveryMap = new Map(existingDeliveries.map(d => [d.dispatchItemId, d]));
+
+    // 3. Group by clientId to find/create target sheet
+    const itemsByClient = new Map<string | null, typeof sourceItems>();
+    for (const si of sourceItems) {
+      const cId = si.sheet.clientId || null;
+      if (!itemsByClient.has(cId)) itemsByClient.set(cId, []);
+      itemsByClient.get(cId)!.push(si);
+    }
+
+    let totalTransferred = 0;
+    let lastSheetId = "";
+
+    for (const [clientId, items] of Array.from(itemsByClient.entries())) {
+      // Find or create dispatchSheet for targetDate and clientId
+      let targetSheet = await this.getDispatchSheetByDateAndClient(targetDate, clientId);
+      if (!targetSheet) {
+        targetSheet = await this.createDispatchSheet({
+          date: targetDate,
+          clientId: clientId,
+          uploadedBy: username,
+          fileName: `Transfers_${targetDate}`,
+        }, "skip");
+      }
+      lastSheetId = targetSheet.id;
+
+      for (const si of items) {
+        const d = deliveryMap.get(si.item.id);
+        let rem = parseFloat(d?.remainingQty || si.item.remaining || si.item.requestedQty || "0");
+        if (rem <= 0) rem = parseFloat(si.item.requestedQty || "0");
+
+        // If this item was previously carried forward to an un-delivered downstream item, delete the un-delivered duplicate
+        if (si.item.carriedToItemId) {
+          const [downstream] = await db.select().from(dispatchItems).where(eq(dispatchItems.id, si.item.carriedToItemId));
+          if (downstream) {
+            const [downstreamDel] = await db.select().from(dispatchDeliveries).where(eq(dispatchDeliveries.dispatchItemId, downstream.id));
+            if (!downstreamDel || downstreamDel.status === "pending") {
+              if (downstreamDel) {
+                await db.delete(dispatchDeliveries).where(eq(dispatchDeliveries.id, downstreamDel.id));
+              }
+              await db.delete(dispatchItems).where(eq(dispatchItems.id, downstream.id));
+            }
+          }
+        }
+
+        // Insert new item on target sheet
+        const effectiveRoute = targetRouteId || si.item.overrideRouteId || si.item.routeId;
+        const [newItem] = await db.insert(dispatchItems).values({
+          sheetId: targetSheet.id,
+          outletCode: si.item.outletCode,
+          outletId: si.item.outletId,
+          routeId: effectiveRoute,
+          overrideRouteId: effectiveRoute,
+          itemCode: si.item.itemCode,
+          description: si.item.description,
+          toNo: si.item.toNo,
+          lineNumber: si.item.lineNumber,
+          requestedDeliveryDate: targetDate as any,
+          storageType: si.item.storageType,
+          uom: si.item.uom,
+          fromOrg: si.item.fromOrg,
+          requestedQty: String(rem),
+          weight: si.item.weight,
+          totalDelivered: "0",
+          remaining: String(rem),
+          remark: remark || `Carried forward from ${si.sheet.date || 'previous sheet'}`,
+          grnNumber: si.item.grnNumber,
+          carriedFromItemId: si.item.id
+        }).returning();
+
+        // Mark original item with carriedToItemId
+        await db.update(dispatchItems)
+          .set({ carriedToItemId: newItem.id })
+          .where(eq(dispatchItems.id, si.item.id));
+
+        // If targetRouteId specified and outlet has ID, create/update zone override on target sheet
+        if (targetRouteId && si.item.outletId) {
+          const [existingOv] = await db.select().from(dispatchOutletZoneOverrides).where(
+            and(
+              eq(dispatchOutletZoneOverrides.sheetId, targetSheet.id),
+              eq(dispatchOutletZoneOverrides.outletId, si.item.outletId)
+            )
+          );
+          if (!existingOv) {
+            await db.insert(dispatchOutletZoneOverrides).values({
+              sheetId: targetSheet.id,
+              outletId: si.item.outletId,
+              overrideZoneId: targetRouteId,
+              reason: `Transferred pending delivery from ${si.sheet.date}`
+            });
+          }
+        }
+
+        totalTransferred++;
+      }
+
+      // Auto assign zone trucks to the target sheet if needed
+      await this.autoAssignZoneTrucksToSheet(targetSheet.id);
+    }
+
+    return {
+      success: true,
+      transferredCount: totalTransferred,
+      targetDate,
+      targetSheetId: lastSheetId
+    };
   }
 
   // Truck transfers

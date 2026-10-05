@@ -11456,6 +11456,32 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/dispatch/transfer-pending", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { itemIds, targetDate, targetRouteId, remark } = req.body;
+      if (!Array.isArray(itemIds) || itemIds.length === 0) {
+        return res.status(400).json({ error: "itemIds must be a non-empty array" });
+      }
+      if (!targetDate) {
+        return res.status(400).json({ error: "targetDate is required" });
+      }
+
+      const result = await storage.transferPendingDeliveries({
+        itemIds,
+        targetDate,
+        targetRouteId,
+        remark,
+        userId: req.user?.id,
+        username: req.user?.username || req.user?.name || "Supervisor"
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("transfer-pending error:", error);
+      res.status(500).json({ error: error.message || "Failed to transfer pending deliveries" });
+    }
+  });
+
   app.get("/api/dispatch/completed-deliveries", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { startDate, endDate, clientId } = req.query as any;

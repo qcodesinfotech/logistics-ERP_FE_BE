@@ -46,7 +46,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
-  Layers, RotateCcw, DollarSign, Receipt, Boxes, CheckSquare,
+  Layers, RotateCcw, DollarSign, Receipt, Boxes, CheckSquare, CalendarDays,
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
 import LoadingMonitorTab from "@/components/loading-monitor-tab";
@@ -7133,7 +7133,62 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role?.toLowerCase().includes("admin");
+  const isSupervisor = isAdmin || user?.role?.toLowerCase().includes("supervisor");
+  const canManage = isSupervisor;
   const { toast } = useToast();
+
+  const [transferModal, setTransferModal] = useState<{
+    isOpen: boolean;
+    items: any[];
+    outletName: string;
+    outletCode: string;
+    defaultRouteId: string;
+  }>({
+    isOpen: false,
+    items: [],
+    outletName: "",
+    outletCode: "",
+    defaultRouteId: "all",
+  });
+
+  const [targetDate, setTargetDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [targetRouteId, setTargetRouteId] = useState("");
+  const [transferRemark, setTransferRemark] = useState("");
+
+  const openTransfer = (items: any[], outletName: string, outletCode: string, defaultRouteId?: string) => {
+    setTransferModal({
+      isOpen: true,
+      items,
+      outletName,
+      outletCode,
+      defaultRouteId: defaultRouteId || "all",
+    });
+    setTargetDate(format(new Date(), "yyyy-MM-dd"));
+    setTargetRouteId(defaultRouteId && defaultRouteId !== "all" ? defaultRouteId : (routes[0]?.id || ""));
+    setTransferRemark("");
+  };
+
+  const transferMutation = useMutation({
+    mutationFn: async ({ itemIds, targetDate, targetRouteId, remark }: { itemIds: string[]; targetDate: string; targetRouteId?: string; remark?: string }) => {
+      const res = await apiRequest("POST", "/api/dispatch/transfer-pending", {
+        itemIds,
+        targetDate,
+        targetRouteId: targetRouteId || undefined,
+        remark: remark || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "1-Click Transfer Completed!",
+        description: `Transferred ${data.transferredCount} pending item(s) to ${format(new Date(data.targetDate), "dd MMM yyyy")} route.`
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/board"] });
+      setTransferModal(prev => ({ ...prev, isOpen: false }));
+    },
+    onError: (err: any) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
 
   const [startDate, setStartDate] = useState(selectedDate || "");
   const [endDate, setEndDate] = useState(selectedDate || "");
@@ -7446,7 +7501,7 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                     <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20 border-r">Req Qty</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 text-right w-20 border-r">Remaining</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 w-24 border-r">Status</th>
-                    {isAdmin && <th className="py-2 px-3 font-semibold text-slate-700 w-24 text-right">Actions</th>}
+                    {canManage && <th className="py-2 px-3 font-semibold text-slate-700 w-44 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -7456,7 +7511,7 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                     return (
                       <React.Fragment key={zone.zoneName}>
                         <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneName)}>
-                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={isAdmin ? 9 : 8}>
+                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={canManage ? 9 : 8}>
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
@@ -7487,7 +7542,7 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 cursor-pointer text-slate-700" onClick={() => toggleOutlet(outletId)}>
-                                <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={isAdmin ? 9 : 8}>
+                                <td className="py-1.5 px-3 border-r flex items-center gap-1.5 font-medium pl-6 bg-slate-50/50" colSpan={canManage ? 9 : 8}>
                                   {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
                                   {outlet.sequence !== undefined && outlet.sequence !== 999999 && (
                                     <Badge variant="secondary" className="text-[10px] h-4 px-1.5 font-mono text-muted-foreground mr-0.5">
@@ -7504,6 +7559,22 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                                   <Badge variant="outline" className="ml-2 bg-white text-[10px] h-4">
                                     {new Set(outlet.items.map((i: any) => i.toNo || i.id).filter(Boolean)).size} DNs · {outlet.items.length} Items (Qty: {formattedQty})
                                   </Badge>
+
+                                  {canManage && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[10px] px-2.5 ml-auto text-primary border-primary/30 bg-primary/5 hover:bg-primary hover:text-white font-semibold shadow-2xs inline-flex items-center gap-1 transition-all"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openTransfer(outlet.items, outlet.outletName, outlet.outletCode, outlet.items[0]?.routeId);
+                                      }}
+                                      title={`Transfer all ${outlet.items.length} pending items to target date and route`}
+                                    >
+                                      <CalendarDays className="h-3 w-3" />
+                                      Transfer Outlet ({outlet.items.length})
+                                    </Button>
+                                  )}
                                 </td>
                               </tr>
 
@@ -7545,23 +7616,38 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                                     <td className="py-1.5 px-3 text-xs border-r">
                                       <StatusBadge status={p.status || "pending"} />
                                     </td>
-                                    {isAdmin && (
-                                      <td className="py-1.5 px-3 text-right">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-6 text-[10px] px-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 font-semibold shadow-sm inline-flex items-center gap-1"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (confirm(`Mark item ${p.itemCode} as completed/delivered?`)) {
-                                              completeMutation.mutate({ dispatchItemId: p.dispatchItemId || p.id, reqQty: String(reqQty) });
-                                            }
-                                          }}
-                                          disabled={completeMutation.isPending}
-                                        >
-                                          <Check className="h-2.5 w-2.5" />
-                                          Complete
-                                        </Button>
+                                    {canManage && (
+                                      <td className="py-1.5 px-3 text-right whitespace-nowrap">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-6 text-[10px] px-2 text-primary border-primary/30 hover:bg-primary/10 hover:text-primary font-semibold shadow-2xs inline-flex items-center gap-1"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openTransfer([p], outlet.outletName, outlet.outletCode, p.routeId || outlet.routeId);
+                                            }}
+                                            title="1-Click transfer to target date and route"
+                                          >
+                                            <CalendarDays className="h-2.5 w-2.5" />
+                                            Transfer
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-6 text-[10px] px-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 font-semibold shadow-2xs inline-flex items-center gap-1"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              if (confirm(`Mark item ${p.itemCode} as completed/delivered?`)) {
+                                                completeMutation.mutate({ dispatchItemId: p.dispatchItemId || p.id, reqQty: String(reqQty) });
+                                              }
+                                            }}
+                                            disabled={completeMutation.isPending}
+                                          >
+                                            <Check className="h-2.5 w-2.5" />
+                                            Complete
+                                          </Button>
+                                        </div>
                                       </td>
                                     )}
                                   </tr>
@@ -7579,6 +7665,139 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
           )}
         </CardContent>
       </Card>
+
+      {/* 1-Click Target Date & Route Transfer Modal */}
+      <Dialog open={transferModal.isOpen} onOpenChange={(open) => setTransferModal(prev => ({ ...prev, isOpen: open }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              1-Click Target Date & Route Transfer
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Move pending deliveries from yesterday straight to today’s (or any future date's) route seamlessly without manual re-uploading.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-xs">
+            <div className="bg-slate-50 dark:bg-slate-900 border rounded-lg p-3 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground font-medium">Outlet:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                  {transferModal.outletName} ({transferModal.outletCode})
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground font-medium">Items to Transfer:</span>
+                <span className="font-bold text-primary">
+                  {transferModal.items.length} item(s)
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground font-medium">Total Pending Qty:</span>
+                <span className="font-bold text-amber-600">
+                  {transferModal.items.reduce((sum, it) => {
+                    const req = parseFloat(it.requestedQty || it.weight || "0");
+                    const del = parseFloat(it.deliveredQty || it.totalDelivered || "0");
+                    let rem = parseFloat(it.remainingQty || it.remaining || "0");
+                    if (rem === 0 && !it.remainingQty && !it.remaining) rem = req - del;
+                    return sum + rem;
+                  }, 0).toFixed(2)} units
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1">
+                <Calendar className="h-3.5 w-3.5 text-primary" />
+                Target Date <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="date"
+                className="h-9 text-xs"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Defaults to Today. Items will be automatically placed on this day's active delivery sheet.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1">
+                <MapPin className="h-3.5 w-3.5 text-primary" />
+                Target Route <span className="text-red-500">*</span>
+              </Label>
+              <Select value={targetRouteId} onValueChange={setTargetRouteId}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Select target route..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {routes.map(r => (
+                    <SelectItem key={r.id} value={r.id} className="text-xs">
+                      {r.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Assigned to this route and dispatched to the designated truck/driver.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Transfer Remark / Note (Optional)</Label>
+              <Input
+                className="h-8 text-xs"
+                placeholder="e.g. Carried forward from previous dispatch"
+                value={transferRemark}
+                onChange={(e) => setTransferRemark(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setTransferModal(prev => ({ ...prev, isOpen: false }))}
+              disabled={transferMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="gap-1.5 font-semibold bg-primary hover:bg-primary/90 text-white"
+              onClick={() => {
+                if (!targetDate) {
+                  toast({ title: "Please pick a target date", variant: "destructive" });
+                  return;
+                }
+                const itemIds = transferModal.items.map((it: any) => it.dispatchItemId || it.id);
+                transferMutation.mutate({
+                  itemIds,
+                  targetDate,
+                  targetRouteId: targetRouteId || undefined,
+                  remark: transferRemark || undefined,
+                });
+              }}
+              disabled={transferMutation.isPending || !targetDate}
+            >
+              {transferMutation.isPending ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  Transferring...
+                </>
+              ) : (
+                <>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                  Transfer to Route
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
