@@ -8422,6 +8422,24 @@ export async function registerRoutes(
     }
   });
 
+  // Record true physical departure from outlet geofence (Check-Out)
+  app.post("/api/dispatch/outlets/record-checkout", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { outletId, outletCode, departureTime, sheetId } = req.body;
+      if (!outletId && !outletCode) {
+        return res.status(400).json({ error: "outletId or outletCode required" });
+      }
+
+      const depDate = departureTime ? new Date(departureTime) : new Date();
+      const updatedCount = await (storage as any).updateOutletDeparture(outletId, sheetId || null, depDate, outletCode);
+      console.log(`[Geofence Check-Out] Outlet ${outletId || outletCode} departure recorded at ${depDate.toISOString()}, updated ${updatedCount} items.`);
+      res.json({ success: true, updatedCount, departureTime: depDate.toISOString() });
+    } catch (e: any) {
+      console.error("Record outlet checkout error:", e);
+      res.status(500).json({ error: e.message || "Failed to record outlet checkout" });
+    }
+  });
+
   // Supervisor override: move outlet to different zone for this sheet
   app.post("/api/dispatch/overrides", authMiddleware, async (req: AuthRequest, res) => {
     try {

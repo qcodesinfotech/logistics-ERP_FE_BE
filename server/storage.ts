@@ -4233,12 +4233,15 @@ export class DatabaseStorage implements IStorage {
     let finalStartTime = deliveryData.deliveryStartTime ? new Date(deliveryData.deliveryStartTime) : undefined;
     let finalEndTime = deliveryData.deliveryEndTime ? new Date(deliveryData.deliveryEndTime) : undefined;
 
-    // Rule: Auto check-in is 2 min after reaching outlet; Check out is 2 min after uploading POD
+    // True physical dwell tracking: If mobile didn't send an earlier geofence check-in timestamp,
+    // estimate a realistic duration (min 15 mins base + 1.5 min per carton) instead of an artificial 2-min window.
     if (!finalStartTime && (deliveryData.status === "delivered" || deliveryData.status === "partial" || deliveryData.podUrl)) {
-      finalStartTime = new Date(Date.now() - 2 * 60 * 1000);
+      const parsedQty = parseFloat(deliveryData.deliveredQty || "1");
+      const estMins = Math.max(15, Math.min(60, 10 + Math.ceil(parsedQty * 1.5)));
+      finalStartTime = new Date(Date.now() - estMins * 60 * 1000);
     }
     if (!finalEndTime && (deliveryData.status === "delivered" || deliveryData.status === "partial" || deliveryData.podUrl)) {
-      finalEndTime = new Date(Date.now() + 2 * 60 * 1000);
+      finalEndTime = new Date();
     }
 
     const finalDeliveryData = {
@@ -4266,6 +4269,51 @@ export class DatabaseStorage implements IStorage {
         .values({ dispatchItemId, ...finalDeliveryData, deliveredAt: new Date() })
         .returning();
       return created;
+    }
+  }
+
+  async updateOutletDeparture(outletId: string, sheetId: string | null, departureTime: Date, outletCode?: string): Promise<number> {
+    try {
+      const outletConds = [];
+      if (outletId) {
+        outletConds.push(eq(dispatchItems.outletId, outletId));
+      }
+      if (outletCode) {
+        outletConds.push(sql`LOWER(TRIM(${dispatchItems.outletCode})) = LOWER(TRIM(${outletCode}))`);
+      }
+
+      if (outletConds.length === 0) return 0;
+
+      const conditions = [];
+      if (sheetId) {
+        conditions.push(eq(dispatchItems.sheetId, sheetId));
+      }
+
+      const items = await db.select({ id: dispatchItems.id })
+        .from(dispatchItems)
+        .where(and(
+          ...(conditions.length > 0 ? conditions : []),
+          or(...outletConds)
+        ));
+
+      if (items.length === 0) return 0;
+
+      const itemIds = items.map(i => i.id);
+      const updated = await db.update(dispatchDeliveries)
+        .set({ deliveryEndTime: departureTime })
+        .where(and(
+          inArray(dispatchDeliveries.dispatchItemId, itemIds),
+          or(
+            eq(dispatchDeliveries.status, "delivered"),
+            eq(dispatchDeliveries.status, "partial")
+          )
+        ))
+        .returning();
+
+      return updated.length;
+    } catch (e) {
+      console.error("[Geofence] updateOutletDeparture error:", e);
+      return 0;
     }
   }
 
