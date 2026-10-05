@@ -50,6 +50,7 @@ import {
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
 import LoadingMonitorTab from "@/components/loading-monitor-tab";
+import { DynamicTableScroll } from "@/components/dynamic-table-scroll";
 import {
   exportCompletedDeliveriesExcel,
   exportPendingDeliveriesExcel,
@@ -7433,7 +7434,7 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
               <p className="text-sm">All deliveries matching the criteria are completed.</p>
             </div>
           ) : (
-            <div className="bg-white border-t overflow-x-auto text-sm rounded-b-xl">
+            <DynamicTableScroll className="bg-white text-sm" containerClassName="border-t rounded-b-xl">
               <table className="w-full text-left border-collapse min-w-[1100px]">
                 <thead className="bg-slate-100/80 border-b">
                   <tr>
@@ -7574,7 +7575,7 @@ function PendingQuantitiesTab({ selectedDate, initialClientId = "all" }: { selec
                   })}
                 </tbody>
               </table>
-            </div>
+            </DynamicTableScroll>
           )}
         </CardContent>
       </Card>
@@ -7976,7 +7977,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
               <p className="text-sm">Try adjusting your filters or date range.</p>
             </div>
           ) : (
-            <div className="bg-white border-t overflow-x-auto text-sm rounded-b-xl">
+            <DynamicTableScroll className="bg-white text-sm" containerClassName="border-t rounded-b-xl">
               <table className="w-full text-left border-collapse min-w-[1000px]">
                 <thead className="bg-slate-100/80 border-b">
                   <tr>
@@ -8191,7 +8192,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                   })}
                 </tbody>
               </table>
-            </div>
+            </DynamicTableScroll>
           )}
         </CardContent>
       </Card>

@@ -287,3 +287,37 @@
   }
 }
 
+/* Custom visible horizontal scrollbar for wide tables */
+.custom-horizontal-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+.custom-horizontal-scrollbar::-webkit-scrollbar {
+  height: 9px;
+}
+.custom-horizontal-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.custom-horizontal-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+}
+.custom-horizontal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.dark .custom-horizontal-scrollbar {
+  scrollbar-color: #475569 #1e293b;
+}
+.dark .custom-horizontal-scrollbar::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.dark .custom-horizontal-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+.dark .custom-horizontal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+
