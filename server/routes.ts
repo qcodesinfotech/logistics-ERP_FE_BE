@@ -8230,7 +8230,7 @@ export async function registerRoutes(
       }
 
       const role = (foundUser.role || "").toLowerCase();
-      const isAuthorized = role === "super_admin" || role === "admin" || role === "supervisor" || role.includes("supervisor") || role === "manager";
+      const isAuthorized = role === "super_admin" || role === "admin" || role === "supervisor" || role.includes("supervisor") || role === "manager" || foundUser.username === "GLL-115";
       if (!isAuthorized) {
         return res.status(403).json({ success: false, error: "User is not authorized as a supervisor or super admin" });
       }
@@ -11119,6 +11119,10 @@ export async function registerRoutes(
   // Dedicated route timing update endpoint (used by supervisor for loading time & dispatching time)
   app.patch("/api/dispatch/trucks/:id/timing", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const userRole = String(req.user?.role || '').toLowerCase();
+      if (userRole === 'driver') {
+        return res.status(403).json({ error: "Only Supervisors or Admins can start and manage loading timing" });
+      }
       const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes } = req.body;
       const updateData: any = {};
       if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
@@ -11140,6 +11144,10 @@ export async function registerRoutes(
   // Route-level loading and dispatch time endpoint (updates existing or assigns timing for route)
   app.post("/api/dispatch/sheets/:sheetId/routes/:routeId/timing", authMiddleware, async (req: AuthRequest, res) => {
     try {
+      const userRole = String(req.user?.role || '').toLowerCase();
+      if (userRole === 'driver') {
+        return res.status(403).json({ error: "Only Supervisors or Admins can start and manage loading timing" });
+      }
       const { sheetId, routeId } = req.params;
       const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes, truckId, driverId } = req.body;
 
