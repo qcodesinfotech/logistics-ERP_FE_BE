@@ -377,17 +377,7 @@ export default function LoadingMonitorTab({
               );
             });
 
-            const isItemDelivered = item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty;
-            const isOverriddenItem = Boolean(outlet.isOverridden || outlet.overrideZoneId || item.overrideRouteId);
-
-            // If this item was overridden/moved to this route, and all candidate trucks in this route
-            // have already departed/loaded (e.g. Trip 1 already departed, awaiting Trip 2 truck),
-            // DO NOT attach to the departed truck! Keep truck = null (unassigned awaiting next trip).
-            if (isOverriddenItem && activeCandidateTrucks.length === 0 && !isItemDelivered) {
-              truck = null;
-            } else {
-              truck = storageMatchingTruck || truckPool[0] || candidateTrucks[0] || null;
-            }
+            truck = storageMatchingTruck || truckPool[0] || candidateTrucks[0] || null;
           }
 
           // Propagate route name to truck if missing or generic
@@ -397,18 +387,8 @@ export default function LoadingMonitorTab({
           }
 
           const isItemDelivered = item.delivery?.status === "delivered" || Number(item.delivery?.deliveredQty || 0) >= qty;
-          let departed = isTruckDeparted(truck) || isItemDelivered;
-          let loaded = isTruckLoaded(truck) || isItemDelivered;
-
-          // Safety guard: If truck is Trip 1 and already departed/loaded, but this item is undelivered
-          // and was moved/overridden to this route (allocated for Trip 2 / waiting for truck),
-          // it must NOT be marked as loaded on the departed Trip 1 truck!
-          if (!isItemDelivered && truck && (truck.tripNumber === 1 || !truck.tripNumber) && (departed || loaded)) {
-            if (outlet.isOverridden || outlet.overrideZoneId || item.overrideRouteId) {
-              departed = false;
-              loaded = false;
-            }
-          }
+          const departed = isTruckDeparted(truck) || isItemDelivered;
+          const loaded = isTruckLoaded(truck) || isItemDelivered;
           const loading = !departed && !loaded && isTruckLoading(truck);
 
           const isDeducted = deductCriteria === "departed" ? departed : loaded;
