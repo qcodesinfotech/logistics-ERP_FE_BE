@@ -132,6 +132,42 @@ const serviceTicketUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
+const podUploadDir = path.join(process.cwd(), "uploads", "pod");
+if (!fs.existsSync(podUploadDir)) {
+  fs.mkdirSync(podUploadDir, { recursive: true });
+}
+
+const podStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, podUploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const podUpload = multer({
+  storage: podStorage,
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif",
+      "image/jpg",
+      "application/pdf",
+    ];
+    if (allowed.includes(file.mimetype) || file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images and PDF documents are allowed for Proof of Delivery."));
+    }
+  },
+});
+
 const projectUploadDir = path.join(process.cwd(), "uploads", "projects");
 if (!fs.existsSync(projectUploadDir)) {
   fs.mkdirSync(projectUploadDir, { recursive: true });
@@ -631,6 +667,24 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Driver upload error:", error);
       res.status(500).json({ error: "Failed to upload file" });
+    }
+  });
+
+  app.post("/api/upload/pod", authMiddleware, (req: AuthRequest, res, next) => {
+    podUpload.single("file")(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ error: err.message || "File upload failed" });
+      }
+      next();
+    });
+  }, (req: AuthRequest, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const fileUrl = `/uploads/pod/${req.file.filename}`;
+      res.json({ url: fileUrl, filename: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype });
+    } catch (error) {
+      console.error("POD upload error:", error);
+      res.status(500).json({ error: "Failed to upload POD" });
     }
   });
 
@@ -8437,6 +8491,199 @@ export async function registerRoutes(
     } catch (e: any) {
       console.error("Record outlet checkout error:", e);
       res.status(500).json({ error: e.message || "Failed to record outlet checkout" });
+    }
+  });
+
+  // Bulk outlet complete delivery (One-click complete all items with optional adjustments, temperature, POD)
+  app.post("/api/dispatch/outlets/complete-delivery", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const {
+        sheetId,
+        outletId,
+        outletCode,
+        status = "delivered",
+        temperature,
+        podUrl,
+        potUrl,
+        remark,
+        cashCollected,
+        cashReceiptNo,
+        paymentMethod,
+        deliveryStartTime,
+        deliveryEndTime,
+        items: customItems,
+      } = req.body;
+
+      if (!sheetId) {
+        return res.status(400).json({ error: "sheetId is required" });
+      }
+      if (!outletId && !outletCode) {
+        return res.status(400).json({ error: "outletId or outletCode is required" });
+      }
+
+      // Find dispatch items for this outlet in this sheet
+      const conditions: any[] = [eq(schema.dispatchItems.sheetId, sheetId)];
+      if (outletId) {
+        conditions.push(eq(schema.dispatchItems.outletId, outletId));
+      } else if (outletCode) {
+        const norm = (outletCode || "").trim().toLowerCase().replace(/^0+/, "");
+        conditions.push(sql`LOWER(REGEXP_REPLACE(${schema.dispatchItems.outletCode}, '^0+', '')) = ${norm}`);
+      }
+
+      const allOutletItems = await db.select().from(schema.dispatchItems).where(and(...conditions));
+
+      if (allOutletItems.length === 0) {
+        return res.status(404).json({ error: "No dispatch items found for this outlet" });
+      }
+
+      const customItemMap = new Map<string, any>();
+      if (Array.isArray(customItems)) {
+        for (const ci of customItems) {
+          if (ci.dispatchItemId) {
+            customItemMap.set(ci.dispatchItemId, ci);
+          }
+        }
+      }
+
+      const callerRole = (req.user?.role || "").toLowerCase();
+      const isPrivileged = callerRole === "super_admin" || callerRole === "admin" || callerRole === "supervisor" || callerRole.includes("supervisor") || callerRole === "manager";
+
+      const nowTimeStr = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Riyadh",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true
+      }).format(new Date());
+
+      let updatedCount = 0;
+
+      for (const item of allOutletItems) {
+        const custom = customItemMap.get(item.id);
+
+        const itemDeliveredQty = custom?.deliveredQty !== undefined
+          ? String(custom.deliveredQty)
+          : String(item.requestedQty || item.weight || "0");
+
+        const itemRemainingQty = custom?.remainingQty !== undefined
+          ? String(custom.remainingQty)
+          : "0";
+
+        const itemDamagedQty = custom?.damagedQty !== undefined ? String(custom.damagedQty) : "0";
+        const itemDamageReason = custom?.damageReason || "";
+        const itemReturnedQty = custom?.returnedQty !== undefined ? String(custom.returnedQty) : "0";
+        const itemReturnReason = custom?.returnReason || "";
+
+        let itemStatus = custom?.status || status || "delivered";
+        const numDelivered = parseFloat(itemDeliveredQty) || 0;
+        const numReturned = parseFloat(itemReturnedQty) || 0;
+        const numRemaining = parseFloat(itemRemainingQty) || 0;
+        const numDamaged = parseFloat(itemDamagedQty) || 0;
+
+        if (numReturned > 0 && numDelivered === 0) {
+          itemStatus = "returned";
+        } else if (numRemaining > 0 || numDamaged > 0 || numReturned > 0) {
+          if (numDelivered > 0) {
+            itemStatus = "partial";
+          }
+        }
+
+        const itemRemark = custom?.remark || remark || (isPrivileged ? "Completed by Supervisor" : "Delivered");
+
+        const updateData: any = {
+          status: itemStatus,
+          deliveredQty: itemDeliveredQty,
+          remainingQty: itemRemainingQty,
+          damagedQty: itemDamagedQty,
+          damageReason: itemDamageReason,
+          returnedQty: itemReturnedQty,
+          returnReason: itemReturnReason,
+          remark: itemRemark,
+          driverId: req.user?.id,
+          deliveryTime: nowTimeStr,
+          deliveryStartTime: deliveryStartTime || undefined,
+          deliveryEndTime: deliveryEndTime || undefined,
+        };
+
+        if (temperature !== undefined && temperature !== null && temperature !== "") {
+          updateData.temperature = String(temperature);
+        }
+        if (podUrl !== undefined && podUrl !== null && podUrl !== "") {
+          updateData.podUrl = String(podUrl);
+        }
+        if (potUrl !== undefined && potUrl !== null && potUrl !== "") {
+          updateData.potUrl = String(potUrl);
+        }
+        if (cashCollected !== undefined && cashCollected !== "") {
+          updateData.cashCollected = String(cashCollected);
+        }
+        if (cashReceiptNo !== undefined && cashReceiptNo !== "") {
+          updateData.cashReceiptNo = String(cashReceiptNo);
+        }
+        if (paymentMethod !== undefined && paymentMethod !== "") {
+          updateData.paymentMethod = String(paymentMethod);
+        }
+
+        const result = await storage.updateDispatchDelivery(item.id, updateData);
+        updatedCount++;
+
+        // Auto FMCG invoice generation / sync
+        if (itemStatus === "delivered" || itemStatus === "partial") {
+          try {
+            if (item.outletId) {
+              const [dispatchSheet] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, item.sheetId));
+              const invoiceKey = item.toNo || `OUTLET-${item.outletId}-${dispatchSheet?.date || 'unknown'}`;
+
+              let [invoice] = await db.select().from(schema.fmcgInvoices).where(
+                eq(schema.fmcgInvoices.toNo, invoiceKey)
+              );
+
+              if (!invoice) {
+                invoice = await storage.createFmcgInvoice({
+                  invoiceNumber: `FMCG-${Date.now()}`,
+                  toNo: invoiceKey,
+                  outletId: item.outletId,
+                  status: "pending"
+                } as any, []);
+              }
+
+              const [existingItem] = await db.select().from(schema.fmcgInvoiceItems).where(
+                and(
+                  eq(schema.fmcgInvoiceItems.invoiceId, invoice.id),
+                  eq(schema.fmcgInvoiceItems.dispatchItemId, item.id)
+                )
+              );
+
+              if (!existingItem) {
+                await db.insert(schema.fmcgInvoiceItems).values({
+                  invoiceId: invoice.id,
+                  dispatchItemId: item.id,
+                  dispatchDeliveryId: result.id,
+                  stockNo: item.itemCode || "N/A",
+                  itemName: item.description || "N/A",
+                  packSize: item.storageType || item.uom || "N/A",
+                  requestedQty: item.requestedQty ? String(item.requestedQty) : "0",
+                  deliveredQty: itemDeliveredQty
+                });
+              } else {
+                await db.update(schema.fmcgInvoiceItems).set({
+                  deliveredQty: itemDeliveredQty
+                }).where(eq(schema.fmcgInvoiceItems.id, existingItem.id));
+              }
+            }
+          } catch (invoiceErr) {
+            console.error("Auto invoice generation error in bulk complete:", invoiceErr);
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        updatedCount,
+        message: `Successfully completed delivery for ${updatedCount} items`,
+      });
+    } catch (e: any) {
+      console.error("Bulk complete delivery error:", e);
+      res.status(500).json({ error: e.message || "Failed to complete delivery for outlet" });
     }
   });
 

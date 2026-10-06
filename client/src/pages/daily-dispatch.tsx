@@ -47,6 +47,7 @@ import {
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
   Layers, RotateCcw, DollarSign, Receipt, Boxes, CheckSquare, CalendarDays,
+  Thermometer, Image as ImageIcon, Camera, UploadCloud, Sparkles, Zap,
 } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
 import LoadingMonitorTab from "@/components/loading-monitor-tab";
@@ -117,6 +118,9 @@ interface DispatchItem {
     deliveryTime?: string | null;
     deliveryStartTime?: string | Date | null;
     deliveryEndTime?: string | Date | null;
+    temperature?: string | null;
+    podUrl?: string | null;
+    potUrl?: string | null;
   } | null;
 }
 interface OutletGroup {
@@ -280,6 +284,10 @@ function StatusBadge({ status }: { status: string }) {
 function DeliveryDialog({
   item, sheetId, onClose, onSave,
 }: { item: DispatchItem; sheetId: string; onClose: () => void; onSave: (data: any) => void }) {
+  const { toast } = useToast();
+  const podFileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingPod, setIsUploadingPod] = useState(false);
+
   const [status, setStatus] = useState(item.delivery?.status || "pending");
   const [deliveredQty, setDeliveredQty] = useState(item.delivery?.deliveredQty || item.totalDelivered || item.requestedQty || item.weight || "");
   const [remainingQty, setRemainingQty] = useState(item.delivery?.remainingQty || item.remaining || "0");
@@ -287,10 +295,39 @@ function DeliveryDialog({
   const [damageReason, setDamageReason] = useState(item.delivery?.damageReason || "");
   const [returnedQty, setReturnedQty] = useState(item.delivery?.returnedQty || "0");
   const [returnReason, setReturnReason] = useState(item.delivery?.returnReason || "");
+  const [temperature, setTemperature] = useState(item.delivery?.temperature || "");
+  const [podUrl, setPodUrl] = useState(item.delivery?.podUrl || "");
   const [cashCollected, setCashCollected] = useState(item.delivery?.cashCollected || "0");
   const [cashReceiptNo, setCashReceiptNo] = useState(item.delivery?.cashReceiptNo || "");
   const [paymentMethod, setPaymentMethod] = useState(item.delivery?.paymentMethod || "credit");
   const [remark, setRemark] = useState(item.delivery?.remark || "");
+
+  const handlePodUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingPod(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload/pod", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Failed to upload POD file");
+      }
+      const data = await res.json();
+      setPodUrl(data.url);
+      toast({ title: "POD uploaded successfully!" });
+    } catch (err: any) {
+      toast({ title: "POD upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsUploadingPod(false);
+      if (podFileInputRef.current) podFileInputRef.current.value = "";
+    }
+  };
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -400,6 +437,121 @@ function DeliveryDialog({
             </div>
           </div>
 
+          {/* Temperature Section */}
+          <div className="space-y-2 p-3 bg-blue-50/50 dark:bg-blue-950/20 rounded-lg border border-blue-200/60 dark:border-blue-800/40">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-blue-800 dark:text-blue-300">
+                <Thermometer className="h-3.5 w-3.5" />
+                Delivery / Storage Temperature
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setTemperature("-18°C")}
+                  className="px-1.5 py-0.5 text-[10px] rounded bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 text-blue-700 font-medium transition-colors"
+                >
+                  ❄️ -18°C Frozen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemperature("4°C")}
+                  className="px-1.5 py-0.5 text-[10px] rounded bg-cyan-100 hover:bg-cyan-200 dark:bg-cyan-900/40 text-cyan-700 font-medium transition-colors"
+                >
+                  🧊 4°C Chilled
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemperature("22°C")}
+                  className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 text-amber-700 font-medium transition-colors"
+                >
+                  🌡️ 22°C Ambient
+                </button>
+              </div>
+            </div>
+            <Input
+              value={temperature}
+              onChange={e => setTemperature(e.target.value)}
+              placeholder="e.g. -18°C, 4°C, 22°C"
+              className="h-8 text-xs border-blue-200 focus-visible:ring-blue-400"
+            />
+          </div>
+
+          {/* POD Gallery / File Upload */}
+          <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900/30 rounded-lg border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                <ImageIcon className="h-3.5 w-3.5 text-primary" />
+                Proof of Delivery (POD) from Gallery / Camera
+              </div>
+              {podUrl && (
+                <button
+                  type="button"
+                  onClick={() => setPodUrl("")}
+                  className="text-[10px] text-red-500 hover:underline flex items-center gap-0.5"
+                >
+                  <X className="h-2.5 w-2.5" /> Remove POD
+                </button>
+              )}
+            </div>
+
+            <input
+              ref={podFileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={handlePodUpload}
+            />
+
+            {podUrl ? (
+              <div className="flex items-center gap-3 p-2 bg-background rounded-md border text-xs">
+                {podUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
+                  <img src={podUrl} alt="POD Preview" className="h-16 w-16 object-cover rounded border" />
+                ) : (
+                  <FileText className="h-10 w-10 text-primary shrink-0" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-emerald-600 truncate">POD Attached</p>
+                  <a
+                    href={podUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-blue-600 hover:underline truncate block"
+                  >
+                    View Document ↗
+                  </a>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => podFileInputRef.current?.click()}
+                  disabled={isUploadingPod}
+                >
+                  Replace
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs flex-1 gap-1.5 border-dashed"
+                  onClick={() => podFileInputRef.current?.click()}
+                  disabled={isUploadingPod}
+                >
+                  {isUploadingPod ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-3.5 w-3.5 text-primary" />
+                  )}
+                  {isUploadingPod ? "Uploading..." : "Choose Image / Photo from Gallery"}
+                </Button>
+              </div>
+            )}
+          </div>
+
           {/* Cash on Delivery & Payment Card */}
           <div className="space-y-2 p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-lg border border-emerald-200/60 dark:border-emerald-800/40">
             <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
@@ -452,6 +604,7 @@ function DeliveryDialog({
           <Button variant="outline" onClick={onClose} size="sm">Cancel</Button>
           <Button
             size="sm"
+            disabled={isUploadingPod}
             onClick={() => onSave({
               status,
               deliveredQty,
@@ -460,6 +613,8 @@ function DeliveryDialog({
               damageReason,
               returnedQty,
               returnReason,
+              temperature,
+              podUrl,
               cashCollected,
               cashReceiptNo,
               paymentMethod,
@@ -467,6 +622,565 @@ function DeliveryDialog({
             })}
           >
             Save Delivery
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ===== Outlet Delivery Dialog (Bulk 1-Click with Deductions, Temp & POD) =====
+function OutletDeliveryDialog({
+  outlet, sheetId, onClose, onSave, isSubmitting,
+}: {
+  outlet: OutletGroup;
+  sheetId: string;
+  onClose: () => void;
+  onSave: (payload: any) => void;
+  isSubmitting?: boolean;
+}) {
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingPod, setIsUploadingPod] = useState(false);
+
+  // Common fields initialized from existing delivery if any
+  const firstWithDelivery = outlet.items.find(i => i.delivery?.temperature || i.delivery?.podUrl);
+  const [temperature, setTemperature] = useState(firstWithDelivery?.delivery?.temperature || "");
+  const [podUrl, setPodUrl] = useState(firstWithDelivery?.delivery?.podUrl || "");
+  const [cashCollected, setCashCollected] = useState(firstWithDelivery?.delivery?.cashCollected || "0");
+  const [cashReceiptNo, setCashReceiptNo] = useState(firstWithDelivery?.delivery?.cashReceiptNo || "");
+  const [paymentMethod, setPaymentMethod] = useState(firstWithDelivery?.delivery?.paymentMethod || "credit");
+  const [generalRemark, setGeneralRemark] = useState("Completed by Supervisor");
+
+  // Per-item row state
+  const [itemRows, setItemRows] = useState(() =>
+    outlet.items.map(item => {
+      const reqQty = parseFloat(item.requestedQty || item.weight || "0");
+      const existingDelivered = item.delivery?.deliveredQty !== null && item.delivery?.deliveredQty !== undefined
+        ? parseFloat(item.delivery.deliveredQty)
+        : reqQty;
+      const existingRemaining = item.delivery?.remainingQty !== null && item.delivery?.remainingQty !== undefined
+        ? parseFloat(item.delivery.remainingQty)
+        : 0;
+
+      return {
+        id: item.id,
+        itemCode: item.itemCode,
+        description: item.description || "",
+        uom: item.uom || "",
+        storageType: item.storageType || "",
+        requestedQty: reqQty,
+        deliveredQty: String(existingDelivered),
+        remainingQty: String(existingRemaining),
+        damagedQty: item.delivery?.damagedQty || "0",
+        damageReason: item.delivery?.damageReason || "",
+        returnedQty: item.delivery?.returnedQty || "0",
+        returnReason: item.delivery?.returnReason || "",
+        remark: item.delivery?.remark || "",
+      };
+    })
+  );
+
+  // 1-Click Complete All Items (100% delivered, 0 remaining/damaged/returned)
+  const handleOneClickAllDelivered = () => {
+    setItemRows(prev =>
+      prev.map(r => ({
+        ...r,
+        deliveredQty: String(r.requestedQty),
+        remainingQty: "0",
+        damagedQty: "0",
+        damageReason: "",
+        returnedQty: "0",
+        returnReason: "",
+      }))
+    );
+    toast({ title: "All items set to 100% Delivered!" });
+  };
+
+  const handleUpdateItemRow = (id: string, field: string, value: string) => {
+    setItemRows(prev =>
+      prev.map(r => {
+        if (r.id !== id) return r;
+        const updated = { ...r, [field]: value };
+        if (field === "deliveredQty") {
+          const delNum = parseFloat(value) || 0;
+          const reqNum = r.requestedQty;
+          const dmgNum = parseFloat(updated.damagedQty) || 0;
+          const retNum = parseFloat(updated.returnedQty) || 0;
+          const autoRem = Math.max(0, reqNum - delNum - dmgNum - retNum);
+          updated.remainingQty = String(autoRem % 1 === 0 ? autoRem : autoRem.toFixed(2));
+        } else if (field === "damagedQty") {
+          const dmgNum = parseFloat(value) || 0;
+          const reqNum = r.requestedQty;
+          const delNum = parseFloat(updated.deliveredQty) || 0;
+          const retNum = parseFloat(updated.returnedQty) || 0;
+          const autoRem = Math.max(0, reqNum - delNum - dmgNum - retNum);
+          updated.remainingQty = String(autoRem % 1 === 0 ? autoRem : autoRem.toFixed(2));
+        } else if (field === "returnedQty") {
+          const retNum = parseFloat(value) || 0;
+          const reqNum = r.requestedQty;
+          const delNum = parseFloat(updated.deliveredQty) || 0;
+          const dmgNum = parseFloat(updated.damagedQty) || 0;
+          const autoRem = Math.max(0, reqNum - delNum - dmgNum - retNum);
+          updated.remainingQty = String(autoRem % 1 === 0 ? autoRem : autoRem.toFixed(2));
+        }
+        return updated;
+      })
+    );
+  };
+
+  const handlePodUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingPod(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload/pod", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Failed to upload POD file");
+      }
+      const data = await res.json();
+      setPodUrl(data.url);
+      toast({ title: "POD uploaded successfully!" });
+    } catch (err: any) {
+      toast({ title: "POD upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsUploadingPod(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // Metrics
+  const totalReq = itemRows.reduce((sum, r) => sum + r.requestedQty, 0);
+  const totalDel = itemRows.reduce((sum, r) => sum + (parseFloat(r.deliveredQty) || 0), 0);
+  const totalDmg = itemRows.reduce((sum, r) => sum + (parseFloat(r.damagedQty) || 0), 0);
+  const totalRet = itemRows.reduce((sum, r) => sum + (parseFloat(r.returnedQty) || 0), 0);
+  const totalRem = itemRows.reduce((sum, r) => sum + (parseFloat(r.remainingQty) || 0), 0);
+  const hasDeductions = totalDmg > 0 || totalRet > 0 || totalRem > 0;
+
+  const handleSubmit = () => {
+    onSave({
+      sheetId,
+      outletId: outlet.outletId,
+      outletCode: outlet.outletCode,
+      status: hasDeductions && totalDel > 0 ? "partial" : hasDeductions && totalDel === 0 ? "returned" : "delivered",
+      temperature: temperature.trim() || undefined,
+      podUrl: podUrl || undefined,
+      remark: generalRemark.trim() || "Completed by Supervisor",
+      cashCollected: cashCollected || "0",
+      cashReceiptNo: cashReceiptNo || "",
+      paymentMethod,
+      items: itemRows.map(r => ({
+        dispatchItemId: r.id,
+        deliveredQty: r.deliveredQty,
+        remainingQty: r.remainingQty,
+        damagedQty: r.damagedQty,
+        damageReason: r.damageReason,
+        returnedQty: r.returnedQty,
+        returnReason: r.returnReason,
+        remark: r.remark,
+      })),
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2 pr-6">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Store className="h-5 w-5 text-emerald-600" />
+              Complete Outlet Delivery — {outlet.outletName}
+            </DialogTitle>
+            <Badge variant="outline" className="text-xs bg-slate-50 font-normal">
+              {outlet.outletCode}
+            </Badge>
+          </div>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Complete all lines in one click, or deduct quantities for shortages, damages, and returns.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          {/* 1-Click Fast Action Banner & Summary */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-emerald-50/80 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800">
+            <div className="space-y-0.5 text-center sm:text-left">
+              <div className="flex items-center gap-2 justify-center sm:justify-start">
+                <span className="font-bold text-xs text-emerald-900 dark:text-emerald-200">
+                  {itemRows.length} Line Items
+                </span>
+                <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                  Total Qty: <strong className="font-bold">{totalReq.toFixed(1)}</strong>
+                </span>
+                <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                  Delivered: <strong className="font-bold">{totalDel.toFixed(1)}</strong>
+                </span>
+                {hasDeductions && (
+                  <Badge variant="outline" className="text-[10px] bg-amber-100 text-amber-800 border-amber-300 h-5">
+                    Deductions: {(totalDmg + totalRet + totalRem).toFixed(1)}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80">
+                Click below to auto-fill 100% delivered for all items, or edit lines individually below.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleOneClickAllDelivered}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-sm text-xs font-semibold shrink-0"
+            >
+              <Zap className="h-3.5 w-3.5 fill-current" />
+              1-Click All Delivered (100%)
+            </Button>
+          </div>
+
+          {/* Temperature & POD Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Temperature */}
+            <div className="space-y-2 p-3 bg-blue-50/50 dark:bg-blue-950/20 rounded-xl border border-blue-200/60 dark:border-blue-800/40">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900 dark:text-blue-300">
+                  <Thermometer className="h-3.5 w-3.5 text-blue-600" />
+                  Delivery Temperature
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setTemperature("-18°C")}
+                    className="px-1.5 py-0.5 text-[10px] rounded bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/40 text-blue-700 font-medium transition-colors"
+                  >
+                    ❄️ -18°C Frozen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemperature("4°C")}
+                    className="px-1.5 py-0.5 text-[10px] rounded bg-cyan-100 hover:bg-cyan-200 dark:bg-cyan-900/40 text-cyan-700 font-medium transition-colors"
+                  >
+                    🧊 4°C Chilled
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemperature("22°C")}
+                    className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 hover:bg-amber-200 dark:bg-amber-900/40 text-amber-700 font-medium transition-colors"
+                  >
+                    🌡️ 22°C Ambient
+                  </button>
+                </div>
+              </div>
+              <Input
+                value={temperature}
+                onChange={e => setTemperature(e.target.value)}
+                placeholder="e.g. -18°C, 4°C, 22°C"
+                className="h-8 text-xs border-blue-200 focus-visible:ring-blue-400"
+              />
+            </div>
+
+            {/* POD Gallery / File Upload */}
+            <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-900/30 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <ImageIcon className="h-3.5 w-3.5 text-primary" />
+                  Proof of Delivery (POD) from Gallery
+                </div>
+                {podUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setPodUrl("")}
+                    className="text-[10px] text-red-500 hover:underline flex items-center gap-0.5"
+                  >
+                    <X className="h-2.5 w-2.5" /> Remove
+                  </button>
+                )}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handlePodUpload}
+              />
+
+              {podUrl ? (
+                <div className="flex items-center gap-2.5 p-1.5 bg-background rounded-md border text-xs">
+                  {podUrl.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
+                    <img src={podUrl} alt="POD Preview" className="h-12 w-12 object-cover rounded border" />
+                  ) : (
+                    <FileText className="h-8 w-8 text-primary shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-emerald-600 truncate text-xs">POD Uploaded</p>
+                    <a
+                      href={podUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-blue-600 hover:underline truncate block"
+                    >
+                      View Attachment ↗
+                    </a>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingPod}
+                  >
+                    Change
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-8 text-xs gap-1.5 border-dashed"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingPod}
+                >
+                  {isUploadingPod ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-3.5 w-3.5 text-primary" />
+                  )}
+                  {isUploadingPod ? "Uploading POD..." : "Upload POD (Gallery / Camera / PDF)"}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Items List with Quantity Deduction / Adjustments */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Item Line Quantities & Deductions ({itemRows.length})
+              </Label>
+              <span className="text-[11px] text-muted-foreground">
+                Delivered / Damaged / Returned adjustments
+              </span>
+            </div>
+
+            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+              {itemRows.map(row => {
+                const reqNum = row.requestedQty;
+                const delNum = parseFloat(row.deliveredQty) || 0;
+                const dmgNum = parseFloat(row.damagedQty) || 0;
+                const retNum = parseFloat(row.returnedQty) || 0;
+                const remNum = parseFloat(row.remainingQty) || 0;
+                const hasItemDeductions = dmgNum > 0 || retNum > 0 || remNum > 0 || delNum < reqNum;
+
+                return (
+                  <div
+                    key={row.id}
+                    className={`p-3 rounded-lg border text-xs space-y-2 transition-colors ${
+                      hasItemDeductions
+                        ? "bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40"
+                        : "bg-card border-border"
+                    }`}
+                  >
+                    {/* Item Title & Storage */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 mr-2">
+                          {row.itemCode}
+                        </span>
+                        <span className="text-muted-foreground truncate">
+                          {row.description}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {row.storageType && (
+                          <Badge variant="outline" className="text-[9px] h-4 px-1">
+                            {row.storageType}
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5 font-bold">
+                          Req: {row.requestedQty} {row.uom}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Quantities Row */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                      {/* Delivered Qty */}
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          Delivered Qty
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={row.deliveredQty}
+                          onChange={e => handleUpdateItemRow(row.id, "deliveredQty", e.target.value)}
+                          className="h-7 text-xs border-emerald-300 focus-visible:ring-emerald-400"
+                        />
+                      </div>
+
+                      {/* Remaining / Shortage */}
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-semibold text-slate-600 dark:text-slate-400">
+                          Remaining / Short
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={row.remainingQty}
+                          onChange={e => handleUpdateItemRow(row.id, "remainingQty", e.target.value)}
+                          className="h-7 text-xs"
+                        />
+                      </div>
+
+                      {/* Damaged Qty */}
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-semibold text-red-600 dark:text-red-400">
+                          Damaged Qty
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={row.damagedQty}
+                          onChange={e => handleUpdateItemRow(row.id, "damagedQty", e.target.value)}
+                          className="h-7 text-xs border-red-200 focus-visible:ring-red-400"
+                        />
+                      </div>
+
+                      {/* Returned Qty */}
+                      <div className="space-y-1">
+                        <Label className="text-[10px] font-semibold text-purple-600 dark:text-purple-400">
+                          Returned Qty
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={row.returnedQty}
+                          onChange={e => handleUpdateItemRow(row.id, "returnedQty", e.target.value)}
+                          className="h-7 text-xs border-purple-200 focus-visible:ring-purple-400"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Damage & Return Reasons if amounts entered */}
+                    {(dmgNum > 0 || retNum > 0) && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                        {dmgNum > 0 && (
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-red-700 dark:text-red-400">Damage Reason</Label>
+                            <Input
+                              value={row.damageReason}
+                              onChange={e => handleUpdateItemRow(row.id, "damageReason", e.target.value)}
+                              placeholder="e.g. Broken packaging, leaking..."
+                              className="h-7 text-xs border-red-200"
+                            />
+                          </div>
+                        )}
+                        {retNum > 0 && (
+                          <div className="space-y-1">
+                            <Label className="text-[10px] text-purple-700 dark:text-purple-400">Return Reason</Label>
+                            <select
+                              value={row.returnReason}
+                              onChange={e => handleUpdateItemRow(row.id, "returnReason", e.target.value)}
+                              className="w-full h-7 border border-purple-200 rounded-md px-2 bg-transparent text-xs text-purple-900 dark:text-purple-200"
+                            >
+                              <option value="">-- Select Return Reason --</option>
+                              <option value="Outlet Closed / Refused">Outlet Closed / Refused</option>
+                              <option value="Near Expiry / Expired">Near Expiry / Expired</option>
+                              <option value="Wrong Item / Wrong SKU">Wrong Item / Wrong SKU</option>
+                              <option value="Refused by Store Manager">Refused by Store Manager</option>
+                              <option value="Quality / Packaging Issue">Quality / Packaging Issue</option>
+                              <option value="Customer Return / Excess">Customer Return / Excess</option>
+                              <option value="Temperature Non-Compliance">Temperature Non-Compliance</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Payment & Cash on Delivery (COD) */}
+          <div className="p-3 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+              <DollarSign className="h-3.5 w-3.5" />
+              Payment & Cash Collection (COD)
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Payment Method</Label>
+                <select
+                  value={paymentMethod}
+                  onChange={e => setPaymentMethod(e.target.value)}
+                  className="w-full h-8 border border-emerald-200 rounded-md px-2 bg-transparent text-xs text-emerald-900 dark:text-emerald-200 font-medium"
+                >
+                  <option value="credit">Credit / Account</option>
+                  <option value="cash">Cash on Delivery (COD)</option>
+                  <option value="card">Card / POS</option>
+                  <option value="cheque">Cheque</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Cash Amount (BD)</Label>
+                <Input
+                  type="number"
+                  step="0.001"
+                  value={cashCollected}
+                  onChange={e => setCashCollected(e.target.value)}
+                  placeholder="0.000"
+                  className="h-8 text-xs border-emerald-200 focus-visible:ring-emerald-400"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">Receipt / Bill #</Label>
+                <Input
+                  value={cashReceiptNo}
+                  onChange={e => setCashReceiptNo(e.target.value)}
+                  placeholder="Voucher #"
+                  className="h-8 text-xs border-emerald-200 focus-visible:ring-emerald-400"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* General Remark */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Supervisor Remark / Notes</Label>
+            <Input
+              value={generalRemark}
+              onChange={e => setGeneralRemark(e.target.value)}
+              placeholder="e.g. Completed by Supervisor, full order delivered..."
+              className="h-8 text-xs"
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={onClose} size="sm" disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSubmit}
+            disabled={isSubmitting || isUploadingPod}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5 shadow-sm"
+          >
+            {isSubmitting ? (
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            )}
+            {isSubmitting ? "Completing Delivery..." : "Confirm & Complete Outlet Delivery"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -649,7 +1363,7 @@ function MoveOverrideDialog({
 // ===== Outlet Card =====
 function OutletCard({
   outlet, sheetId, zones, isSupervisor, assignedTruck, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate, onSelect, onManageItems,
-  onQuickComplete, onRevertDelivery,
+  onQuickComplete, onRevertDelivery, onCompleteOutlet,
 }: {
   outlet: OutletGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   assignedTruck?: { vehicle: any; driver: any } | null;
@@ -661,6 +1375,7 @@ function OutletCard({
   onManageItems: (outlet: OutletGroup) => void;
   onQuickComplete?: (item: DispatchItem) => void;
   onRevertDelivery?: (item: DispatchItem) => void;
+  onCompleteOutlet?: (outlet: OutletGroup) => void;
 }) {
   const { user } = useAuth();
   const isDriver = user?.role === "driver" || user?.role?.toLowerCase().includes("driver");
@@ -734,7 +1449,7 @@ function OutletCard({
           )}
         </div>
 
-        {/* Row 3: Metrics (Qty, Progress, Override, Move) */}
+        {/* Row 3: Metrics (Qty, Progress, Override, Move, Complete) */}
         <div className="flex flex-wrap items-center justify-between gap-2 pl-9 pt-1.5 border-t border-slate-100/50 mt-1.5">
           <div className="flex items-center gap-1.5 flex-wrap">
             {outlet.isOverridden && (
@@ -749,6 +1464,17 @@ function OutletCard({
           </div>
 
           <div className="flex items-center gap-1">
+            {isSupervisor && !isOutletComplete && onCompleteOutlet && (
+              <Button
+                size="sm"
+                className="h-6 px-2 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white gap-1 font-semibold shadow-xs"
+                onClick={e => { e.stopPropagation(); onCompleteOutlet(outlet); }}
+                title="Complete delivery for all items in this outlet"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Complete Delivery
+              </Button>
+            )}
             {isSupervisor && !isOutletComplete && (
               <Button
                 variant="ghost"
@@ -947,7 +1673,7 @@ const getCompletedDeliveryNotesCount = (outletsList: any[]) => {
 function ZoneColumn({
   zone, sheetId, zones, isSupervisor, onDeliveryUpdate, onOverride, onOverrideItem, selectedDate,
   onSelectRoute, onSelectOutlet, isExpanded, selectedOutletForDetails, onCloseDetails, onManageItems,
-  onQuickComplete, onRevertDelivery, initialZoneData, onDownloadDeliveries,
+  onQuickComplete, onRevertDelivery, onCompleteOutlet, initialZoneData, onDownloadDeliveries,
 }: {
   zone: ZoneGroup; sheetId: string; zones: Zone[]; isSupervisor: boolean;
   onDeliveryUpdate: (item: DispatchItem) => void;
@@ -962,6 +1688,7 @@ function ZoneColumn({
   onManageItems: (outlet: OutletGroup) => void;
   onQuickComplete?: (item: DispatchItem) => void;
   onRevertDelivery?: (item: DispatchItem) => void;
+  onCompleteOutlet?: (outlet: OutletGroup) => void;
   initialZoneData?: ZoneGroup;
   onDownloadDeliveries?: (zoneId: string) => void;
 }) {
@@ -1615,6 +2342,7 @@ function ZoneColumn({
                     onManageItems={onManageItems}
                     onQuickComplete={onQuickComplete}
                     onRevertDelivery={onRevertDelivery}
+                    onCompleteOutlet={onCompleteOutlet}
                   />
                 </div>
               );
@@ -2418,6 +3146,7 @@ export default function DailyDispatchPage() {
   const [uploadDate, setUploadDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [isDragging, setIsDragging] = useState(false);
   const [deliveryDialog, setDeliveryDialog] = useState<DispatchItem | null>(null);
+  const [outletDeliveryDialog, setOutletDeliveryDialog] = useState<OutletGroup | null>(null);
   const [overrideDialog, setOverrideDialog] = useState<OutletGroup | null>(null);
   const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
   const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
@@ -2874,6 +3603,19 @@ export default function DailyDispatchPage() {
       toast({ title: "Delivery updated!" });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       setDeliveryDialog(null);
+    },
+    onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
+
+  // Bulk Outlet Delivery mutation
+  const completeOutletMutation = useMutation({
+    mutationFn: (data: any) =>
+      apiRequest("POST", "/api/dispatch/outlets/complete-delivery", data),
+    onSuccess: (res: any) => {
+      toast({ title: "Outlet delivery completed successfully!" });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+      setOutletDeliveryDialog(null);
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -3842,6 +4584,7 @@ export default function DailyDispatchPage() {
                           onCloseDetails={handleCloseDetailsPanel}
                           onQuickComplete={handleQuickComplete}
                           onRevertDelivery={handleRevert}
+                          onCompleteOutlet={outlet => setOutletDeliveryDialog(outlet)}
                           initialZoneData={boardData.zones.find(z => z.zoneId === zone.zoneId)}
                           onDownloadDeliveries={(zoneId) => handleDownloadFinalDeliveries(zoneId)}
                         />
@@ -4594,6 +5337,17 @@ export default function DailyDispatchPage() {
         <DeliveryDialog item={deliveryDialog} sheetId={boardSheetId!}
           onClose={() => setDeliveryDialog(null)}
           onSave={data => deliveryMutation.mutate({ itemId: deliveryDialog.id, data })}
+        />
+      )}
+
+      {/* Outlet Bulk Delivery Dialog */}
+      {outletDeliveryDialog && (
+        <OutletDeliveryDialog
+          outlet={outletDeliveryDialog}
+          sheetId={boardSheetId!}
+          isSubmitting={completeOutletMutation.isPending}
+          onClose={() => setOutletDeliveryDialog(null)}
+          onSave={data => completeOutletMutation.mutate(data)}
         />
       )}
 

@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { 
-  Card, CardContent, CardHeader, CardTitle, CardDescription 
+import {
+  Card, CardContent, CardHeader, CardTitle, CardDescription
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -327,16 +327,16 @@ export default function LoadingMonitorTab({
           const stType = rawStorage.includes("CHILL")
             ? "CHILLED"
             : rawStorage.includes("FROZ")
-            ? "FROZEN"
-            : rawStorage.includes("AMB")
-            ? "AMBIENT"
-            : rawStorage.includes("PACK")
-            ? "PACKAGING"
-            : rawStorage.includes("CLEAN")
-            ? "CLEANING"
-            : rawStorage.includes("CHEM")
-            ? "CHEMICAL"
-            : "DRY";
+              ? "FROZEN"
+              : rawStorage.includes("AMB")
+                ? "AMBIENT"
+                : rawStorage.includes("PACK")
+                  ? "PACKAGING"
+                  : rawStorage.includes("CLEAN")
+                    ? "CLEANING"
+                    : rawStorage.includes("CHEM")
+                      ? "CHEMICAL"
+                      : "DRY";
           counts[stType] = (counts[stType] || 0) + 1;
 
           const qty = Number(item.requestedQty || item.weight || 0);
@@ -506,12 +506,12 @@ export default function LoadingMonitorTab({
       const status = isFullyDeparted
         ? "FULLY LOADED"
         : (isAllocated && !isPending)
-        ? "ALLOCATED"
-        : isAllocated
-        ? "PARTIALLY ALLOCATED"
-        : sku.loadedQty > 0
-        ? "PARTIALLY LOADED"
-        : "PENDING";
+          ? "ALLOCATED"
+          : isAllocated
+            ? "PARTIALLY ALLOCATED"
+            : sku.loadedQty > 0
+              ? "PARTIALLY LOADED"
+              : "PENDING";
 
       return {
         ...sku,
@@ -773,22 +773,20 @@ export default function LoadingMonitorTab({
           <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border text-xs">
             <button
               onClick={() => setDeductCriteria("departed")}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                deductCriteria === "departed"
-                  ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${deductCriteria === "departed"
+                ? "bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-sm"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
               title="Deducts quantity from pending as each truck physically departs / leaves"
             >
               🚚 Deduct on Truck Departure (Default)
             </button>
             <button
               onClick={() => setDeductCriteria("loaded_or_departed")}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                deductCriteria === "loaded_or_departed"
-                  ? "bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${deductCriteria === "loaded_or_departed"
+                ? "bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-sm"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
               title="Deducts quantity as soon as truck is marked loaded or departed"
             >
               📦 Deduct on Loading Done
@@ -802,21 +800,19 @@ export default function LoadingMonitorTab({
           <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-md border text-xs">
             <button
               onClick={() => setViewMode("sku")}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                viewMode === "sku"
-                  ? "bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm font-semibold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
+              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${viewMode === "sku"
+                ? "bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-sm font-semibold"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
             >
               <Boxes className="h-3 w-3" /> SKU Balance View
             </button>
             <button
               onClick={() => setViewMode("truck")}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${
-                viewMode === "truck"
-                  ? "bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm font-semibold"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
+              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors flex items-center gap-1 ${viewMode === "truck"
+                ? "bg-white dark:bg-slate-900 text-sky-700 dark:text-sky-300 shadow-sm font-semibold"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
             >
               <Truck className="h-3 w-3" /> Trucks & Trips View
             </button>
@@ -877,26 +873,23 @@ export default function LoadingMonitorTab({
         </Card>
 
         {/* Card 2: 1. Pending to Load */}
-        <Card className={`border shadow-none p-3 transition-colors ${
-          globalTotals.purePendingQty > 0
-            ? "bg-amber-50/60 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800"
-            : "bg-slate-50 dark:bg-slate-900/40"
-        }`}>
+        <Card className={`border shadow-none p-3 transition-colors ${globalTotals.purePendingQty > 0
+          ? "bg-amber-50/60 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800"
+          : "bg-slate-50 dark:bg-slate-900/40"
+          }`}>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1">
               <Hourglass className="h-3.5 w-3.5 text-amber-600" />
               1. Pending to Load
             </span>
-            <div className={`h-7 w-7 rounded-full flex items-center justify-center ${
-              globalTotals.purePendingQty > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
-            }`}>
+            <div className={`h-7 w-7 rounded-full flex items-center justify-center ${globalTotals.purePendingQty > 0 ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"
+              }`}>
               {globalTotals.purePendingQty > 0 ? <Clock className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
             </div>
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className={`text-xl font-bold ${
-              globalTotals.purePendingQty > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-600"
-            }`}>
+            <span className={`text-xl font-bold ${globalTotals.purePendingQty > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-600"
+              }`}>
               {globalTotals.purePendingQty.toLocaleString()}
             </span>
             <span className="text-xs text-muted-foreground font-medium">Cartons / Units</span>
@@ -907,11 +900,10 @@ export default function LoadingMonitorTab({
         </Card>
 
         {/* Card 3: 2. Allocated (Loading in Progress) */}
-        <Card className={`border shadow-none p-3 transition-colors ${
-          globalTotals.allocatedQty > 0
-            ? "bg-blue-50/60 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800"
-            : "bg-slate-50 dark:bg-slate-900/40"
-        }`}>
+        <Card className={`border shadow-none p-3 transition-colors ${globalTotals.allocatedQty > 0
+          ? "bg-blue-50/60 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800"
+          : "bg-slate-50 dark:bg-slate-900/40"
+          }`}>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-blue-800 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1">
               <Boxes className="h-3.5 w-3.5 text-blue-600" />
@@ -1018,11 +1010,10 @@ export default function LoadingMonitorTab({
               <button
                 key={st.id}
                 onClick={() => setStorageFilter(st.id)}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
-                  storageFilter === st.id
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                }`}
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${storageFilter === st.id
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                  }`}
               >
                 {st.label} {st.count !== undefined ? `(${st.count})` : ""}
               </button>
@@ -1041,17 +1032,16 @@ export default function LoadingMonitorTab({
               <button
                 key={sf.id}
                 onClick={() => setStatusFilter(sf.id as any)}
-                className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors ${
-                  statusFilter === sf.id
-                    ? sf.id === "allocated"
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : sf.id === "fully_loaded"
+                className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors ${statusFilter === sf.id
+                  ? sf.id === "allocated"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : sf.id === "fully_loaded"
                       ? "bg-emerald-600 text-white shadow-sm"
                       : sf.id === "pending_only"
-                      ? "bg-amber-600 text-white shadow-sm"
-                      : "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-sm"
-                    : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                }`}
+                        ? "bg-amber-600 text-white shadow-sm"
+                        : "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-sm"
+                  : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                  }`}
               >
                 {sf.label}
               </button>
@@ -1129,9 +1119,8 @@ export default function LoadingMonitorTab({
                   return (
                     <React.Fragment key={skuKey}>
                       <TableRow
-                        className={`text-xs cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${
-                          hasPendingBalance ? "bg-amber-50/15" : ""
-                        }`}
+                        className={`text-xs cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/50 ${hasPendingBalance ? "bg-amber-50/15" : ""
+                          }`}
                         onClick={() => toggleSkuExpand(skuKey)}
                       >
                         <TableCell className="text-center text-muted-foreground font-mono text-[11px]">
@@ -1154,19 +1143,18 @@ export default function LoadingMonitorTab({
                         <TableCell className="text-center">
                           <Badge
                             variant="outline"
-                            className={`text-[10px] h-5 px-1.5 uppercase font-medium ${
-                              sku.storageType?.toUpperCase().includes("CHILL")
-                                ? "bg-cyan-50 text-cyan-800 border-cyan-200"
-                                : sku.storageType?.toUpperCase().includes("FROZ")
+                            className={`text-[10px] h-5 px-1.5 uppercase font-medium ${sku.storageType?.toUpperCase().includes("CHILL")
+                              ? "bg-cyan-50 text-cyan-800 border-cyan-200"
+                              : sku.storageType?.toUpperCase().includes("FROZ")
                                 ? "bg-blue-50 text-blue-800 border-blue-200"
                                 : sku.storageType?.toUpperCase().includes("PACK")
-                                ? "bg-purple-50 text-purple-800 border-purple-200"
-                                : sku.storageType?.toUpperCase().includes("CLEAN") || sku.storageType?.toUpperCase().includes("CHEM")
-                                ? "bg-rose-50 text-rose-800 border-rose-200"
-                                : sku.storageType?.toUpperCase().includes("AMB")
-                                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                : "bg-amber-50 text-amber-800 border-amber-200"
-                            }`}
+                                  ? "bg-purple-50 text-purple-800 border-purple-200"
+                                  : sku.storageType?.toUpperCase().includes("CLEAN") || sku.storageType?.toUpperCase().includes("CHEM")
+                                    ? "bg-rose-50 text-rose-800 border-rose-200"
+                                    : sku.storageType?.toUpperCase().includes("AMB")
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                      : "bg-amber-50 text-amber-800 border-amber-200"
+                              }`}
                           >
                             {sku.storageType || "Dry"}
                           </Badge>
@@ -1180,11 +1168,10 @@ export default function LoadingMonitorTab({
                         {/* 1. Pending to Load */}
                         <TableCell className="text-right bg-amber-50/40 dark:bg-amber-950/15">
                           <span
-                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${
-                              (sku.purePendingQty || 0) > 0
-                                ? "bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-900/60 dark:text-amber-100 dark:border-amber-700"
-                                : "text-muted-foreground"
-                            }`}
+                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${(sku.purePendingQty || 0) > 0
+                              ? "bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-900/60 dark:text-amber-100 dark:border-amber-700"
+                              : "text-muted-foreground"
+                              }`}
                           >
                             {(sku.purePendingQty || 0).toLocaleString()}
                           </span>
@@ -1192,11 +1179,10 @@ export default function LoadingMonitorTab({
                         {/* 2. Allocated (Loading) */}
                         <TableCell className="text-right bg-blue-50/40 dark:bg-blue-950/15">
                           <span
-                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${
-                              (sku.allocatedQty || 0) > 0
-                                ? "bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-900/60 dark:text-blue-100 dark:border-blue-700 font-semibold"
-                                : "text-muted-foreground"
-                            }`}
+                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${(sku.allocatedQty || 0) > 0
+                              ? "bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-900/60 dark:text-blue-100 dark:border-blue-700 font-semibold"
+                              : "text-muted-foreground"
+                              }`}
                           >
                             {(sku.allocatedQty || 0).toLocaleString()}
                           </span>
@@ -1215,11 +1201,10 @@ export default function LoadingMonitorTab({
                         {/* Total Balance Pending */}
                         <TableCell className="text-right">
                           <span
-                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${
-                              sku.balanceQty > 0
-                                ? "bg-slate-100 text-slate-800 border border-slate-300 dark:bg-slate-800 dark:text-slate-200"
-                                : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                            }`}
+                            className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-xs ${sku.balanceQty > 0
+                              ? "bg-slate-100 text-slate-800 border border-slate-300 dark:bg-slate-800 dark:text-slate-200"
+                              : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                              }`}
                           >
                             {sku.balanceQty.toLocaleString()}
                           </span>
@@ -1245,17 +1230,16 @@ export default function LoadingMonitorTab({
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge
-                            className={`text-[10px] h-5 px-1.5 font-semibold ${
-                              sku.balanceQty === 0
-                                ? "bg-emerald-600 text-white"
-                                : (sku.allocatedQty || 0) > 0 && (sku.purePendingQty || 0) === 0
+                            className={`text-[10px] h-5 px-1.5 font-semibold ${sku.balanceQty === 0
+                              ? "bg-emerald-600 text-white"
+                              : (sku.allocatedQty || 0) > 0 && (sku.purePendingQty || 0) === 0
                                 ? "bg-blue-600 text-white"
                                 : (sku.allocatedQty || 0) > 0
-                                ? "bg-indigo-600 text-white"
-                                : sku.loadedQty > 0
-                                ? "bg-sky-600 text-white"
-                                : "bg-amber-500 text-white"
-                            }`}
+                                  ? "bg-indigo-600 text-white"
+                                  : sku.loadedQty > 0
+                                    ? "bg-sky-600 text-white"
+                                    : "bg-amber-500 text-white"
+                              }`}
                           >
                             {sku.status}
                           </Badge>
