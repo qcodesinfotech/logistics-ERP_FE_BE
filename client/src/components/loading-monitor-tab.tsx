@@ -19,6 +19,7 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { exportLoadingMonitorExcel } from "@/lib/customer-excel-export";
+import { cn } from "@/lib/utils";
 
 interface LoadingMonitorTabProps {
   boardSheetId: string | null;
@@ -133,11 +134,11 @@ export default function LoadingMonitorTab({
   const isTruckLoaded = (t: any) => {
     if (!t) return false;
     if (isTruckDeparted(t)) return true;
+    const hasStart = !!(t.loadingStartTime && t.loadingStartTime.trim() !== "" && t.loadingStartTime !== "-");
+    const hasEnd = !!(t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-");
     const s = (t.loadingStatus || "").toLowerCase();
     const st = (t.status || "").toLowerCase();
-    if (s === "loading" || st === "loading" || s === "pending" || st === "pending") return false;
-    if (s === "loaded" || st === "loaded") return true;
-    if (t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-") return true;
+    if (hasStart && (hasEnd || s === "loaded" || st === "loaded")) return true;
     return false;
   };
 
@@ -715,6 +716,15 @@ export default function LoadingMonitorTab({
   const handleQuickDepart = (truckAssignmentId: string | null) => {
     if (!truckAssignmentId) {
       toast({ title: "Cannot depart an unassigned truck. Please assign a truck in Truck Planning first.", variant: "destructive" });
+      return;
+    }
+    const targetTruck = truckList.find((t: any) => t.id === truckAssignmentId || t.truckAssignmentId === truckAssignmentId);
+    if (targetTruck && !isTruckLoaded(targetTruck)) {
+      toast({
+        title: "Loading Incomplete",
+        description: "Cannot mark truck departed: Both loading start and loading completion must be recorded first.",
+        variant: "destructive",
+      });
       return;
     }
     updateTruckTimingMutation.mutate({ truckAssignmentId });
@@ -1353,12 +1363,18 @@ export default function LoadingMonitorTab({
                                             <Button
                                               size="sm"
                                               variant="outline"
-                                              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 h-6 text-[10px] px-2 gap-1"
+                                              className={cn(
+                                                "h-6 text-[10px] px-2 gap-1",
+                                                isTruckLoaded(alloc)
+                                                  ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                                  : "border-slate-200 text-slate-400 bg-slate-50 opacity-60 cursor-not-allowed"
+                                              )}
                                               onClick={(e) => {
                                                 e.stopPropagation();
                                                 handleQuickDepart(alloc.truckAssignmentId);
                                               }}
-                                              disabled={updateTruckTimingMutation.isPending}
+                                              disabled={updateTruckTimingMutation.isPending || !isTruckLoaded(alloc)}
+                                              title={!isTruckLoaded(alloc) ? "Loading must be started and completed before departure" : "Mark Departed"}
                                             >
                                               <Truck className="h-2.5 w-2.5 text-emerald-600" />
                                               Mark Departed
@@ -1492,9 +1508,15 @@ export default function LoadingMonitorTab({
                         <Button
                           size="sm"
                           variant="outline"
-                          className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 h-7 text-xs gap-1"
+                          className={cn(
+                            "h-7 text-xs gap-1",
+                            isTruckLoaded(truck)
+                              ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                              : "border-slate-200 text-slate-400 bg-slate-50 opacity-60 cursor-not-allowed"
+                          )}
                           onClick={() => handleQuickDepart(truck.id)}
-                          disabled={updateTruckTimingMutation.isPending}
+                          disabled={updateTruckTimingMutation.isPending || !isTruckLoaded(truck)}
+                          title={!isTruckLoaded(truck) ? "Loading must be started and completed before departure" : "Mark Departed"}
                         >
                           <Truck className="h-3 w-3 text-emerald-600" />
                           Mark Departed

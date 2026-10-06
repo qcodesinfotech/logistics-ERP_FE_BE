@@ -1042,6 +1042,16 @@ function ZoneColumn({
       setTimingForm(payload);
       updateTimingMutation.mutate(payload);
     } else if (action === "dispatch") {
+      const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
+      const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded";
+      if (!hasStarted || !hasCompleted) {
+        toast({
+          title: "Cannot Dispatch Truck",
+          description: "Both loading start and loading completion must be recorded before marking departed.",
+          variant: "destructive",
+        });
+        return;
+      }
       const payload = {
         ...timingForm,
         departTime: now,
@@ -2006,8 +2016,21 @@ function ZoneColumn({
               <Button
                 type="button"
                 size="sm"
-                disabled={updateTimingMutation.isPending}
-                onClick={() => updateTimingMutation.mutate(timingForm)}
+                onClick={() => {
+                  if (timingForm.departTime || timingForm.loadingStatus === "dispatched") {
+                    const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
+                    const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded" || timingForm.loadingStatus === "dispatched";
+                    if (!hasStarted || !hasCompleted) {
+                      toast({
+                        title: "Loading Incomplete",
+                        description: "Cannot mark truck departed: Both loading start and loading completion must be recorded first.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                  }
+                  updateTimingMutation.mutate(timingForm);
+                }}
               >
                 {updateTimingMutation.isPending ? "Saving..." : "Save Timings"}
               </Button>

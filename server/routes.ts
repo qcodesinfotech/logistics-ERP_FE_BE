@@ -10543,6 +10543,57 @@ export async function registerRoutes(
       }
 
       const depDate = departureTime ? new Date(departureTime) : new Date();
+
+      // Check Daily Dispatch truck assignments for today / active sheets:
+      // Departure/checkout from store is NOT allowed until loading starting and completed is marked!
+      const todayStr = depDate.toLocaleDateString("en-CA");
+      const activeSheets = await db.select().from(schema.dispatchSheets)
+        .where(or(eq(schema.dispatchSheets.date, todayStr), eq(schema.dispatchSheets.status, "active")));
+      const sheetIds = activeSheets.map(s => s.id);
+
+      let matchedTAs: any[] = [];
+      if (sheetIds.length > 0) {
+        const driverIdentifiers = [targetRecord.driverId, effectiveDriverId, req.user?.id].filter(Boolean) as string[];
+        const targetTruck = (req.body.truckId || targetRecord.truckId) ? String(req.body.truckId || targetRecord.truckId).trim().toLowerCase() : null;
+
+        let matchedVehicleId: string | null = null;
+        if (targetTruck) {
+          const allVehicles = await storage.getVehicles();
+          const matchedVeh = allVehicles.find(v => 
+            v.id.toLowerCase() === targetTruck ||
+            (v.plateNumber && v.plateNumber.toLowerCase() === targetTruck) ||
+            (v.name && v.name.toLowerCase() === targetTruck)
+          );
+          if (matchedVeh) matchedVehicleId = matchedVeh.id;
+        }
+
+        const truckAssignments = await db.select().from(schema.dispatchTruckAssignments)
+          .where(inArray(schema.dispatchTruckAssignments.sheetId, sheetIds));
+
+        matchedTAs = truckAssignments.filter(ta => {
+          const matchesDriver = ta.driverId && driverIdentifiers.includes(ta.driverId);
+          const matchesTruck = (matchedVehicleId && ta.truckId === matchedVehicleId) ||
+                               (targetTruck && ta.truckId.toLowerCase() === targetTruck);
+          return matchesDriver || matchesTruck;
+        });
+
+        if (matchedTAs.length > 0) {
+          const incompleteLoadingTAs = matchedTAs.filter(ta => {
+            const hasStarted = !!(ta.loadingStartTime && ta.loadingStartTime.trim() !== "" && ta.loadingStartTime !== "-");
+            const hasCompleted = !!(ta.loadingEndTime && ta.loadingEndTime.trim() !== "" && ta.loadingEndTime !== "-") || 
+                                 ta.loadingStatus === "loaded" || ta.loadingStatus === "dispatched";
+            return !hasStarted || !hasCompleted;
+          });
+
+          if (incompleteLoadingTAs.length > 0) {
+            return res.status(400).json({
+              error: "Cannot check out from store: Loading starting and completed must be marked before departure.",
+              loadingBlocked: true,
+            });
+          }
+        }
+      }
+
       let loadingDurationMinutes = 0;
       if (targetRecord.checkInTime) {
         const checkInMs = new Date(targetRecord.checkInTime).getTime();
@@ -10566,45 +10617,15 @@ export async function registerRoutes(
       // Auto-sync departure time and dispatched status to Daily Dispatch truck assignments
       let syncedTruckAssignments = 0;
       try {
-        const todayStr = depDate.toLocaleDateString("en-CA");
-        const activeSheets = await db.select().from(schema.dispatchSheets)
-          .where(or(eq(schema.dispatchSheets.date, todayStr), eq(schema.dispatchSheets.status, "active")));
-        const sheetIds = activeSheets.map(s => s.id);
-
-        if (sheetIds.length > 0) {
-          const driverIdentifiers = [targetRecord.driverId, effectiveDriverId, req.user?.id].filter(Boolean) as string[];
-          const targetTruck = (req.body.truckId || targetRecord.truckId) ? String(req.body.truckId || targetRecord.truckId).trim().toLowerCase() : null;
-
-          let matchedVehicleId: string | null = null;
-          if (targetTruck) {
-            const allVehicles = await storage.getVehicles();
-            const matchedVeh = allVehicles.find(v => 
-              v.id.toLowerCase() === targetTruck ||
-              (v.plateNumber && v.plateNumber.toLowerCase() === targetTruck) ||
-              (v.name && v.name.toLowerCase() === targetTruck)
-            );
-            if (matchedVeh) matchedVehicleId = matchedVeh.id;
+        for (const ta of matchedTAs) {
+          const updatePayload: any = {
+            departTime: formattedDepartTime,
+          };
+          if (!ta.loadingStatus || ta.loadingStatus === "pending" || ta.loadingStatus === "loading" || ta.loadingStatus === "loaded") {
+            updatePayload.loadingStatus = "dispatched";
           }
-
-          const truckAssignments = await db.select().from(schema.dispatchTruckAssignments)
-            .where(inArray(schema.dispatchTruckAssignments.sheetId, sheetIds));
-
-          for (const ta of truckAssignments) {
-            const matchesDriver = ta.driverId && driverIdentifiers.includes(ta.driverId);
-            const matchesTruck = (matchedVehicleId && ta.truckId === matchedVehicleId) ||
-                                 (targetTruck && ta.truckId.toLowerCase() === targetTruck);
-
-            if (matchesDriver || matchesTruck) {
-              const updatePayload: any = {
-                departTime: formattedDepartTime,
-              };
-              if (!ta.loadingStatus || ta.loadingStatus === "pending" || ta.loadingStatus === "loading" || ta.loadingStatus === "loaded") {
-                updatePayload.loadingStatus = "dispatched";
-              }
-              await storage.updateDispatchTruckAssignment(ta.id, updatePayload);
-              syncedTruckAssignments++;
-            }
-          }
+          await storage.updateDispatchTruckAssignment(ta.id, updatePayload);
+          syncedTruckAssignments++;
         }
       } catch (syncErr) {
         console.error("Error auto-syncing departure time to dispatch truck assignments:", syncErr);
@@ -11142,6 +11163,22 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Only Supervisors or Admins can start and manage loading timing" });
       }
       const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes } = req.body;
+
+      // Validate: Cannot depart truck if loading is not both started and completed
+      if (departTime || loadingStatus === "dispatched") {
+        const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
+        const effStartTime = loadingStartTime !== undefined ? loadingStartTime : existingTa?.loadingStartTime;
+        const effEndTime = loadingEndTime !== undefined ? loadingEndTime : existingTa?.loadingEndTime;
+        const effStatus = loadingStatus !== undefined ? loadingStatus : existingTa?.loadingStatus;
+
+        const hasStarted = !!(effStartTime && effStartTime.trim() !== "" && effStartTime !== "-");
+        const hasCompleted = !!(effEndTime && effEndTime.trim() !== "" && effEndTime !== "-") || effStatus === "loaded" || effStatus === "dispatched";
+
+        if (!hasStarted || !hasCompleted) {
+          return res.status(400).json({ error: "Cannot mark truck departed: Both loading start and loading completion must be recorded first." });
+        }
+      }
+
       const updateData: any = {};
       if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
       if (loadingEndTime !== undefined) updateData.loadingEndTime = loadingEndTime;
@@ -11171,6 +11208,20 @@ export async function registerRoutes(
 
       const existingTrucks = await storage.getDispatchTruckAssignments(sheetId);
       const matched = existingTrucks.find((t: any) => t.zoneId === routeId);
+
+      // Validate: Cannot depart truck if loading is not both started and completed
+      if (departTime || loadingStatus === "dispatched") {
+        const effStartTime = loadingStartTime !== undefined ? loadingStartTime : matched?.loadingStartTime;
+        const effEndTime = loadingEndTime !== undefined ? loadingEndTime : matched?.loadingEndTime;
+        const effStatus = loadingStatus !== undefined ? loadingStatus : matched?.loadingStatus;
+
+        const hasStarted = !!(effStartTime && effStartTime.trim() !== "" && effStartTime !== "-");
+        const hasCompleted = !!(effEndTime && effEndTime.trim() !== "" && effEndTime !== "-") || effStatus === "loaded" || effStatus === "dispatched";
+
+        if (!hasStarted || !hasCompleted) {
+          return res.status(400).json({ error: "Cannot dispatch truck: Both loading start and loading completion must be recorded first." });
+        }
+      }
 
       if (matched) {
         const updateData: any = {};
