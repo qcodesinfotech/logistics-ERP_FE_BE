@@ -99,7 +99,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     if (decoded?.id) {
       try {
         const [user] = await db.select().from(users).where(eq(users.id, decoded.id)).limit(1);
-        if (user && user.isActive) {
+        if (user && user.status !== "inactive" && (user as any).isActive !== false) {
           req.user = {
             id: user.id,
             username: user.username,

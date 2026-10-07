@@ -1747,8 +1747,8 @@ function ZoneColumn({
       const payload = {
         ...timingForm,
         loadingEndTime: now,
-        departTime: "",
-        loadingStatus: "loaded",
+        departTime: timingForm.departTime || "",
+        loadingStatus: timingForm.departTime ? "dispatched" : "loaded",
       };
       setTimingForm(payload);
       updateTimingMutation.mutate(payload);

@@ -10825,22 +10825,6 @@ export async function registerRoutes(
                                (targetTruck && ta.truckId.toLowerCase() === targetTruck);
           return matchesDriver || matchesTruck;
         });
-
-        if (matchedTAs.length > 0) {
-          const incompleteLoadingTAs = matchedTAs.filter(ta => {
-            const hasStarted = !!(ta.loadingStartTime && ta.loadingStartTime.trim() !== "" && ta.loadingStartTime !== "-");
-            const hasCompleted = !!(ta.loadingEndTime && ta.loadingEndTime.trim() !== "" && ta.loadingEndTime !== "-") || 
-                                 ta.loadingStatus === "loaded" || ta.loadingStatus === "dispatched";
-            return !hasStarted || !hasCompleted;
-          });
-
-          if (incompleteLoadingTAs.length > 0) {
-            return res.status(400).json({
-              error: "Cannot check out from store: Loading starting and completed must be marked before departure.",
-              loadingBlocked: true,
-            });
-          }
-        }
       }
 
       let loadingDurationMinutes = 0;
@@ -10867,10 +10851,14 @@ export async function registerRoutes(
       let syncedTruckAssignments = 0;
       try {
         for (const ta of matchedTAs) {
+          const hasStarted = !!(ta.loadingStartTime && ta.loadingStartTime.trim() !== "" && ta.loadingStartTime !== "-");
+          const hasCompleted = !!(ta.loadingEndTime && ta.loadingEndTime.trim() !== "" && ta.loadingEndTime !== "-") || 
+                               ta.loadingStatus === "loaded" || ta.loadingStatus === "dispatched";
+
           const updatePayload: any = {
             departTime: formattedDepartTime,
           };
-          if (!ta.loadingStatus || ta.loadingStatus === "pending" || ta.loadingStatus === "loading" || ta.loadingStatus === "loaded") {
+          if (hasCompleted || ta.loadingStatus === "loaded") {
             updatePayload.loadingStatus = "dispatched";
           }
           await storage.updateDispatchTruckAssignment(ta.id, updatePayload);
@@ -11436,6 +11424,22 @@ export async function registerRoutes(
       if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
       if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
 
+      // Auto-retroactive dispatch: If loading is completed (or marked loaded) and departTime is not set, check if driver already departed
+      if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
+        const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
+        if (existingTa) {
+          const attendanceList = await storage.getDriverAttendance();
+          const matchedAtt = attendanceList.find(a => 
+            (existingTa.driverId && a.driverId === existingTa.driverId) ||
+            (existingTa.truckId && a.truckId === existingTa.truckId)
+          );
+          if (matchedAtt?.departureTime) {
+            updateData.departTime = formatTime12h(matchedAtt.departureTime);
+            updateData.loadingStatus = "dispatched";
+          }
+        }
+      }
+
       const updated = await storage.updateDispatchTruckAssignment(req.params.id, updateData);
       if (!updated) return res.status(404).json({ error: "Truck assignment not found" });
       res.json(updated);
@@ -11490,6 +11494,21 @@ export async function registerRoutes(
           }
         }
         if (driverId) updateData.driverId = driverId;
+
+        // Auto-retroactive dispatch: If loading is completed (or marked loaded) and departTime is not set, check if driver already departed
+        if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
+          const effDriverId = driverId || matched.driverId;
+          const effTruckId = truckId || matched.truckId;
+          const attendanceList = await storage.getDriverAttendance();
+          const matchedAtt = attendanceList.find(a => 
+            (effDriverId && a.driverId === effDriverId) ||
+            (effTruckId && a.truckId === effTruckId)
+          );
+          if (matchedAtt?.departureTime) {
+            updateData.departTime = formatTime12h(matchedAtt.departureTime);
+            updateData.loadingStatus = "dispatched";
+          }
+        }
 
         const updated = await storage.updateDispatchTruckAssignment(matched.id, updateData);
         return res.json(updated);
