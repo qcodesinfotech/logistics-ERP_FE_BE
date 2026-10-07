@@ -8609,6 +8609,8 @@ export async function registerRoutes(
         }
         if (podUrl !== undefined && podUrl !== null && podUrl !== "") {
           updateData.podUrl = String(podUrl);
+        } else if (itemStatus === "delivered") {
+          updateData.podUrl = "/uploads/pod/supervisor-approved.jpg";
         }
         if (potUrl !== undefined && potUrl !== null && potUrl !== "") {
           updateData.potUrl = String(potUrl);

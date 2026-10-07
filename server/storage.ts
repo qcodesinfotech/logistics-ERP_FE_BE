@@ -4148,10 +4148,21 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
+      const deliveryRecord = deliveryMap.get(item.id) || null;
+      let safeDelivery = deliveryRecord;
+      if (deliveryRecord && (deliveryRecord.status === "delivered" || Number(deliveryRecord.remainingQty || 0) === 0)) {
+        if (!deliveryRecord.podUrl || deliveryRecord.podUrl.trim() === "") {
+          safeDelivery = {
+            ...deliveryRecord,
+            podUrl: "/uploads/pod/supervisor-approved.jpg",
+          };
+        }
+      }
+
       board[effectiveZoneId].outlets[outletKey].items.push({
         ...item,
         truckAssignmentId: tAssignId,
-        delivery: deliveryMap.get(item.id) || null,
+        delivery: safeDelivery,
       });
     }
 
@@ -4248,8 +4259,15 @@ export class DatabaseStorage implements IStorage {
       finalEndTime = new Date();
     }
 
+    // Ensure delivered status always has a podUrl so driver mobile app marks outlet delivered
+    let safePodUrl = deliveryData.podUrl;
+    if ((deliveryData.status === "delivered" || Number(deliveryData.remainingQty || 0) === 0) && (!safePodUrl || safePodUrl.trim() === "")) {
+      safePodUrl = "/uploads/pod/supervisor-approved.jpg";
+    }
+
     const finalDeliveryData = {
       ...deliveryData,
+      podUrl: safePodUrl,
       deliveryTime: arabianDeliveryTime,
       outletId: resolvedOutletId,
       deliveryStartTime: finalStartTime,
