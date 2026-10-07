@@ -309,15 +309,7 @@ function DeliveryDialog({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/upload/pod", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || "Failed to upload POD file");
-      }
+      const res = await apiRequest("POST", "/api/upload/pod", formData);
       const data = await res.json();
       setPodUrl(data.url);
       toast({ title: "POD uploaded successfully!" });
@@ -736,15 +728,7 @@ function OutletDeliveryDialog({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch("/api/upload/pod", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || "Failed to upload POD file");
-      }
+      const res = await apiRequest("POST", "/api/upload/pod", formData);
       const data = await res.json();
       setPodUrl(data.url);
       toast({ title: "POD uploaded successfully!" });

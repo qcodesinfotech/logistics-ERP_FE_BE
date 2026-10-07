@@ -82,19 +82,48 @@ const clearRefreshTokenCookie = (res: Response) => {
 export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.split(" ")[1];
+    const user = verifyAccessToken(token);
+
+    if (user) {
+      req.user = user;
+      return next();
+    }
+  }
+
+  // Fallback to cookie-based authentication if present (e.g. from credentials: "include" upload calls)
+  const refreshToken = req.cookies?.refreshToken;
+  if (refreshToken) {
+    const decoded = verifyRefreshToken(refreshToken);
+    if (decoded?.id) {
+      try {
+        const [user] = await db.select().from(users).where(eq(users.id, decoded.id)).limit(1);
+        if (user && user.isActive) {
+          req.user = {
+            id: user.id,
+            username: user.username,
+            name: user.name,
+            role: user.role,
+            employeeId: user.employeeId,
+            companyId: user.companyId,
+            shopId: user.shopId,
+            branchId: user.branchId,
+            warehouseId: user.warehouseId,
+          };
+          return next();
+        }
+      } catch (err) {
+        console.error("Cookie auth fallback error in authMiddleware:", err);
+      }
+    }
+  }
+
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "No token provided" });
   }
 
-  const token = authHeader.split(" ")[1];
-  const user = verifyAccessToken(token);
-
-  if (!user) {
-    return res.status(401).json({ error: "Invalid or expired token" });
-  }
-
-  req.user = user;
-  next();
+  return res.status(401).json({ error: "Invalid or expired token" });
 };
 
 export const roleMiddleware = (...allowedRoles: string[]) => {
