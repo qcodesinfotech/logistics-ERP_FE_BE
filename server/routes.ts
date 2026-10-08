@@ -1222,6 +1222,9 @@ export async function registerRoutes(
         { name: "Super Admin", description: "Full system access", isSystemRole: true },
         { name: "Admin", description: "Administrative access with some restrictions", isSystemRole: true },
         { name: "Manager", description: "Management level access", isSystemRole: true },
+        { name: "Supervisor", description: "Operations and crew supervisor", isSystemRole: true },
+        { name: "Driver", description: "Logistics vehicle driver", isSystemRole: true },
+        { name: "Delivery Assistant", description: "Delivery crew assistant", isSystemRole: true },
         { name: "Cashier", description: "Sales and basic operations", isSystemRole: true },
         { name: "Staff", description: "Limited operational access", isSystemRole: true },
       ];
@@ -4579,27 +4582,38 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/reports/driver-attendance", authMiddleware, permissionMiddleware("reports"), async (req: AuthRequest, res) => {
+  const handleAttendanceReport = async (req: AuthRequest, res: Response) => {
     try {
-      const { driverId, startDate, endDate } = req.query as any;
-      const report = await storage.getDriverAttendanceReport(driverId, startDate, endDate);
+      const { driverId, employeeId, category, startDate, endDate } = req.query as any;
+      const targetEmpId = employeeId || driverId;
+      let report = await storage.getDriverAttendanceReport(targetEmpId, startDate, endDate);
+      if (category && category !== "all") {
+        const catLower = String(category).trim().toLowerCase();
+        report = report.filter((r: any) => (r.category || r.position || "").trim().toLowerCase() === catLower);
+      }
       res.json(report);
     } catch (error: any) {
-      console.error("Error in /api/reports/driver-attendance:", error);
-      res.status(400).json({ error: error.message || "Failed to get driver attendance report" });
+      console.error("Error in attendance report:", error);
+      res.status(400).json({ error: error.message || "Failed to get attendance report" });
     }
-  });
+  };
 
-  app.get("/api/reports/driver-deliveries", authMiddleware, permissionMiddleware("reports"), async (req: AuthRequest, res) => {
+  app.get("/api/reports/driver-attendance", authMiddleware, permissionMiddleware("reports"), handleAttendanceReport);
+  app.get("/api/reports/attendance", authMiddleware, permissionMiddleware("reports"), handleAttendanceReport);
+
+  const handleDeliveriesReport = async (req: AuthRequest, res: Response) => {
     try {
       const { driverId, startDate, endDate } = req.query as any;
       const report = await storage.getDriverDeliveriesReport(driverId, startDate, endDate);
       res.json(report);
     } catch (error: any) {
-      console.error("Error in /api/reports/driver-deliveries:", error);
-      res.status(400).json({ error: error.message || "Failed to get driver deliveries report" });
+      console.error("Error in deliveries report:", error);
+      res.status(400).json({ error: error.message || "Failed to get delivery report" });
     }
-  });
+  };
+
+  app.get("/api/reports/driver-deliveries", authMiddleware, permissionMiddleware("reports"), handleDeliveriesReport);
+  app.get("/api/reports/daily-deliveries", authMiddleware, permissionMiddleware("reports"), handleDeliveriesReport);
 
   app.get("/api/reports/profit-loss", authMiddleware, permissionMiddleware("reports"), async (req: AuthRequest, res) => {
     const scope = getScopeFromRequest(req);
@@ -11105,9 +11119,86 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/crew/available-delivery-assistants", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await ensureDriverTablesSchema();
+      const targetDate = (req.query.date as string) || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      
+      const [allEmployees, todayAttendance] = await Promise.all([
+        storage.getEmployees(),
+        storage.getDriverAttendance(undefined, targetDate),
+      ]);
+
+      const deliveryAssistants = allEmployees.filter(emp => {
+        const pos = (emp.position || "").trim().toLowerCase();
+        return pos === "delivery assistant" || pos === "delivery_assistant";
+      });
+
+      const attendanceByEmpId = new Map<string, any>();
+      for (const att of todayAttendance) {
+        if (att.driverId && att.checkInTime && att.status !== "absent") {
+          if (!attendanceByEmpId.has(att.driverId)) {
+            attendanceByEmpId.set(att.driverId, att);
+          }
+        }
+      }
+
+      const available = deliveryAssistants
+        .filter(emp => attendanceByEmpId.has(emp.id))
+        .map(emp => {
+          const att = attendanceByEmpId.get(emp.id);
+          return {
+            id: emp.id,
+            name: emp.name,
+            employeeCode: emp.employeeCode,
+            phone: emp.phone,
+            position: emp.position,
+            checkInTime: att?.checkInTime,
+            checkInLocation: att?.checkInLocation,
+            attendanceId: att?.id,
+            status: att?.status || "present",
+          };
+        });
+
+      res.json(available);
+    } catch (error: any) {
+      console.error("Get available delivery assistants error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch available delivery assistants" });
+    }
+  });
+
   app.patch("/api/drivers/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { id } = req.params;
+      const { defaultCrewMemberId } = req.body;
+
+      if (defaultCrewMemberId !== undefined) {
+        const userRole = (req.user?.role || "").toLowerCase();
+        const isSupervisorOrAdmin = userRole === "supervisor" || userRole === "admin" || userRole === "super_admin" || userRole.includes("supervisor");
+        if (!isSupervisorOrAdmin) {
+          return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
+        }
+
+        if (defaultCrewMemberId) {
+          const emp = await storage.getEmployee(defaultCrewMemberId);
+          if (!emp) {
+            return res.status(400).json({ error: "Selected crew member not found." });
+          }
+          const pos = (emp.position || "").trim().toLowerCase();
+          if (pos !== "delivery assistant" && pos !== "delivery_assistant") {
+            return res.status(400).json({ error: `Selected employee is a ${emp.position || 'Staff'}, but crew can only be allocated from Delivery Assistants.` });
+          }
+
+          const todayArabian = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+          const attRecords = await storage.getDriverAttendance(defaultCrewMemberId, todayArabian);
+          const hasRegisteredAttendance = Array.isArray(attRecords) && attRecords.some(a => a.checkInTime && a.status !== "absent");
+
+          if (!hasRegisteredAttendance) {
+            return res.status(400).json({ error: `Attendance is not registered for Delivery Assistant "${emp.name}" today. Crew can only be allocated from delivery assistants whose attendance is registered.` });
+          }
+        }
+      }
+
       const updated = await storage.updateDriver(id, req.body);
       res.json(updated);
     } catch (error: any) {
@@ -11356,6 +11447,34 @@ export async function registerRoutes(
           data.driverId = veh.assignedDriverId;
         }
       }
+      if (data.driverId && !data.crewMemberId) {
+        const [drv] = await db.select().from(schema.drivers).where(eq(schema.drivers.id, data.driverId));
+        if (drv?.defaultCrewMemberId) {
+          data.crewMemberId = drv.defaultCrewMemberId;
+        }
+      }
+      if (data.crewMemberId) {
+        const userRole = (req.user?.role || "").toLowerCase();
+        const userPos = String((req.user as any)?.position || "").toLowerCase();
+        const isSupervisorOrAdmin = userRole === "supervisor" || userRole === "admin" || userRole === "super_admin" || userPos.includes("supervisor") || userPos.includes("admin") || userPos.includes("manager");
+        if (!isSupervisorOrAdmin) {
+          return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
+        }
+        const targetDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+        const [allEmployees, todayAttendance] = await Promise.all([
+          storage.getEmployees(),
+          storage.getDriverAttendance(undefined, targetDate),
+        ]);
+        const targetEmp = allEmployees.find(e => e.id === data.crewMemberId);
+        const empPos = (targetEmp?.position || "").trim().toLowerCase();
+        if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
+          return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
+        }
+        const hasCheckedIn = todayAttendance.some(att => att.driverId === data.crewMemberId && att.checkInTime && att.status !== "absent");
+        if (!hasCheckedIn) {
+          return res.status(400).json({ error: "Selected Delivery Assistant has not registered attendance for today." });
+        }
+      }
       const truck = await storage.createDispatchTruckAssignment(data);
       res.status(201).json(truck);
     } catch (error) {
@@ -11381,6 +11500,28 @@ export async function registerRoutes(
         const [veh] = await db.select().from(schema.vehicles).where(eq(schema.vehicles.id, data.truckId));
         if (veh?.assignedDriverId) {
           data.driverId = veh.assignedDriverId;
+        }
+      }
+      if (data.crewMemberId) {
+        const userRole = (req.user?.role || "").toLowerCase();
+        const userPos = String((req.user as any)?.position || "").toLowerCase();
+        const isSupervisorOrAdmin = userRole === "supervisor" || userRole === "admin" || userRole === "super_admin" || userPos.includes("supervisor") || userPos.includes("admin") || userPos.includes("manager");
+        if (!isSupervisorOrAdmin) {
+          return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
+        }
+        const targetDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+        const [allEmployees, todayAttendance] = await Promise.all([
+          storage.getEmployees(),
+          storage.getDriverAttendance(undefined, targetDate),
+        ]);
+        const targetEmp = allEmployees.find(e => e.id === data.crewMemberId);
+        const empPos = (targetEmp?.position || "").trim().toLowerCase();
+        if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
+          return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
+        }
+        const hasCheckedIn = todayAttendance.some(att => att.driverId === data.crewMemberId && att.checkInTime && att.status !== "absent");
+        if (!hasCheckedIn) {
+          return res.status(400).json({ error: "Selected Delivery Assistant has not registered attendance for today." });
         }
       }
       const truck = await storage.updateDispatchTruckAssignment(req.params.id, data);

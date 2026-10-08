@@ -42,7 +42,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  Truck, Upload, FileText, Calendar, MapPin, User, Package, Store, Hourglass, AlertCircle,
+  Truck, Upload, FileText, Calendar, MapPin, User, Users, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
@@ -7024,14 +7024,23 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
 function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelectSheet, sheets }: any) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", zoneId: "", tripNumber: 1 });
-  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string; tripNumber: number } | null>(null);
+  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", crewMemberId: "", zoneId: "", tripNumber: 1 });
+  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string; crewMemberId?: string; tripNumber: number } | null>(null);
   const [expandedStorageTypes, setExpandedStorageTypes] = useState<Record<string, boolean>>({});
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [planningTab, setPlanningTab] = useState("unassigned");
   const [pendingAssignment, setPendingAssignment] = useState<{ title: string; description: string; payload: any } | null>(null);
 
   const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
+  const { data: availableAssistants = [] } = useQuery<any[]>({
+    queryKey: ["/api/crew/available-delivery-assistants"],
+  });
+
+  const getAssistantName = (id: string | null | undefined) => {
+    if (!id) return "";
+    const a = availableAssistants.find((item: any) => item.id === id);
+    return a ? a.name : "Assigned Crew";
+  };
 
   const { data: truckData, refetch } = useQuery<any>({
     queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`],
@@ -7052,7 +7061,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Truck added to dispatch!" });
-      setTruckForm({ truckId: "", driverId: "", zoneId: "", tripNumber: 1 });
+      setTruckForm({ truckId: "", driverId: "", crewMemberId: "", zoneId: "", tripNumber: 1 });
     },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
@@ -7066,8 +7075,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   });
 
   const updateTruckAssignmentMutation = useMutation({
-    mutationFn: (data: { id: string; truckId: string; driverId: string | null; tripNumber: number }) =>
-      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId, tripNumber: data.tripNumber }),
+    mutationFn: (data: { id: string; truckId: string; driverId: string | null; crewMemberId?: string | null; tripNumber: number }) =>
+      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId, crewMemberId: data.crewMemberId, tripNumber: data.tripNumber }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Assignment updated successfully!" });
@@ -7330,6 +7339,21 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     </SelectContent>
                   </Select>
                 </div>
+                {/* Delivery Assistant */}
+                <div className="space-y-2">
+                  <Label>Delivery Assistant (Optional)</Label>
+                  <Select value={truckForm.crewMemberId || "unassigned"} onValueChange={v => setTruckForm(f => ({ ...f, crewMemberId: v === "unassigned" ? "" : v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select assistant..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
+                      {availableAssistants.map((a: any) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name} ({a.employeeCode || "DA"})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 {/* Trip Number */}
                 <div className="space-y-2">
                   <Label>Trip Number <span className="text-red-500">*</span></Label>
@@ -7436,7 +7460,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                 </div>
                                 <div className="flex items-center shrink-0">
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
-                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", tripNumber: ta.tripNumber })}>
+                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", crewMemberId: ta.crewMemberId || "", tripNumber: ta.tripNumber })}>
                                     <Edit2 className="h-3 w-3" />
                                   </Button>
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
@@ -7471,6 +7495,14 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     : getDriverName(ta.driverId)}
                                 </span>
                               </p>
+                              {ta.crewMemberId && (
+                                <p className="text-[10px] text-primary/80 flex items-center gap-0.5 mt-0.5" title={`Crew: ${getAssistantName(ta.crewMemberId)}`}>
+                                  <Users className="h-2.5 w-2.5 shrink-0" />
+                                  <span className="truncate font-medium">
+                                    {getAssistantName(ta.crewMemberId)}
+                                  </span>
+                                </p>
+                              )}
                               <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
                                 <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                                   <MapPin className="h-2.5 w-2.5" /> {taOutletCount} Outlets
@@ -7853,6 +7885,23 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>Delivery Assistant (Crew)</Label>
+                <Select
+                  value={editAssignment.crewMemberId || "unassigned"}
+                  onValueChange={(val) => setEditAssignment((prev) => prev ? { ...prev, crewMemberId: val === "unassigned" ? "" : val } : null)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select delivery assistant" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
+                    {availableAssistants.map((a: any) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name} ({a.employeeCode || "DA"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
                 <Label>Trip Number</Label>
                 <Select
                   value={String(editAssignment.tripNumber || 1)}
@@ -7873,6 +7922,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     id: editAssignment.id,
                     truckId: editAssignment.truckId,
                     driverId: editAssignment.driverId || null,
+                    crewMemberId: editAssignment.crewMemberId || null,
                     tripNumber: editAssignment.tripNumber || 1,
                   })}
                   disabled={updateTruckAssignmentMutation.isPending}

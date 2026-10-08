@@ -17,6 +17,7 @@ export interface AuthUser {
   username: string;
   name: string | null;
   role: string;
+  position?: string | null;
   employeeId: string | null;
   companyId: string | null;
   shopId: string | null;
@@ -548,11 +549,28 @@ export const registerAuthRoutes = (app: any) => {
         return res.status(401).json({ error: "Incorrect password or username" });
       }
 
+      const pos = (emp.position || "").trim().toLowerCase();
+      let empRole = "driver";
+      if (pos === "admin") {
+        empRole = "admin";
+      } else if (pos === "supervisor") {
+        empRole = "supervisor";
+      } else if (pos === "manager") {
+        empRole = "manager";
+      } else if (pos === "delivery assistant" || pos === "delivery_assistant") {
+        empRole = "delivery_assistant";
+      } else if (pos === "driver") {
+        empRole = "driver";
+      } else if (pos) {
+        empRole = pos.replace(/\s+/g, "_");
+      }
+
       const authUser: AuthUser = {
         id: emp.id,
         username: emp.employeeCode,
         name: emp.name,
-        role: "driver",
+        role: empRole,
+        position: emp.position || null,
         employeeId: emp.id,
         companyId: emp.companyId,
         shopId: emp.shopId,

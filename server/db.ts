@@ -42,6 +42,7 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "loading_end_time" text;
       ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "loading_status" text DEFAULT 'pending';
       ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "supervisor_notes" text;
+      ALTER TABLE "dispatch_truck_assignments" ADD COLUMN IF NOT EXISTS "crew_member_id" varchar;
       ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "carried_from_item_id" varchar;
       ALTER TABLE "dispatch_items" ADD COLUMN IF NOT EXISTS "carried_to_item_id" varchar;
       ALTER TABLE "dispatch_deliveries" ADD COLUMN IF NOT EXISTS "returned_qty" numeric(10, 3) DEFAULT 0;

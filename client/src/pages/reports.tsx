@@ -53,6 +53,8 @@ export default function Reports() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>("all");
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>("all");
   const [selectedDriverId, setSelectedDriverId] = useState<string>("all");
+  const [selectedAttendanceEmployeeId, setSelectedAttendanceEmployeeId] = useState<string>("all");
+  const [selectedAttendanceCategory, setSelectedAttendanceCategory] = useState<string>("all");
 
   const getDateFilter = () => {
     const now = new Date();
@@ -168,7 +170,7 @@ export default function Reports() {
 
   const { data: driverAttendanceReport = [] } = useQuery<any[]>({
     queryKey: [
-      `/api/reports/driver-attendance?driverId=${selectedDriverId === "all" ? "" : selectedDriverId}&startDate=${currentDates.start.toISOString().split('T')[0]}&endDate=${currentDates.end.toISOString().split('T')[0]}`
+      `/api/reports/attendance?employeeId=${selectedAttendanceEmployeeId === "all" ? "" : selectedAttendanceEmployeeId}&category=${selectedAttendanceCategory === "all" ? "" : selectedAttendanceCategory}&startDate=${currentDates.start.toISOString().split('T')[0]}&endDate=${currentDates.end.toISOString().split('T')[0]}`
     ],
     enabled: activeReport === "driver-attendance",
   });
@@ -247,8 +249,8 @@ export default function Reports() {
     { id: "salary", label: "Salary Report", icon: Wallet },
     { id: "petty-cash", label: "Petty Cash Report", icon: Wallet },
     { id: "employee-work", label: "Employee Work Report", icon: Users },
-    { id: "driver-attendance", label: "Driver Attendance Report", icon: Users },
-    { id: "driver-delivery", label: "Driver Delivery Report", icon: Truck },
+    { id: "driver-attendance", label: "Attendance Report", icon: Users },
+    { id: "driver-delivery", label: "Daily Delivery Report", icon: Truck },
     { id: "customer-activity-utilization", label: "Customer Activity & Utilization", icon: FileSpreadsheet },
     { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck },
     { id: "trip-profitability", label: "Trip Profitability", icon: TrendingUp },
@@ -1708,8 +1710,10 @@ export default function Reports() {
   const renderDriverAttendanceReport = () => {
     const csvData = driverAttendanceReport.map(item => ({
       Date: item.checkInTime ? format(new Date(item.checkInTime), "yyyy-MM-dd") : "-",
-      Driver: item.driverName,
-      "Crew Member": item.crewMemberName || "-",
+      "Employee Name": item.employeeName || item.driverName || "-",
+      "Category": item.category || item.position || "-",
+      "Employee Code": item.employeeCode || "-",
+      "Crew / Assistant": item.crewMemberName || "-",
       "Check In": item.checkInTime ? format(new Date(item.checkInTime), "hh:mm a") : "-",
       "Check Out": item.checkOutTime ? format(new Date(item.checkOutTime), "hh:mm a") : "-",
       "Crew Check In": item.crewCheckInTime ? format(new Date(item.crewCheckInTime), "hh:mm a") : "-",
@@ -1723,24 +1727,48 @@ export default function Reports() {
       Status: item.status || "present"
     }));
 
+    const attendanceCategories = ["Admin", "Driver", "Delivery Assistant", "Supervisor", "Manager"];
+    const filteredEmployeesForAttendance = selectedAttendanceCategory === "all"
+      ? employeesList
+      : employeesList.filter(e => (e.position || "").trim().toLowerCase() === selectedAttendanceCategory.toLowerCase());
+
     return (
       <div className="space-y-4">
         <div className="flex gap-4 items-end justify-between flex-wrap no-print">
-          <div className="space-y-1">
-            <Label>Driver</Label>
-            <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="All Drivers" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Drivers</SelectItem>
-                {drivers.map((drv: any) => (
-                  <SelectItem key={drv.id} value={drv.id}>{drv.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex gap-4 items-end flex-wrap">
+            <div className="space-y-1">
+              <Label>Category</Label>
+              <Select value={selectedAttendanceCategory} onValueChange={(val) => {
+                setSelectedAttendanceCategory(val);
+                setSelectedAttendanceEmployeeId("all");
+              }}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {attendanceCategories.map(cat => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Employee</Label>
+              <Select value={selectedAttendanceEmployeeId} onValueChange={setSelectedAttendanceEmployeeId}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="All Employees" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Employees</SelectItem>
+                  {filteredEmployeesForAttendance.map((emp: any) => (
+                    <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.position || "Staff"})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <Button onClick={() => exportToCSV("driver-attendance-report", csvData)} variant="outline">
+          <Button onClick={() => exportToCSV("attendance-report", csvData)} variant="outline">
             <Printer className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
@@ -1781,69 +1809,79 @@ export default function Reports() {
           </Card>
         </div>
 
-        <Card>
-          <CardContent className="pt-4 p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Driver Name</TableHead>
-                  <TableHead>Crew Member</TableHead>
-                  <TableHead>Check-in</TableHead>
-                  <TableHead>Check-out</TableHead>
-                  <TableHead>Crew Check-in</TableHead>
-                  <TableHead>Crew Check-out</TableHead>
-                  <TableHead className="text-right">Opening KM</TableHead>
-                  <TableHead className="text-right">Closing KM</TableHead>
-                  <TableHead className="text-right">Total KM</TableHead>
-                  <TableHead className="text-right">Hours</TableHead>
-                  <TableHead className="text-right">Overtime</TableHead>
-                  <TableHead>Shift</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {driverAttendanceReport.map((row: any) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-medium">
-                      {row.checkInTime ? format(new Date(row.checkInTime), "yyyy-MM-dd") : "-"}
-                    </TableCell>
-                    <TableCell>{row.driverName}</TableCell>
-                    <TableCell className="font-semibold text-primary/80">{row.crewMemberName || "-"}</TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {row.checkInTime ? format(new Date(row.checkInTime), "hh:mm a") : "-"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {row.checkOutTime ? format(new Date(row.checkOutTime), "hh:mm a") : "-"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {row.crewCheckInTime ? format(new Date(row.crewCheckInTime), "hh:mm a") : "-"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {row.crewCheckOutTime ? format(new Date(row.crewCheckOutTime), "hh:mm a") : "-"}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{row.openingKm ?? "-"}</TableCell>
-                    <TableCell className="text-right font-mono">{row.closingKm ?? "-"}</TableCell>
-                    <TableCell className="text-right font-mono font-bold text-indigo-600 bg-indigo-50/30">{row.totalKm ?? "-"}</TableCell>
-                    <TableCell className="text-right font-mono">{row.shiftHours || "0.00"}</TableCell>
-                    <TableCell className="text-right font-mono">{row.overtimeHours || "0.00"}</TableCell>
-                    <TableCell className="capitalize text-xs text-muted-foreground">{row.shiftType}</TableCell>
-                    <TableCell>
-                      <Badge variant={row.status === "present" ? "default" : "secondary"}>
-                        {String(row.status).toUpperCase()}
-                      </Badge>
-                    </TableCell>
+        <Card className="overflow-hidden">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto w-full">
+              <Table className="min-w-[1550px] w-full">
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[110px]">Date</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[160px]">Employee Name</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[140px]">Category</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[90px]">Code</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Crew / Assistant</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Check-in</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Check-out</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[110px]">Crew Check-in</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[110px]">Crew Check-out</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[100px]">Opening KM</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[100px]">Closing KM</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[100px]">Total KM</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[90px]">Hours</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[90px]">Overtime</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[90px]">Shift</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Status</TableHead>
                   </TableRow>
-                ))}
-                {driverAttendanceReport.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
-                      No attendance records found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {driverAttendanceReport.map((row: any) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="font-medium whitespace-nowrap px-3 py-2.5">
+                        {row.checkInTime ? format(new Date(row.checkInTime), "yyyy-MM-dd") : "-"}
+                      </TableCell>
+                      <TableCell className="font-semibold whitespace-nowrap px-3 py-2.5">{row.employeeName || row.driverName}</TableCell>
+                      <TableCell className="whitespace-nowrap px-3 py-2.5">
+                        <Badge variant="outline" className="text-xs">
+                          {row.category || row.position || "Staff"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap px-3 py-2.5">{row.employeeCode || "-"}</TableCell>
+                      <TableCell className="font-semibold text-primary/80 whitespace-nowrap px-3 py-2.5">{row.crewMemberName || "-"}</TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap px-3 py-2.5">
+                        {row.checkInTime ? format(new Date(row.checkInTime), "hh:mm a") : "-"}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap px-3 py-2.5">
+                        {row.checkOutTime ? format(new Date(row.checkOutTime), "hh:mm a") : "-"}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap px-3 py-2.5">
+                        {row.crewCheckInTime ? format(new Date(row.crewCheckInTime), "hh:mm a") : "-"}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground whitespace-nowrap px-3 py-2.5">
+                        {row.crewCheckOutTime ? format(new Date(row.crewCheckOutTime), "hh:mm a") : "-"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono whitespace-nowrap px-3 py-2.5">{row.openingKm ?? "-"}</TableCell>
+                      <TableCell className="text-right font-mono whitespace-nowrap px-3 py-2.5">{row.closingKm ?? "-"}</TableCell>
+                      <TableCell className="text-right font-mono font-bold text-indigo-600 bg-indigo-50/30 whitespace-nowrap px-3 py-2.5">{row.totalKm ?? "-"}</TableCell>
+                      <TableCell className="text-right font-mono whitespace-nowrap px-3 py-2.5">{row.shiftHours || "0.00"}</TableCell>
+                      <TableCell className="text-right font-mono whitespace-nowrap px-3 py-2.5">{row.overtimeHours || "0.00"}</TableCell>
+                      <TableCell className="capitalize text-xs text-muted-foreground whitespace-nowrap px-3 py-2.5">{row.shiftType}</TableCell>
+                      <TableCell className="whitespace-nowrap px-3 py-2.5">
+                        <Badge variant={row.status === "present" ? "default" : "secondary"}>
+                          {String(row.status).toUpperCase()}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {driverAttendanceReport.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={16} className="text-center py-8 text-muted-foreground">
+                        No attendance records found.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -1856,6 +1894,7 @@ export default function Reports() {
       "Check-Out Time": item.deliveryEndTime ? format(new Date(item.deliveryEndTime), "hh:mm a") : (item.deliveredAt ? format(new Date(item.deliveredAt), "hh:mm a") : "-"),
       "Completion Time": item.deliveredAt ? format(new Date(item.deliveredAt), "yyyy-MM-dd hh:mm a") : (item.deliveryTime || "-"),
       Driver: item.driverName,
+      "Delivery Assistant": item.deliveryAssistantName || item.crewMemberName || "-",
       Zone: item.zoneName || "-",
       Outlet: `${item.outletName} (${item.outletCode})`,
       Product: `${item.description} (${item.itemCode})`,
@@ -1879,6 +1918,7 @@ export default function Reports() {
         "Check-Out Time": "",
         "Completion Time": "TOTALS",
         Driver: "",
+        "Delivery Assistant": "",
         Zone: "",
         Outlet: "",
         Product: "",
@@ -1909,7 +1949,7 @@ export default function Reports() {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={() => exportToCSV("driver-delivery-report", csvData)} variant="outline">
+          <Button onClick={() => exportToCSV("daily-delivery-report", csvData)} variant="outline">
             <Printer className="mr-2 h-4 w-4" />
             Export CSV
           </Button>
@@ -1966,105 +2006,111 @@ export default function Reports() {
           </Card>
         </div>
 
-        <Card>
-          <CardContent className="pt-4 p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Check-In</TableHead>
-                  <TableHead>Check-Out</TableHead>
-                  <TableHead>Completion</TableHead>
-                  <TableHead>Driver Name</TableHead>
-                  <TableHead>Zone/Route</TableHead>
-                  <TableHead>Outlet</TableHead>
-                  <TableHead>Product / Item</TableHead>
-                  <TableHead className="text-right">Req. Qty</TableHead>
-                  <TableHead className="text-right">Del. Qty</TableHead>
-                  <TableHead className="text-right">Remaining</TableHead>
-                  <TableHead className="text-right">Damaged</TableHead>
-                  <TableHead>Temp</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>POD</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {driverDeliveriesReport.map((row: any) => {
-                  const remainingVal = parseFloat(row.remainingQty || "0");
-                  const hasRemaining = remainingVal > 0;
-                  return (
-                    <TableRow 
-                      key={row.id}
-                      className={hasRemaining ? "bg-amber-50/80 hover:bg-amber-100/80 dark:bg-amber-950/20 dark:hover:bg-amber-950/30 transition-colors font-semibold" : ""}
-                    >
-                      <TableCell className="font-mono text-xs whitespace-nowrap text-blue-700 font-medium">
-                        {row.deliveryStartTime ? format(new Date(row.deliveryStartTime), "hh:mm a") : "-"}
+        <Card className="overflow-hidden">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto w-full">
+              <Table className="min-w-[1600px] w-full">
+                <TableHeader>
+                  <TableRow className="bg-muted/40">
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Check-In</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Check-Out</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Completion</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Driver Name</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Delivery Assistant</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[110px]">Zone/Route</TableHead>
+                    <TableHead className="px-3 py-3 min-w-[200px]">Outlet</TableHead>
+                    <TableHead className="px-3 py-3 min-w-[240px]">Product / Item</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[95px]">Req. Qty</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[95px]">Del. Qty</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[95px]">Remaining</TableHead>
+                    <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[90px]">Damaged</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[80px]">Temp</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Status</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[90px]">POD</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {driverDeliveriesReport.map((row: any) => {
+                    const remainingVal = parseFloat(row.remainingQty || "0");
+                    const hasRemaining = remainingVal > 0;
+                    return (
+                      <TableRow 
+                        key={row.id}
+                        className={hasRemaining ? "bg-amber-50/80 hover:bg-amber-100/80 dark:bg-amber-950/20 dark:hover:bg-amber-950/30 transition-colors font-semibold" : ""}
+                      >
+                        <TableCell className="font-mono text-xs whitespace-nowrap text-blue-700 font-medium px-3 py-2.5">
+                          {row.deliveryStartTime ? format(new Date(row.deliveryStartTime), "hh:mm a") : "-"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs whitespace-nowrap text-purple-700 font-medium px-3 py-2.5">
+                          {row.deliveryEndTime ? format(new Date(row.deliveryEndTime), "hh:mm a") : (row.deliveredAt ? format(new Date(row.deliveredAt), "hh:mm a") : "-")}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs whitespace-nowrap px-3 py-2.5">
+                          {row.deliveredAt ? format(new Date(row.deliveredAt), "yyyy-MM-dd hh:mm a") : "-"}
+                          {row.deliveryTime ? ` (${row.deliveryTime})` : ""}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap font-medium px-3 py-2.5">{row.driverName}</TableCell>
+                        <TableCell className="font-semibold text-primary/80 whitespace-nowrap px-3 py-2.5">
+                          {row.deliveryAssistantName || row.crewMemberName || "-"}
+                        </TableCell>
+                        <TableCell className="text-xs whitespace-nowrap px-3 py-2.5">{row.zoneName || "-"}</TableCell>
+                        <TableCell className="px-3 py-2.5">
+                          <div className="text-sm font-semibold">{row.outletName}</div>
+                          <div className="text-xs text-muted-foreground whitespace-nowrap">Code: {row.outletCode}</div>
+                        </TableCell>
+                        <TableCell className="px-3 py-2.5">
+                          <div className="text-sm">{row.description}</div>
+                          <div className="text-xs text-muted-foreground font-mono">{row.itemCode}</div>
+                        </TableCell>
+                        <TableCell className="text-right font-mono whitespace-nowrap px-3 py-2.5">{row.requestedQty || row.weight || "-"}</TableCell>
+                        <TableCell className="text-right font-mono text-green-700 font-bold whitespace-nowrap px-3 py-2.5">{row.deliveredQty ?? "-"}</TableCell>
+                        <TableCell className="text-right font-mono text-amber-700 font-bold whitespace-nowrap px-3 py-2.5">{row.remainingQty ?? "-"}</TableCell>
+                        <TableCell className="text-right font-mono text-orange-600 whitespace-nowrap px-3 py-2.5">{row.damagedQty ?? "-"}</TableCell>
+                        <TableCell className="font-mono text-xs whitespace-nowrap px-3 py-2.5">{row.temperature || "-"}</TableCell>
+                        <TableCell className="whitespace-nowrap px-3 py-2.5">
+                          <Badge variant={row.status === "delivered" ? "default" : (row.status === "partial" || row.status === "partially_delivered") ? "outline" : "destructive"}>
+                            {String(row.status === "partially_delivered" ? "partial" : row.status).toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap px-3 py-2.5">
+                          {row.podUrl ? (
+                            <a href={row.podUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline text-xs">
+                              View POD
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No POD</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {driverDeliveriesReport.length > 0 && (
+                    <TableRow className="bg-slate-100 font-bold hover:bg-slate-100 dark:bg-slate-800">
+                      <TableCell colSpan={8} className="text-right px-3 py-2.5">Totals:</TableCell>
+                      <TableCell className="text-right font-mono px-3 py-2.5">
+                        {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.requestedQty || row.weight || "0"), 0).toFixed(3)}
                       </TableCell>
-                      <TableCell className="font-mono text-xs whitespace-nowrap text-purple-700 font-medium">
-                        {row.deliveryEndTime ? format(new Date(row.deliveryEndTime), "hh:mm a") : (row.deliveredAt ? format(new Date(row.deliveredAt), "hh:mm a") : "-")}
+                      <TableCell className="text-right font-mono text-green-700 px-3 py-2.5">
+                        {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.deliveredQty || "0"), 0).toFixed(3)}
                       </TableCell>
-                      <TableCell className="font-mono text-xs whitespace-nowrap">
-                        {row.deliveredAt ? format(new Date(row.deliveredAt), "yyyy-MM-dd hh:mm a") : "-"}
-                        {row.deliveryTime ? ` (${row.deliveryTime})` : ""}
+                      <TableCell className="text-right font-mono text-amber-700 px-3 py-2.5">
+                        {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.remainingQty || "0"), 0).toFixed(3)}
                       </TableCell>
-                      <TableCell>{row.driverName}</TableCell>
-                      <TableCell className="text-xs">{row.zoneName || "-"}</TableCell>
-                      <TableCell>
-                        <div className="text-sm font-semibold">{row.outletName}</div>
-                        <div className="text-xs text-muted-foreground">Code: {row.outletCode}</div>
+                      <TableCell className="text-right font-mono text-orange-600 px-3 py-2.5">
+                        {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.damagedQty || "0"), 0).toFixed(3)}
                       </TableCell>
-                      <TableCell>
-                        <div className="text-sm">{row.description}</div>
-                        <div className="text-xs text-muted-foreground font-mono">{row.itemCode}</div>
-                      </TableCell>
-                      <TableCell className="text-right font-mono">{row.requestedQty || row.weight || "-"}</TableCell>
-                      <TableCell className="text-right font-mono text-green-700 font-bold">{row.deliveredQty ?? "-"}</TableCell>
-                      <TableCell className="text-right font-mono text-amber-700 font-bold">{row.remainingQty ?? "-"}</TableCell>
-                      <TableCell className="text-right font-mono text-orange-600">{row.damagedQty ?? "-"}</TableCell>
-                      <TableCell className="font-mono text-xs">{row.temperature || "-"}</TableCell>
-                      <TableCell>
-                        <Badge variant={row.status === "delivered" ? "default" : (row.status === "partial" || row.status === "partially_delivered") ? "outline" : "destructive"}>
-                          {String(row.status === "partially_delivered" ? "partial" : row.status).toUpperCase()}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {row.podUrl ? (
-                          <a href={row.podUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline text-xs">
-                            View POD
-                          </a>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">No POD</span>
-                        )}
+                      <TableCell colSpan={3} className="px-3 py-2.5"></TableCell>
+                    </TableRow>
+                  )}
+                  {driverDeliveriesReport.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
+                        No delivery logs found.
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-                {driverDeliveriesReport.length > 0 && (
-                  <TableRow className="bg-slate-100 font-bold hover:bg-slate-100 dark:bg-slate-800">
-                    <TableCell colSpan={7} className="text-right">Totals:</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.requestedQty || row.weight || "0"), 0).toFixed(3)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-green-700">
-                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.deliveredQty || "0"), 0).toFixed(3)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-amber-700">
-                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.remainingQty || "0"), 0).toFixed(3)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-orange-600">
-                      {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.damagedQty || "0"), 0).toFixed(3)}
-                    </TableCell>
-                    <TableCell colSpan={3}></TableCell>
-                  </TableRow>
-                )}
-                {driverDeliveriesReport.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
-                      No delivery logs found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -2762,7 +2808,7 @@ export default function Reports() {
             </CardContent>
           </Card>
         </div>
-        <div className="col-span-9 print:col-span-12">
+        <div className="col-span-9 print:col-span-12 min-w-0">
           <Card className="print:border-0 print:shadow-none">
             <CardHeader className="print:px-0 print:pt-0">
               <CardTitle className="flex items-center gap-2 print:text-2xl">

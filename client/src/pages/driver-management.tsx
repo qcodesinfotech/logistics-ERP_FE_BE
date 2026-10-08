@@ -12,6 +12,8 @@ import { StatusBadge } from "@/components/status-badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/auth-context";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,6 +22,8 @@ export default function DriverManagementPage() {
   const [activeTab, setActiveTab] = useState("profiles");
   const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isSupervisor = user?.role === "supervisor" || user?.role === "admin" || user?.role === "super_admin" || (user?.role?.toLowerCase().includes("supervisor"));
 
   const { data: drivers = [] } = useQuery<any[]>({
     queryKey: ["/api/drivers"],
@@ -27,6 +31,10 @@ export default function DriverManagementPage() {
 
   const { data: employees = [] } = useQuery<any[]>({
     queryKey: ["/api/employees/minimal"],
+  });
+
+  const { data: availableCrew = [] } = useQuery<any[]>({
+    queryKey: ["/api/crew/available-delivery-assistants"],
   });
 
   const assignCrewMutation = useMutation({
@@ -207,43 +215,68 @@ export default function DriverManagementPage() {
                     <TableHead>Package Type</TableHead>
                     <TableHead>Base Salary</TableHead>
                     <TableHead>Holiday Pay Rate</TableHead>
-                    <TableHead>Default Crew Member</TableHead>
+                    <TableHead>Assigned Delivery Assistant (Crew)</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {drivers.map((driver: any) => (
-                    <TableRow key={driver.id} className="hover:bg-accent/40 transition-colors">
-                      <TableCell className="font-semibold">{driver.name}</TableCell>
-                      <TableCell className="capitalize text-xs font-mono">{driver.packageType}</TableCell>
-                      <TableCell className="text-right"><CurrencyDisplay amount={driver.baseSalary} /></TableCell>
-                      <TableCell className="font-mono text-xs">{driver.holidayPayRate}</TableCell>
-                      <TableCell>
-                        <Select
-                          value={driver.defaultCrewMemberId || "unassigned"}
-                          onValueChange={(val) => {
-                            assignCrewMutation.mutate({
-                              driverId: driver.id,
-                              crewMemberId: val === "unassigned" ? null : val,
-                            });
-                          }}
-                        >
-                          <SelectTrigger className="w-[180px] h-8 text-xs">
-                            <SelectValue placeholder="Select crew..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="unassigned" className="text-muted-foreground italic text-xs">None (Unassigned)</SelectItem>
-                            {employees.map((emp: any) => (
-                              <SelectItem key={emp.id} value={emp.id} className="text-xs">
-                                {emp.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell><StatusBadge status={driver.status} /></TableCell>
-                    </TableRow>
-                  ))}
+                  {drivers.map((driver: any) => {
+                    const assignedEmp = employees.find((e: any) => e.id === driver.defaultCrewMemberId);
+                    return (
+                      <TableRow key={driver.id} className="hover:bg-accent/40 transition-colors">
+                        <TableCell className="font-semibold">{driver.name}</TableCell>
+                        <TableCell className="capitalize text-xs font-mono">{driver.packageType}</TableCell>
+                        <TableCell className="text-right"><CurrencyDisplay amount={driver.baseSalary} /></TableCell>
+                        <TableCell className="font-mono text-xs">{driver.holidayPayRate}</TableCell>
+                        <TableCell>
+                          {!isSupervisor ? (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Crew assignment must be done by a supervisor">
+                              <span className="font-medium text-foreground">
+                                {assignedEmp?.name || "Unassigned"}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground italic">(Supervisor only)</span>
+                            </div>
+                          ) : (
+                            <Select
+                              value={driver.defaultCrewMemberId || "unassigned"}
+                              onValueChange={(val) => {
+                                assignCrewMutation.mutate({
+                                  driverId: driver.id,
+                                  crewMemberId: val === "unassigned" ? null : val,
+                                });
+                              }}
+                            >
+                              <SelectTrigger className="w-[210px] h-8 text-xs">
+                                <SelectValue placeholder="Select delivery assistant..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned" className="text-muted-foreground italic text-xs">
+                                  None (Unassigned)
+                                </SelectItem>
+                                {driver.defaultCrewMemberId && !availableCrew.some((ac: any) => ac.id === driver.defaultCrewMemberId) && assignedEmp && (
+                                  <SelectItem key={assignedEmp.id} value={assignedEmp.id} className="text-xs text-amber-600">
+                                    {assignedEmp.name} (Not checked in today)
+                                  </SelectItem>
+                                )}
+                                {availableCrew.map((emp: any) => (
+                                  <SelectItem key={emp.id} value={emp.id} className="text-xs">
+                                    <span className="font-medium text-emerald-600 dark:text-emerald-400">✓ {emp.name}</span>
+                                    <span className="text-[10px] text-muted-foreground ml-1">({emp.employeeCode})</span>
+                                  </SelectItem>
+                                ))}
+                                {availableCrew.length === 0 && !driver.defaultCrewMemberId && (
+                                  <div className="px-2 py-1.5 text-[11px] text-muted-foreground text-center italic">
+                                    No delivery assistants checked in today
+                                  </div>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
+                        <TableCell><StatusBadge status={driver.status} /></TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>

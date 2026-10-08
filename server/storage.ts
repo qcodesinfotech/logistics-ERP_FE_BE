@@ -8853,16 +8853,27 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(driverAttendance.checkInTime));
 
     const employeesList = await this.getEmployees();
-    const employeeMap = new Map(employeesList.map(e => [e.id, e.name]));
+    const employeeMap = new Map(employeesList.map(e => [e.id, e]));
     
     return list.map(item => {
       const opening = item.openingKm !== null && item.openingKm !== undefined ? parseInt(item.openingKm.toString()) : null;
       const closing = item.closingKm !== null && item.closingKm !== undefined ? parseInt(item.closingKm.toString()) : null;
       const totalKm = (opening !== null && closing !== null) ? (closing - opening) : null;
+      const emp = employeeMap.get(item.driverId);
+      const empName = emp?.name || "Unknown Employee";
+      const empCode = emp?.employeeCode || "-";
+      const empPos = emp?.position || "Staff";
+      const crewEmp = item.crewMemberId ? employeeMap.get(item.crewMemberId) : null;
+
       return {
         ...item,
-        driverName: employeeMap.get(item.driverId) || "Unknown Driver",
-        crewMemberName: item.crewMemberId ? (employeeMap.get(item.crewMemberId) || "Unknown Crew Member") : null,
+        employeeId: item.driverId,
+        employeeName: empName,
+        employeeCode: empCode,
+        position: empPos,
+        category: empPos,
+        driverName: empName,
+        crewMemberName: crewEmp?.name || (item.crewMemberId ? "Unknown Crew Member" : null),
         totalKm
       };
     });
@@ -9004,6 +9015,39 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    // Map drivers default crew member and truck assignments crew member
+    const driverDefaultCrewMap = new Map<string, string>();
+    for (const d of driversList) {
+      if (d.defaultCrewMemberId) {
+        driverDefaultCrewMap.set(d.id, d.defaultCrewMemberId);
+      }
+    }
+    const truckCrewMap = new Map<string, string>();
+    for (const t of truckAssigns) {
+      if (t.crewMemberId) {
+        truckCrewMap.set(t.id, t.crewMemberId);
+      }
+    }
+
+    // Load attendance records that had crew assigned
+    const attendancesWithCrew = await db.select({
+      driverId: driverAttendance.driverId,
+      crewMemberId: driverAttendance.crewMemberId,
+      date: sql<string>`TO_CHAR(driver_attendance.check_in_time AT TIME ZONE 'Asia/Riyadh', 'YYYY-MM-DD')`
+    })
+    .from(driverAttendance)
+    .where(isNotNull(driverAttendance.crewMemberId));
+
+    const driverDateCrewMap = new Map<string, string>();
+    for (const att of attendancesWithCrew) {
+      if (att.driverId && att.crewMemberId && att.date) {
+        driverDateCrewMap.set(`${att.driverId}:${att.date}`, att.crewMemberId);
+      }
+    }
+
+    const allEmployeesList = await this.getEmployees();
+    const employeeNameMap = new Map(allEmployeesList.map(e => [e.id, e.name]));
+
     return list.map(item => {
       const sId = item.sheetId;
       const outletId = item.outletId;
@@ -9047,11 +9091,35 @@ export class DatabaseStorage implements IStorage {
 
       const resolvedRoute = effectiveZoneId ? routeMap.get(effectiveZoneId) : null;
 
+      // Resolve Delivery Assistant assigned to this delivery
+      const rawSheetDate = item.sheetDate as any;
+      const sheetDateStr = rawSheetDate ? (typeof rawSheetDate === 'string' ? rawSheetDate.split('T')[0] : (rawSheetDate.toISOString ? rawSheetDate.toISOString().split('T')[0] : String(rawSheetDate).split('T')[0])) : null;
+      const rawDelDate = item.deliveredAt as any;
+      const deliveryDateStr = rawDelDate ? (typeof rawDelDate === 'string' ? rawDelDate.split('T')[0] : (rawDelDate.toISOString ? rawDelDate.toISOString().split('T')[0] : String(rawDelDate).split('T')[0])) : sheetDateStr;
+
+      let assignedCrewId: string | null = null;
+      if (tAssignId && truckCrewMap.has(tAssignId)) {
+        assignedCrewId = truckCrewMap.get(tAssignId)!;
+      } else if (driverTruck?.id && truckCrewMap.has(driverTruck.id)) {
+        assignedCrewId = truckCrewMap.get(driverTruck.id)!;
+      } else if (item.driverId && deliveryDateStr && driverDateCrewMap.has(`${item.driverId}:${deliveryDateStr}`)) {
+        assignedCrewId = driverDateCrewMap.get(`${item.driverId}:${deliveryDateStr}`)!;
+      } else if (item.driverId && sheetDateStr && driverDateCrewMap.has(`${item.driverId}:${sheetDateStr}`)) {
+        assignedCrewId = driverDateCrewMap.get(`${item.driverId}:${sheetDateStr}`)!;
+      } else if (item.driverId && driverDefaultCrewMap.has(item.driverId)) {
+        assignedCrewId = driverDefaultCrewMap.get(item.driverId)!;
+      }
+
+      const deliveryAssistantName = assignedCrewId ? (employeeNameMap.get(assignedCrewId) || "Unknown Assistant") : null;
+
       return {
         ...item,
         routeId: effectiveZoneId || item.routeId,
         zoneName: resolvedRoute?.name || item.zoneName || "Unknown Route",
-        driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned"
+        driverName: item.driverId ? (driverMap.get(item.driverId) || "Unknown Driver") : "Unassigned",
+        deliveryAssistantId: assignedCrewId,
+        deliveryAssistantName: deliveryAssistantName,
+        crewMemberName: deliveryAssistantName,
       };
     });
   }

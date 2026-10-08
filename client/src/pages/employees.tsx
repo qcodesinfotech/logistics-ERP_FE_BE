@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { UserCircle, Plus, Pencil, Trash2, DollarSign, CreditCard, RotateCcw, FileText, Printer, History, Upload, X, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -86,6 +87,7 @@ export default function Employees() {
   const [isAdvanceDialogOpen, setIsAdvanceDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const { toast } = useToast();
 
   const currentDate = new Date();
@@ -571,7 +573,21 @@ export default function Employees() {
     },
     { key: "employeeCode", header: "Code" },
     { key: "name", header: "Name" },
-    { key: "position", header: "Position", render: (e: Employee) => e.position || "-" },
+    { 
+      key: "position", 
+      header: "Category", 
+      render: (e: Employee) => {
+        const pos = e.position || "-";
+        const pLower = pos.toLowerCase();
+        let badgeClass = "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+        if (pLower === "admin") badgeClass = "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200";
+        else if (pLower === "driver") badgeClass = "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200";
+        else if (pLower === "delivery assistant") badgeClass = "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200";
+        else if (pLower === "supervisor") badgeClass = "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200";
+        else if (pLower === "manager") badgeClass = "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200";
+        return <Badge variant="outline" className={`font-medium ${badgeClass}`}>{pos}</Badge>;
+      } 
+    },
     { key: "department", header: "Department", render: (e: Employee) => e.department || "-" },
     { key: "phone", header: "Phone", render: (e: Employee) => e.phone || "-" },
     {
@@ -706,7 +722,29 @@ export default function Employees() {
 
         <TabsContent value="employees">
           <Card>
-            <CardContent className="pt-6">
+            <CardHeader className="pb-3 flex flex-row items-center justify-between flex-wrap gap-4">
+              <div>
+                <CardTitle className="text-base font-semibold">Employee Directory</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">Filter staff by department category or position.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground font-medium">Category:</span>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="w-[180px] h-8 text-xs">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="Admin">Admin</SelectItem>
+                    <SelectItem value="Driver">Driver</SelectItem>
+                    <SelectItem value="Delivery Assistant">Delivery Assistant</SelectItem>
+                    <SelectItem value="Supervisor">Supervisor</SelectItem>
+                    <SelectItem value="Manager">Manager</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-2">
               {isLoading ? (
                 <TableSkeleton rows={5} cols={8} />
               ) : !employees || employees.length === 0 ? (
@@ -721,7 +759,14 @@ export default function Employees() {
                   </Button>
                 </EmptyState>
               ) : (
-                <DataTable columns={employeeColumns} data={employees} getRowKey={(e) => e.id} />
+                <DataTable 
+                  columns={employeeColumns} 
+                  data={employees.filter(e => {
+                    if (categoryFilter === "all") return true;
+                    return (e.position || "").trim().toLowerCase() === categoryFilter.toLowerCase();
+                  })} 
+                  getRowKey={(e) => e.id} 
+                />
               )}
             </CardContent>
           </Card>
@@ -827,15 +872,18 @@ export default function Employees() {
                 )} />
                 <FormField control={form.control} name="position" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Position</FormLabel>
+                    <FormLabel>Category / Position</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select position" /></SelectTrigger>
+                        <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        <SelectItem value="Admin">Admin</SelectItem>
                         <SelectItem value="Driver">Driver</SelectItem>
-                        <SelectItem value="Staff">Staff</SelectItem>
+                        <SelectItem value="Delivery Assistant">Delivery Assistant</SelectItem>
+                        <SelectItem value="Supervisor">Supervisor</SelectItem>
                         <SelectItem value="Manager">Manager</SelectItem>
+                        <SelectItem value="Staff">Staff</SelectItem>
                         <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
                     </Select>
