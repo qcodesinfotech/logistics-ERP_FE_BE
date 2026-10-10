@@ -10894,15 +10894,16 @@ export async function registerRoutes(
       let syncedTruckAssignments = 0;
       try {
         for (const ta of matchedTAs) {
-          const hasStarted = !!(ta.loadingStartTime && ta.loadingStartTime.trim() !== "" && ta.loadingStartTime !== "-");
-          const hasCompleted = !!(ta.loadingEndTime && ta.loadingEndTime.trim() !== "" && ta.loadingEndTime !== "-") || 
-                               ta.loadingStatus === "loaded" || ta.loadingStatus === "dispatched";
-
           const updatePayload: any = {
             departTime: formattedDepartTime,
+            loadingStatus: "dispatched",
           };
-          if (hasCompleted || ta.loadingStatus === "loaded") {
-            updatePayload.loadingStatus = "dispatched";
+          if (!ta.loadingEndTime || ta.loadingEndTime.trim() === "" || ta.loadingEndTime === "-") {
+            updatePayload.loadingEndTime = formattedDepartTime;
+          }
+          if (!ta.loadingStartTime || ta.loadingStartTime.trim() === "" || ta.loadingStartTime === "-") {
+            const estStartTime = targetRecord.checkInTime ? formatTime12h(targetRecord.checkInTime) : formattedDepartTime;
+            updatePayload.loadingStartTime = estStartTime;
           }
           await storage.updateDispatchTruckAssignment(ta.id, updatePayload);
           syncedTruckAssignments++;
@@ -11571,20 +11572,7 @@ export async function registerRoutes(
       }
       const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes } = req.body;
 
-      // Validate: Cannot depart truck if loading is not both started and completed
-      if (departTime || loadingStatus === "dispatched") {
-        const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
-        const effStartTime = loadingStartTime !== undefined ? loadingStartTime : existingTa?.loadingStartTime;
-        const effEndTime = loadingEndTime !== undefined ? loadingEndTime : existingTa?.loadingEndTime;
-        const effStatus = loadingStatus !== undefined ? loadingStatus : existingTa?.loadingStatus;
-
-        const hasStarted = !!(effStartTime && effStartTime.trim() !== "" && effStartTime !== "-");
-        const hasCompleted = !!(effEndTime && effEndTime.trim() !== "" && effEndTime !== "-") || effStatus === "loaded" || effStatus === "dispatched";
-
-        if (!hasStarted || !hasCompleted) {
-          return res.status(400).json({ error: "Cannot mark truck departed: Both loading start and loading completion must be recorded first." });
-        }
-      }
+      const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
 
       const updateData: any = {};
       if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
@@ -11593,6 +11581,21 @@ export async function registerRoutes(
       if (reportingTime !== undefined) updateData.reportingTime = reportingTime;
       if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
       if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
+
+      // When starting loading, set status to loading if currently pending
+      if (loadingStartTime && (!existingTa?.loadingEndTime && !loadingEndTime) && (!existingTa?.departTime && !departTime) && !loadingStatus) {
+        updateData.loadingStatus = "loading";
+      }
+
+      // If user is explicitly dispatching a truck, auto-fill end time if missing
+      const isExplicitDispatch = (loadingStatus === "dispatched" && existingTa?.loadingStatus !== "dispatched") ||
+                                 (departTime && departTime.trim() !== "" && !existingTa?.departTime);
+      if (isExplicitDispatch) {
+        if (!existingTa?.loadingEndTime && !updateData.loadingEndTime) {
+          updateData.loadingEndTime = departTime || formatTime12h(new Date());
+        }
+      }
+
 
       // Auto-retroactive dispatch: If loading is completed (or marked loaded) and departTime is not set, check if driver already departed
       if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
@@ -11632,20 +11635,6 @@ export async function registerRoutes(
       const existingTrucks = await storage.getDispatchTruckAssignments(sheetId);
       const matched = existingTrucks.find((t: any) => t.zoneId === routeId);
 
-      // Validate: Cannot depart truck if loading is not both started and completed
-      if (departTime || loadingStatus === "dispatched") {
-        const effStartTime = loadingStartTime !== undefined ? loadingStartTime : matched?.loadingStartTime;
-        const effEndTime = loadingEndTime !== undefined ? loadingEndTime : matched?.loadingEndTime;
-        const effStatus = loadingStatus !== undefined ? loadingStatus : matched?.loadingStatus;
-
-        const hasStarted = !!(effStartTime && effStartTime.trim() !== "" && effStartTime !== "-");
-        const hasCompleted = !!(effEndTime && effEndTime.trim() !== "" && effEndTime !== "-") || effStatus === "loaded" || effStatus === "dispatched";
-
-        if (!hasStarted || !hasCompleted) {
-          return res.status(400).json({ error: "Cannot dispatch truck: Both loading start and loading completion must be recorded first." });
-        }
-      }
-
       if (matched) {
         const updateData: any = {};
         if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime === "" ? null : loadingStartTime;
@@ -11654,6 +11643,21 @@ export async function registerRoutes(
         if (reportingTime !== undefined) updateData.reportingTime = reportingTime === "" ? null : reportingTime;
         if (loadingStatus !== undefined) updateData.loadingStatus = loadingStatus;
         if (supervisorNotes !== undefined) updateData.supervisorNotes = supervisorNotes;
+
+        // When starting loading, set status to loading if currently pending
+        if (loadingStartTime && (!matched.loadingEndTime && !loadingEndTime) && (!matched.departTime && !departTime) && !loadingStatus) {
+          updateData.loadingStatus = "loading";
+        }
+
+        // If user is explicitly dispatching, auto-fill end time if missing
+        const isExplicitDispatch = (loadingStatus === "dispatched" && matched.loadingStatus !== "dispatched") ||
+                                   (departTime && departTime.trim() !== "" && !matched.departTime);
+        if (isExplicitDispatch) {
+          if (!matched.loadingEndTime && !updateData.loadingEndTime) {
+            updateData.loadingEndTime = departTime || formatTime12h(new Date());
+          }
+        }
+
         if (truckId) {
           updateData.truckId = truckId;
           if (!driverId && !matched.driverId) {

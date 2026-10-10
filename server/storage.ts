@@ -3951,17 +3951,16 @@ export class DatabaseStorage implements IStorage {
               needsUpdate = true;
             }
             (t as any).isAutoDeparted = true;
-            const hasStarted = !!(t.loadingStartTime && t.loadingStartTime.trim() !== "" && t.loadingStartTime !== "-");
-            const hasCompleted = !!(t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-") || t.loadingStatus === "loaded" || t.loadingStatus === "dispatched";
-            if (hasStarted && hasCompleted) {
-              if (t.loadingStatus !== "dispatched") {
-                t.loadingStatus = "dispatched";
-                updateData.loadingStatus = "dispatched";
-                needsUpdate = true;
-              }
+            if (t.loadingStatus !== "dispatched") {
+              t.loadingStatus = "dispatched";
+              updateData.loadingStatus = "dispatched";
+              needsUpdate = true;
             }
-          } else if (matchedAtt.departureTime) {
-            (t as any).isAutoDeparted = true;
+            if (!t.loadingEndTime || t.loadingEndTime.trim() === "" || t.loadingEndTime === "-") {
+              t.loadingEndTime = formattedDep;
+              updateData.loadingEndTime = formattedDep;
+              needsUpdate = true;
+            }
           }
 
           // If driver clocked into this truck, synchronize driverId

@@ -2729,9 +2729,12 @@ function ZoneColumn({
                 type="button"
                 size="sm"
                 onClick={() => {
-                  if (timingForm.departTime || timingForm.loadingStatus === "dispatched") {
+                  // Only validate dispatch completion if user is explicitly setting dispatched status or a new depart time
+                  const isExplicitDispatch = (timingForm.loadingStatus === "dispatched" && primaryTruck?.loadingStatus !== "dispatched") ||
+                                             (timingForm.departTime && !primaryTruck?.departTime);
+                  if (isExplicitDispatch) {
                     const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
-                    const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded" || timingForm.loadingStatus === "dispatched";
+                    const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded";
                     if (!hasStarted || !hasCompleted) {
                       toast({
                         title: "Loading Incomplete",
