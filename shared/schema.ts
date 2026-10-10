@@ -747,6 +747,7 @@ export const outlets = pgTable("outlets", {
   contactPhone: text("contact_phone"),
   status: text("status").notNull().default("active"),
   isVendor: boolean("is_vendor").default(false),
+  disableGeofence: boolean("disable_geofence").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -8357,8 +8357,9 @@ export async function registerRoutes(
           const outletLat = parseFloat(outlet?.latitude || "");
           const outletLon = parseFloat(outlet?.longitude || "");
           const hasOutletCoords = !isNaN(outletLat) && !isNaN(outletLon) && outletLat !== 0 && outletLon !== 0;
+          const isGeofenceDisabled = outlet?.disableGeofence === true;
 
-          if (hasOutletCoords) {
+          if (hasOutletCoords && !isGeofenceDisabled) {
             const driverLat = parseFloat(req.body.driverLatitude || req.body.deliveryLatitude || req.body.latitude || "");
             const driverLon = parseFloat(req.body.driverLongitude || req.body.deliveryLongitude || req.body.longitude || "");
             const hasDriverCoords = !isNaN(driverLat) && !isNaN(driverLon);
@@ -10692,12 +10693,40 @@ export async function registerRoutes(
       const existingToday = await storage.getDriverAttendance(effectiveDriverId, todayArabian);
       const isSecondLogin = Array.isArray(existingToday) && existingToday.length > 0;
 
-      // First login of the day is restricted to within 100 meters of the authorized warehouse location.
+      // Check supervisor / privileged authorization or bypass
+      const callerRole = (req.user?.role || "").toLowerCase();
+      const isPrivilegedCaller = callerRole === "super_admin" || callerRole === "admin" || callerRole === "supervisor" || callerRole.includes("supervisor") || callerRole === "manager";
+      
+      const { supervisorUsername, supervisorPassword } = req.body;
+      let supervisorApproved = false;
+      if (supervisorUsername && supervisorPassword) {
+        try {
+          const bcryptLib = await import("bcrypt");
+          const [sup] = await db.select().from(schema.users).where(
+            sql`LOWER(TRIM(${schema.users.username})) = LOWER(TRIM(${supervisorUsername}))`
+          );
+          if (sup && sup.password) {
+            const isValid = await bcryptLib.default.compare(supervisorPassword, sup.password);
+            if (isValid) {
+              const r = (sup.role || "").toLowerCase();
+              if (r === "super_admin" || r === "admin" || r === "supervisor" || r.includes("supervisor") || r === "manager") {
+                supervisorApproved = true;
+              }
+            }
+          }
+        } catch (authErr) {
+          console.warn("Supervisor attendance check auth error:", authErr);
+        }
+      }
+
+      // First login of the day is restricted to within 100 meters of the authorized warehouse location
+      // UNLESS authorized by supervisor/admin or executed directly by supervisor/admin in ERP.
       // Second/subsequent logins on the same day are permitted from ANY location.
-      if (!isSecondLogin) {
+      if (!isSecondLogin && !isPrivilegedCaller && !supervisorApproved) {
         if (authorizedPlaces.some(p => p.latitude && p.longitude) && minDistance > 100) {
           return res.status(403).json({
-            error: `First check-in for the day is restricted to the authorized warehouse/depot location (within 100 meters). You are currently ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}.`
+            error: `First check-in for the day is restricted to the authorized warehouse/depot location (within 100 meters). You are currently ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}.`,
+            canSupervisorOverride: true,
           });
         }
       }

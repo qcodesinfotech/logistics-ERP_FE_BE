@@ -4,9 +4,10 @@ import { useLocation } from "wouter";
 import * as XLSX from "xlsx";
 import {
   Store, Plus, Edit, Trash2, MapPin, Globe, Check, ChevronDown, ChevronRight, Route as RouteIcon, Eye,
-  Upload, Download, FileSpreadsheet, Building2, Navigation, Layers, Search
+  Upload, Download, FileSpreadsheet, Building2, Navigation, Layers, Search, ShieldAlert, Lock, Unlock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,7 +32,7 @@ import { apiRequest, queryClient, getErrorMessage } from "@/lib/queryClient";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import type { Zone, Client } from "@shared/schema";
 
 // ===================== Types =====================
@@ -72,6 +73,7 @@ interface Outlet {
   contactPhone?: string;
   status: string;
   isVendor?: boolean;
+  disableGeofence?: boolean;
 }
 
 // ===================== Schemas =====================
@@ -106,6 +108,7 @@ const outletSchema = z.object({
   contactPerson: z.string().optional(),
   contactPhone: z.string().optional(),
   status: z.enum(["active", "inactive"]).default("active"),
+  disableGeofence: z.boolean().optional().default(false),
 });
 
 type BrandFormData = z.infer<typeof brandSchema>;
@@ -360,6 +363,7 @@ export default function RoutesPage() {
         contactPerson: outlet.contactPerson || "",
         contactPhone: outlet.contactPhone || "",
         status: outlet.status as "active" | "inactive",
+        disableGeofence: !!outlet.disableGeofence,
       });
       // Fetch existing zone assignments
       try {
@@ -374,11 +378,27 @@ export default function RoutesPage() {
         routeId: selectedRouteFilter !== "all" ? selectedRouteFilter : "",
         brandId: selectedBrandFilter !== "all" ? selectedBrandFilter : "",
         clientId: "",
-        name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active" 
+        name: "", code: "", phone: "", email: "", address: "", latitude: "", longitude: "", contactPerson: "", contactPhone: "", status: "active",
+        disableGeofence: false,
       });
     }
     setOutletDialog({ open: true, editing: outlet });
   };
+
+  const toggleGeofenceMutation = useMutation({
+    mutationFn: ({ id, disableGeofence }: { id: string; disableGeofence: boolean }) =>
+      apiRequest("PATCH", `/api/outlets/${id}`, { disableGeofence }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
+      toast({
+        title: vars.disableGeofence ? "Location Check Disabled" : "Location Check Enabled",
+        description: vars.disableGeofence
+          ? "Drivers can now deliver to this outlet without geofence distance restrictions. GPS coordinates remain safely preserved."
+          : "Standard 100m geofence validation is now restored for this outlet.",
+      });
+    },
+    onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
+  });
 
   const createOutletMutation = useMutation({
     mutationFn: (data: OutletFormData) =>
@@ -932,6 +952,7 @@ export default function RoutesPage() {
                         <TableHead>Customer / Parent</TableHead>
                         <TableHead>Route / Brand</TableHead>
                         <TableHead>Code & Location</TableHead>
+                        <TableHead>Location Geofence</TableHead>
                         <TableHead>Phone / Contact</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
@@ -985,6 +1006,34 @@ export default function RoutesPage() {
                                 ) : (
                                   <div className="text-[11px] text-muted-foreground">No GPS</div>
                                 )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="space-y-1.5 min-w-[130px]">
+                                {outlet.disableGeofence ? (
+                                  <Badge variant="outline" className="bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border-amber-300 gap-1 text-[11px] font-medium">
+                                    <Unlock className="h-3 w-3 text-amber-600" /> Bypassed (Off)
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-300 gap-1 text-[11px] font-medium">
+                                    <Lock className="h-3 w-3 text-emerald-600" /> Enforced (100m)
+                                  </Badge>
+                                )}
+                                <div>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className={`h-6 px-2 text-[11px] font-normal rounded ${
+                                      outlet.disableGeofence
+                                        ? "border-emerald-600 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300"
+                                        : "border-amber-500 text-amber-700 hover:bg-amber-50 dark:text-amber-300"
+                                    }`}
+                                    disabled={toggleGeofenceMutation.isPending}
+                                    onClick={() => toggleGeofenceMutation.mutate({ id: outlet.id, disableGeofence: !outlet.disableGeofence })}
+                                  >
+                                    {outlet.disableGeofence ? "Enable Geofence" : "Disable Geofence"}
+                                  </Button>
+                                </div>
                               </div>
                             </TableCell>
                             <TableCell>
@@ -1333,6 +1382,29 @@ export default function RoutesPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
+                <FormField
+                  control={outletForm.control}
+                  name="disableGeofence"
+                  render={({ field }) => (
+                    <FormItem className="col-span-2 flex flex-row items-center justify-between rounded-lg border p-3.5 shadow-sm bg-muted/20">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-sm font-medium flex items-center gap-1.5 cursor-pointer">
+                          <ShieldAlert className="h-4 w-4 text-amber-500" />
+                          Disable Location Validation (Geofence Bypass)
+                        </FormLabel>
+                        <FormDescription className="text-xs text-muted-foreground">
+                          When enabled, drivers can complete deliveries without being restricted to the 100m geofence. GPS coordinates stay safely preserved.
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               </div>
 
               {/* Zone Multi-Select */}

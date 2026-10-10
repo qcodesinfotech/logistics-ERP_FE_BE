@@ -53,6 +53,7 @@ export async function ensureDriverTablesSchema() {
       ALTER TABLE "user_activity_logs" ADD COLUMN IF NOT EXISTS "latitude" numeric(10, 6);
       ALTER TABLE "user_activity_logs" ADD COLUMN IF NOT EXISTS "longitude" numeric(10, 6);
       ALTER TABLE "user_activity_logs" ADD COLUMN IF NOT EXISTS "location_name" text;
+      ALTER TABLE "outlets" ADD COLUMN IF NOT EXISTS "disable_geofence" boolean DEFAULT false;
 
       CREATE TABLE IF NOT EXISTS "vehicle_maintenance" (
         "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),

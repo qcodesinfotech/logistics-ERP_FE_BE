@@ -4136,6 +4136,7 @@ export class DatabaseStorage implements IStorage {
           phone: matchedOutlet?.phone || null,
           contactPerson: matchedOutlet?.contactPerson || null,
           clientId: matchedOutlet?.clientId || null,
+          disableGeofence: !!matchedOutlet?.disableGeofence,
           isOverridden,
           overrideZoneId: isOverridden ? (ov?.overrideZoneId || item.overrideRouteId || null) : null,
           truckAssignmentId: tAssignId,

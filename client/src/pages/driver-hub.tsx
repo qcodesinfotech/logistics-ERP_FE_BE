@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   UserCircle, Navigation, MapPin, ShieldAlert, CheckCircle2, 
-  Map, History, Gauge, AlertCircle, RefreshCw, Key, Plus
+  Map, History, Gauge, AlertCircle, RefreshCw, Key, Plus, Building2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -237,8 +237,19 @@ export default function DriverHubPage() {
                     placeholder="e.g. 58.4059"
                   />
                 </div>
-                <div className="col-span-2 flex justify-between items-center pt-2">
-                  <span className="text-[10px] text-muted-foreground">Use browser's GPS or input coordinates</span>
+                <div className="col-span-2 flex justify-between items-center pt-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs text-primary"
+                    onClick={() => {
+                      setLatitude(26.213444);
+                      setLongitude(50.660460);
+                    }}
+                  >
+                    <Building2 className="h-3.5 w-3.5" /> Warehouse Depot (Bahrain)
+                  </Button>
                   <Button 
                     type="button" 
                     variant="outline" 
