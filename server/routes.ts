@@ -9178,6 +9178,7 @@ export async function registerRoutes(
             uom: item.uom || "",
             totalQty: 0,
             itemCount: 0,
+            toNumbers: new Set<string>(),
             outlets: [] as any[],
           });
         }
@@ -9185,16 +9186,21 @@ export async function registerRoutes(
         const qty = parseFloat(item.requestedQty || item.weight || "0");
         entry.totalQty += isNaN(qty) ? 0 : qty;
         entry.itemCount += 1;
+        if (item.toNo && String(item.toNo).trim() !== "") {
+          entry.toNumbers.add(String(item.toNo).trim());
+        }
         entry.outlets.push({
           itemId: item.id,
           outletCode: item.outletCode,
           outletName: outletMap.get(normalize(item.outletCode)) || item.outletCode,
           qty: item.requestedQty,
+          toNo: item.toNo || "",
         });
       }
 
       const skuList = Array.from(skuMap.values()).map(s => ({
         ...s,
+        toNumbers: Array.from(s.toNumbers),
         totalQty: Math.round(s.totalQty * 1000) / 1000,
         outletsCount: new Set(s.outlets.map((o: any) => o.outletCode)).size,
       })).sort((a, b) => a.itemCode.localeCompare(b.itemCode));
@@ -10845,27 +10851,56 @@ export async function registerRoutes(
 
       let matchedTAs: any[] = [];
       if (sheetIds.length > 0) {
-        const driverIdentifiers = [targetRecord.driverId, effectiveDriverId, req.user?.id].filter(Boolean) as string[];
-        const targetTruck = (req.body.truckId || targetRecord.truckId) ? String(req.body.truckId || targetRecord.truckId).trim().toLowerCase() : null;
-
-        let matchedVehicleId: string | null = null;
-        if (targetTruck) {
-          const allVehicles = await storage.getVehicles();
-          const matchedVeh = allVehicles.find(v => 
-            v.id.toLowerCase() === targetTruck ||
-            (v.plateNumber && v.plateNumber.toLowerCase() === targetTruck) ||
-            (v.name && v.name.toLowerCase() === targetTruck)
+        const rawDriverIds = [targetRecord.driverId, effectiveDriverId, req.user?.id, req.user?.employeeId].filter(Boolean) as string[];
+        const driverIdentifiers = new Set<string>(rawDriverIds);
+        try {
+          const matchedUsers = await db.select().from(schema.users).where(
+            or(
+              inArray(schema.users.id, rawDriverIds),
+              inArray(schema.users.employeeId, rawDriverIds)
+            )
           );
-          if (matchedVeh) matchedVehicleId = matchedVeh.id;
+          for (const u of matchedUsers) {
+            if (u.id) driverIdentifiers.add(u.id);
+            if (u.employeeId) driverIdentifiers.add(u.employeeId);
+            if (u.username) driverIdentifiers.add(u.username);
+          }
+        } catch (_) {}
+
+        const targetTruck = (req.body.truckId || targetRecord.truckId) ? String(req.body.truckId || targetRecord.truckId).trim().toLowerCase() : null;
+        const allVehicles = await storage.getVehicles();
+        const matchedVehicleIds = new Set<string>();
+        if (targetTruck) {
+          for (const v of allVehicles) {
+            if (
+              v.id.toLowerCase() === targetTruck ||
+              (v.plateNumber && v.plateNumber.toLowerCase() === targetTruck) ||
+              (v.name && v.name.toLowerCase() === targetTruck)
+            ) {
+              matchedVehicleIds.add(v.id);
+            }
+          }
         }
 
         const truckAssignments = await db.select().from(schema.dispatchTruckAssignments)
           .where(inArray(schema.dispatchTruckAssignments.sheetId, sheetIds));
 
         matchedTAs = truckAssignments.filter(ta => {
-          const matchesDriver = ta.driverId && driverIdentifiers.includes(ta.driverId);
-          const matchesTruck = (matchedVehicleId && ta.truckId === matchedVehicleId) ||
-                               (targetTruck && ta.truckId.toLowerCase() === targetTruck);
+          const matchesDriver = ta.driverId && driverIdentifiers.has(ta.driverId);
+          let matchesTruck = false;
+          if (ta.truckId) {
+            if (matchedVehicleIds.has(ta.truckId) || (targetTruck && ta.truckId.toLowerCase() === targetTruck)) {
+              matchesTruck = true;
+            } else if (targetTruck) {
+              const taVeh = allVehicles.find(v => v.id === ta.truckId);
+              if (taVeh && (
+                (taVeh.plateNumber && taVeh.plateNumber.toLowerCase() === targetTruck) ||
+                (taVeh.name && taVeh.name.toLowerCase() === targetTruck)
+              )) {
+                matchesTruck = true;
+              }
+            }
+          }
           return matchesDriver || matchesTruck;
         });
       }
@@ -11563,6 +11598,48 @@ export async function registerRoutes(
     }
   });
 
+  async function findMatchingDepartureAttendance(driverId?: string | null, truckId?: string | null) {
+    if (!driverId && !truckId) return null;
+    const rawDriverIds = driverId ? [driverId] : [];
+    const driverIdentifiers = new Set<string>(rawDriverIds);
+    try {
+      if (rawDriverIds.length > 0) {
+        const matchedUsers = await db.select().from(schema.users).where(
+          or(
+            inArray(schema.users.id, rawDriverIds),
+            inArray(schema.users.employeeId, rawDriverIds)
+          )
+        );
+        for (const u of matchedUsers) {
+          if (u.id) driverIdentifiers.add(u.id);
+          if (u.employeeId) driverIdentifiers.add(u.employeeId);
+          if (u.username) driverIdentifiers.add(u.username);
+        }
+      }
+    } catch (_) {}
+
+    const allVehicles = await storage.getVehicles();
+    const truckIdentifiers = new Set<string>();
+    if (truckId) {
+      truckIdentifiers.add(truckId.toLowerCase());
+      const veh = allVehicles.find(v => v.id.toLowerCase() === truckId.toLowerCase() || (v.plateNumber && v.plateNumber.toLowerCase() === truckId.toLowerCase()));
+      if (veh) {
+        truckIdentifiers.add(veh.id.toLowerCase());
+        if (veh.plateNumber) truckIdentifiers.add(veh.plateNumber.toLowerCase());
+        if (veh.name) truckIdentifiers.add(veh.name.toLowerCase());
+      }
+    }
+
+    const attendanceList = await storage.getDriverAttendance();
+    const matched = attendanceList.find(a => {
+      if (!a.departureTime) return false;
+      const matchesDriver = a.driverId && driverIdentifiers.has(a.driverId);
+      const matchesTruck = a.truckId && truckIdentifiers.has(a.truckId.toLowerCase());
+      return matchesDriver || matchesTruck;
+    });
+    return matched || null;
+  }
+
   // Dedicated route timing update endpoint (used by supervisor for loading time & dispatching time)
   app.patch("/api/dispatch/trucks/:id/timing", authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -11596,16 +11673,11 @@ export async function registerRoutes(
         }
       }
 
-
       // Auto-retroactive dispatch: If loading is completed (or marked loaded) and departTime is not set, check if driver already departed
       if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
         const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
         if (existingTa) {
-          const attendanceList = await storage.getDriverAttendance();
-          const matchedAtt = attendanceList.find(a => 
-            (existingTa.driverId && a.driverId === existingTa.driverId) ||
-            (existingTa.truckId && a.truckId === existingTa.truckId)
-          );
+          const matchedAtt = await findMatchingDepartureAttendance(existingTa.driverId, existingTa.truckId);
           if (matchedAtt?.departureTime) {
             updateData.departTime = formatTime12h(matchedAtt.departureTime);
             updateData.loadingStatus = "dispatched";
@@ -11673,11 +11745,7 @@ export async function registerRoutes(
         if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
           const effDriverId = driverId || matched.driverId;
           const effTruckId = truckId || matched.truckId;
-          const attendanceList = await storage.getDriverAttendance();
-          const matchedAtt = attendanceList.find(a => 
-            (effDriverId && a.driverId === effDriverId) ||
-            (effTruckId && a.truckId === effTruckId)
-          );
+          const matchedAtt = await findMatchingDepartureAttendance(effDriverId, effTruckId);
           if (matchedAtt?.departureTime) {
             updateData.departTime = formatTime12h(matchedAtt.departureTime);
             updateData.loadingStatus = "dispatched";

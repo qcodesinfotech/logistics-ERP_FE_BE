@@ -3204,8 +3204,12 @@ export default function DailyDispatchPage() {
     isOpen: false,
     selectedSku: "",
   });
+  const [deleteScope, setDeleteScope] = useState<"all" | "specific">("all");
   const [selectedDeleteOutlets, setSelectedDeleteOutlets] = useState<string[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [skuSearchFilter, setSkuSearchFilter] = useState("");
+  const [editingOutletQty, setEditingOutletQty] = useState<{ [itemId: string]: string }>({});
+  const [savingQtyItemId, setSavingQtyItemId] = useState<string | null>(null);
 
   const [summarySearchQuery, setSummarySearchQuery] = useState("");
   const [pivotSearchQuery, setPivotSearchQuery] = useState("");
@@ -3279,6 +3283,22 @@ export default function DailyDispatchPage() {
     if (!globalDeleteSkuModal.selectedSku) return null;
     return sheetSkus.find((s: any) => s.itemCode === globalDeleteSkuModal.selectedSku) || null;
   }, [sheetSkus, globalDeleteSkuModal.selectedSku]);
+
+  const filteredSheetSkus = useMemo(() => {
+    const q = skuSearchFilter.trim().toLowerCase();
+    if (!q) return sheetSkus;
+    return sheetSkus.filter((s: any) => {
+      const codeMatch = s.itemCode?.toLowerCase().includes(q);
+      const descMatch = s.description?.toLowerCase().includes(q);
+      const toMatch = s.toNumbers?.some((t: string) => t.toLowerCase().includes(q));
+      const outletMatch = s.outlets?.some((o: any) =>
+        o.outletName?.toLowerCase().includes(q) ||
+        o.outletCode?.toLowerCase().includes(q) ||
+        o.toNo?.toLowerCase().includes(q)
+      );
+      return codeMatch || descMatch || toMatch || outletMatch;
+    });
+  }, [sheetSkus, skuSearchFilter]);
 
   const { data: vehiclesList = [] } = useQuery<any[]>({
     queryKey: ["/api/vehicles"],
@@ -6177,41 +6197,93 @@ export default function DailyDispatchPage() {
           setGlobalDeleteSkuModal(prev => ({ ...prev, isOpen: open }));
           if (!open) {
             setSelectedDeleteOutlets([]);
+            setDeleteScope("all");
+            setSkuSearchFilter("");
+            setEditingOutletQty({});
           }
         }}
       >
-        <DialogContent className="max-w-xl max-h-[90vh] flex flex-col p-6">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base font-bold text-red-700">
               <Trash2 className="h-5 w-5 text-red-600" />
-              Delete SKU from Dispatch Sheet
+              Manage & Delete SKU from Dispatch Sheet
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Permanently remove an SKU across all or selected outlets in today's active sheet.
+              Search SKU by code, description, or TO number. Edit quantities or permanently remove SKU for all or selected outlets.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto space-y-4 my-2 text-xs">
-            {/* SKU Selector */}
-            <div>
-              <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                Select SKU to Remove *
-              </label>
+          <div className="flex-1 overflow-y-auto space-y-4 my-2 text-xs pr-1">
+            {/* Search SKU or Name or TO Number */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-slate-700 dark:text-slate-300 block">
+                  Search & Select SKU *
+                </label>
+                <span className="text-[11px] text-muted-foreground">
+                  {filteredSheetSkus.length} of {sheetSkus.length} SKUs available
+                </span>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search SKU code, product name, or TO number..."
+                  value={skuSearchFilter}
+                  onChange={e => setSkuSearchFilter(e.target.value)}
+                  className="pl-8 text-xs h-9"
+                />
+                {skuSearchFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setSkuSearchFilter("")}
+                    className="absolute right-2.5 top-2.5 text-xs text-muted-foreground hover:text-foreground font-bold px-1"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* SKU Dropdown */}
               <select
                 value={globalDeleteSkuModal.selectedSku}
                 onChange={e => {
                   setGlobalDeleteSkuModal(prev => ({ ...prev, selectedSku: e.target.value }));
                   setSelectedDeleteOutlets([]);
+                  setDeleteScope("all");
+                  setEditingOutletQty({});
                 }}
-                className="w-full h-9 border rounded-md px-3 bg-background text-xs font-mono"
+                className="w-full h-9 border rounded-md px-3 bg-background text-xs font-mono mt-1 focus:ring-1 focus:ring-red-500"
               >
-                <option value="">-- Choose SKU from current sheet ({sheetSkus.length} available) --</option>
-                {sheetSkus.map((s: any) => (
+                <option value="">-- Choose SKU ({filteredSheetSkus.length} matching) --</option>
+                {filteredSheetSkus.map((s: any) => (
                   <option key={s.itemCode} value={s.itemCode}>
-                    {s.itemCode} - {s.description || "No description"} ({s.outletsCount} outlets | {s.totalQty} total qty)
+                    {s.itemCode} - {s.description || "No description"} ({s.outletsCount} outlets | {s.totalQty} total qty){s.toNumbers?.length ? ` | TO: ${s.toNumbers.join(", ")}` : ""}
                   </option>
                 ))}
               </select>
+
+              {/* Quick Suggestion Chips if user is searching and hasn't picked yet */}
+              {skuSearchFilter.trim() !== "" && filteredSheetSkus.length > 0 && !globalDeleteSkuModal.selectedSku && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {filteredSheetSkus.slice(0, 5).map((s: any) => (
+                    <button
+                      key={s.itemCode}
+                      type="button"
+                      onClick={() => {
+                        setGlobalDeleteSkuModal(prev => ({ ...prev, selectedSku: s.itemCode }));
+                        setSelectedDeleteOutlets([]);
+                        setDeleteScope("all");
+                        setEditingOutletQty({});
+                      }}
+                      className="text-[11px] bg-slate-100 hover:bg-red-50 hover:text-red-700 border border-slate-200 rounded px-2 py-0.5 font-mono text-left"
+                    >
+                      <strong>{s.itemCode}</strong> - {s.description?.slice(0, 24)}...
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {selectedSkuInfo && (
@@ -6229,6 +6301,17 @@ export default function DailyDispatchPage() {
                     </Badge>
                   </div>
 
+                  {selectedSkuInfo.toNumbers && selectedSkuInfo.toNumbers.length > 0 && (
+                    <div className="pt-1.5 border-t border-red-200/60 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-muted-foreground uppercase font-semibold">TO Numbers:</span>
+                      {selectedSkuInfo.toNumbers.map((to: string, idx: number) => (
+                        <span key={idx} className="font-mono text-[11px] bg-white border border-red-200 px-1.5 py-0.2 rounded font-medium text-slate-800">
+                          {to}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-red-200/60">
                     <div>
                       <span className="text-[10px] text-muted-foreground uppercase block">Outlets In Sheet</span>
@@ -6244,27 +6327,29 @@ export default function DailyDispatchPage() {
                 {/* Outlet Scope Selection */}
                 <div className="space-y-2">
                   <label className="font-semibold text-slate-700 block">Deletion Scope</label>
-                  <div className="flex items-center gap-4 border p-2.5 rounded-lg bg-muted/20">
-                    <label className="flex items-center gap-2 cursor-pointer text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border p-2.5 rounded-lg bg-muted/20">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-medium">
                       <input
                         type="radio"
                         name="deleteScope"
-                        checked={selectedDeleteOutlets.length === 0}
-                        onChange={() => setSelectedDeleteOutlets([])}
+                        checked={deleteScope === "all"}
+                        onChange={() => {
+                          setDeleteScope("all");
+                          setSelectedDeleteOutlets([]);
+                        }}
                         className="text-red-600 focus:ring-red-500"
                       />
                       <span>Delete from <strong>ALL</strong> Outlets ({selectedSkuInfo.outletsCount || 0} outlets, {selectedSkuInfo.totalQty} total qty)</span>
                     </label>
 
-                    <label className="flex items-center gap-2 cursor-pointer text-xs">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs font-medium">
                       <input
                         type="radio"
                         name="deleteScope"
-                        checked={selectedDeleteOutlets.length > 0}
+                        checked={deleteScope === "specific"}
                         onChange={() => {
-                          if (selectedDeleteOutlets.length === 0 && selectedSkuInfo.outlets?.length > 0) {
-                            setSelectedDeleteOutlets([selectedSkuInfo.outlets[0].outletCode]);
-                          }
+                          setDeleteScope("specific");
+                          setSelectedDeleteOutlets([]); // REMOVE ANY DEFAULT SELECTION! STARTS EMPTY!
                         }}
                         className="text-red-600 focus:ring-red-500"
                       />
@@ -6272,37 +6357,139 @@ export default function DailyDispatchPage() {
                     </label>
                   </div>
 
-                  {/* Outlets Checklist (when specific outlets mode is active) */}
-                  {selectedDeleteOutlets.length > 0 && (
-                    <div className="border rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100 bg-white">
+                  {/* Outlets List with Editable Quantities */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-700 text-xs">
+                        {deleteScope === "specific" ? (
+                          <>Select Outlets to Delete & Manage Quantities <span className="font-normal text-muted-foreground">({selectedDeleteOutlets.length} of {selectedSkuInfo.outlets?.length || 0} selected)</span></>
+                        ) : (
+                          <>Outlets in Sheet & Quantities <span className="font-normal text-muted-foreground">({selectedSkuInfo.outlets?.length || 0} outlets)</span></>
+                        )}
+                      </span>
+                      {deleteScope === "specific" && (
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDeleteOutlets((selectedSkuInfo.outlets || []).map((o: any) => o.outletCode))}
+                            className="text-blue-600 hover:underline"
+                          >
+                            Select All
+                          </button>
+                          <span>•</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDeleteOutlets([])}
+                            className="text-slate-500 hover:underline"
+                          >
+                            Clear Selection
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border rounded-lg max-h-56 overflow-y-auto divide-y divide-slate-100 bg-white">
                       {(selectedSkuInfo.outlets || []).map((o: any, idx: number) => {
                         const isChecked = selectedDeleteOutlets.includes(o.outletCode);
+                        const isEditingThis = editingOutletQty[o.itemId] !== undefined;
+                        const currentEditVal = isEditingThis ? editingOutletQty[o.itemId] : String(o.qty ?? "");
+                        const isModified = isEditingThis && currentEditVal !== String(o.qty ?? "");
+
                         return (
-                          <div key={idx} className="flex items-center justify-between p-2 hover:bg-slate-50">
-                            <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 pr-2">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
+                          <div key={idx} className={`flex items-center justify-between p-2 hover:bg-slate-50 ${isChecked ? "bg-red-50/40" : ""}`}>
+                            {deleteScope === "specific" ? (
+                              <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 pr-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={e => {
+                                    if (e.target.checked) {
+                                      setSelectedDeleteOutlets(prev => [...prev, o.outletCode]);
+                                    } else {
+                                      setSelectedDeleteOutlets(prev => prev.filter(code => code !== o.outletCode));
+                                    }
+                                  }}
+                                  className="rounded border-slate-300 text-red-600 focus:ring-red-500"
+                                />
+                                <div className="truncate flex-1">
+                                  <span className="text-xs font-medium text-slate-800">{o.outletName}</span>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+                                    <span>Code: {o.outletCode}</span>
+                                    {o.toNo && <span className="bg-slate-100 text-slate-600 px-1 rounded">TO: {o.toNo}</span>}
+                                  </div>
+                                </div>
+                              </label>
+                            ) : (
+                              <div className="truncate flex-1 min-w-0 pr-2">
+                                <span className="text-xs font-medium text-slate-800">{o.outletName}</span>
+                                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+                                  <span>Code: {o.outletCode}</span>
+                                  {o.toNo && <span className="bg-slate-100 text-slate-600 px-1 rounded">TO: {o.toNo}</span>}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Editable Quantity */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Input
+                                type="number"
+                                step="any"
+                                min="0"
+                                value={currentEditVal}
                                 onChange={e => {
-                                  if (e.target.checked) {
-                                    setSelectedDeleteOutlets(prev => [...prev, o.outletCode]);
-                                  } else {
-                                    setSelectedDeleteOutlets(prev => prev.filter(code => code !== o.outletCode));
+                                  const val = e.target.value;
+                                  setEditingOutletQty(prev => ({ ...prev, [o.itemId]: val }));
+                                }}
+                                className={`w-20 h-7 text-xs font-mono font-bold text-right px-1.5 ${isModified ? "border-amber-500 bg-amber-50/50" : ""}`}
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={isModified ? "default" : "outline"}
+                                className={`h-7 px-2 text-xs gap-1 ${isModified ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "text-slate-500"}`}
+                                disabled={!isModified || savingQtyItemId === o.itemId}
+                                title={isModified ? "Save modified quantity" : "Quantity unchanged"}
+                                onClick={async () => {
+                                  const newQtyVal = editingOutletQty[o.itemId];
+                                  if (newQtyVal === undefined || isNaN(parseFloat(newQtyVal)) || parseFloat(newQtyVal) < 0) {
+                                    toast({ title: "Invalid quantity", description: "Please enter a valid positive number", variant: "destructive" });
+                                    return;
+                                  }
+                                  setSavingQtyItemId(o.itemId);
+                                  try {
+                                    await updateItemMutation.mutateAsync({
+                                      id: o.itemId,
+                                      requestedQty: parseFloat(newQtyVal),
+                                    });
+                                    setEditingOutletQty(prev => {
+                                      const next = { ...prev };
+                                      delete next[o.itemId];
+                                      return next;
+                                    });
+                                    toast({
+                                      title: "Quantity Updated",
+                                      description: `Updated quantity for ${o.outletName} to ${newQtyVal}`,
+                                    });
+                                  } catch (err: any) {
+                                    toast({ title: "Update Failed", description: getErrorMessage(err), variant: "destructive" });
+                                  } finally {
+                                    setSavingQtyItemId(null);
                                   }
                                 }}
-                                className="rounded border-slate-300 text-red-600 focus:ring-red-500"
-                              />
-                              <span className="truncate text-xs font-medium text-slate-800">{o.outletName}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">({o.outletCode})</span>
-                            </label>
-                            <span className="font-bold text-slate-700 text-xs shrink-0 bg-slate-100 px-2 py-0.5 rounded">
-                              {o.qty}
-                            </span>
+                              >
+                                {savingQtyItemId === o.itemId ? (
+                                  <RefreshCw className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Check className="h-3 w-3" />
+                                )}
+                                <span className="text-[10px]">Save</span>
+                              </Button>
+                            </div>
                           </div>
                         );
                       })}
                     </div>
-                  )}
+                  </div>
                 </div>
               </>
             )}
@@ -6312,19 +6499,35 @@ export default function DailyDispatchPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setGlobalDeleteSkuModal({ isOpen: false, selectedSku: "" })}
+              onClick={() => {
+                setGlobalDeleteSkuModal({ isOpen: false, selectedSku: "" });
+                setSelectedDeleteOutlets([]);
+                setDeleteScope("all");
+                setSkuSearchFilter("");
+                setEditingOutletQty({});
+              }}
             >
               Cancel
             </Button>
             <Button
               size="sm"
               variant="destructive"
-              disabled={!globalDeleteSkuModal.selectedSku || deleteSkuMutation.isPending}
+              disabled={
+                !globalDeleteSkuModal.selectedSku ||
+                (deleteScope === "specific" && selectedDeleteOutlets.length === 0) ||
+                deleteSkuMutation.isPending
+              }
               onClick={() => setDeleteConfirmOpen(true)}
               className="gap-1.5"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {deleteSkuMutation.isPending ? "Deleting..." : "Delete SKU..."}
+              {deleteSkuMutation.isPending
+                ? "Deleting..."
+                : deleteScope === "specific" && selectedDeleteOutlets.length === 0
+                ? "Select Outlets to Delete"
+                : deleteScope === "specific"
+                ? `Delete SKU (${selectedDeleteOutlets.length} Outlets)...`
+                : "Delete SKU (All Outlets)..."}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -6344,7 +6547,7 @@ export default function DailyDispatchPage() {
                 {selectedSkuInfo?.description ? ` (${selectedSkuInfo.description})` : ""} from today's active sheet?
               </p>
               <div className="p-2.5 bg-red-50 border border-red-200 rounded text-red-800 text-[11px] font-medium">
-                Scope: {selectedDeleteOutlets.length > 0 ? (
+                Scope: {deleteScope === "specific" ? (
                   <>Removing from <strong>{selectedDeleteOutlets.length}</strong> selected outlet(s)</>
                 ) : (
                   <>Removing from <strong>ALL {selectedSkuInfo?.outletsCount || selectedSkuInfo?.outlets?.length || 0}</strong> outlet(s), total quantity: <strong>{selectedSkuInfo?.totalQty || 0}</strong></>
@@ -6363,7 +6566,7 @@ export default function DailyDispatchPage() {
                 deleteSkuMutation.mutate({
                   sheetId: boardSheetId!,
                   itemCode: globalDeleteSkuModal.selectedSku,
-                  outletCodes: selectedDeleteOutlets.length > 0 ? selectedDeleteOutlets : undefined,
+                  outletCodes: deleteScope === "specific" ? selectedDeleteOutlets : undefined,
                 });
               }}
             >
