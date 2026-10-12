@@ -2263,7 +2263,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateBankAccount(id: string, data: Partial<InsertBankAccount>): Promise<BankAccount | undefined> {
-    const [account] = await db.update(bankAccounts).set(data).where(eq(bankAccounts.id, id)).returning();
+    const updateData: any = { ...data };
+
+    if (data.openingBalance !== undefined) {
+      const txs = await db.select().from(bankTransactions).where(eq(bankTransactions.bankAccountId, id));
+      const txSum = txs.reduce((sum, t) => {
+        const amt = parseFloat(t.amount?.toString() || "0");
+        return t.type === "deposit" ? sum + amt : sum - amt;
+      }, 0);
+
+      const newOpening = parseFloat(data.openingBalance?.toString() || "0");
+      updateData.currentBalance = (newOpening + txSum).toFixed(3);
+    }
+
+    const [account] = await db.update(bankAccounts).set(updateData).where(eq(bankAccounts.id, id)).returning();
     return account || undefined;
   }
 

@@ -202,7 +202,11 @@ export default function Bank() {
   };
 
   const totalBalance = bankAccounts?.reduce(
-    (sum, acc) => sum + parseFloat(acc.currentBalance || "0"),
+    (sum, acc) => {
+      const cur = parseFloat(acc.currentBalance || "0");
+      const open = parseFloat(acc.openingBalance || "0");
+      return sum + (cur !== 0 ? cur : open);
+    },
     0
   ) || 0;
 
