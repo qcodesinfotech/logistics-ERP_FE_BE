@@ -3154,6 +3154,35 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/bank-transactions/:id", authMiddleware, permissionMiddleware("bank_accounts"), async (req: AuthRequest, res) => {
+    try {
+      const isManagement = req.user && ["super_admin", "admin", "manager"].includes(req.user.role);
+      if (!isManagement) {
+        return res.status(403).json({ error: "Management approval required to edit bank transactions" });
+      }
+      const transaction = await storage.updateBankTransaction(req.params.id, req.body);
+      if (!transaction) return res.status(404).json({ error: "Bank transaction not found" });
+      res.json(transaction);
+    } catch (error: any) {
+      console.error("Bank transaction update error:", error);
+      res.status(400).json({ error: error.message || "Failed to update bank transaction" });
+    }
+  });
+
+  app.delete("/api/bank-transactions/:id", authMiddleware, permissionMiddleware("bank_accounts"), async (req: AuthRequest, res) => {
+    try {
+      const isManagement = req.user && ["super_admin", "admin", "manager"].includes(req.user.role);
+      if (!isManagement) {
+        return res.status(403).json({ error: "Management approval required to delete bank transactions" });
+      }
+      await storage.deleteBankTransaction(req.params.id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Bank transaction delete error:", error);
+      res.status(400).json({ error: error.message || "Failed to delete bank transaction" });
+    }
+  });
+
   // Petty Cash - RBAC protected
   app.get("/api/petty-cash", authMiddleware, permissionMiddleware("petty_cash"), async (req: AuthRequest, res) => {
     const scope = getScopeFromRequest(req);

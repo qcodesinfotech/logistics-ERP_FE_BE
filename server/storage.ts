@@ -289,6 +289,8 @@ export interface IStorage {
   // Bank Transactions
   getBankTransactions(accountId?: string, scope?: { shopId?: string | null; branchId?: string | null } | null): Promise<BankTransaction[]>;
   createBankTransaction(data: InsertBankTransaction): Promise<BankTransaction>;
+  updateBankTransaction(id: string, data: Partial<InsertBankTransaction>): Promise<BankTransaction | undefined>;
+  deleteBankTransaction(id: string): Promise<void>;
 
   // Petty Cash
   getPettyCashAccounts(scope?: { shopId?: string | null; branchId?: string | null } | null): Promise<PettyCash[]>;
@@ -2304,10 +2306,12 @@ export class DatabaseStorage implements IStorage {
 
   async createBankTransaction(data: InsertBankTransaction): Promise<BankTransaction> {
     const amount = parseFloat(data.amount?.toString() || "0");
+    const bankCharges = data.type === "withdrawal" ? parseFloat(data.bankCharges?.toString() || "0") : 0;
+    const totalDeduction = amount + bankCharges;
 
-    // STRICT FINANCIAL CONTROL: Validate sufficient funds for withdrawals and transfers out
-    if (data.type === "withdrawal" && amount > 0) {
-      await this.ensureSufficientFunds(amount, data.bankAccountId, "bank withdrawal");
+    // STRICT FINANCIAL CONTROL: Validate sufficient funds for withdrawals (including bank charges)
+    if (data.type === "withdrawal" && totalDeduction > 0) {
+      await this.ensureSufficientFunds(totalDeduction, data.bankAccountId, "bank withdrawal (including bank charges)");
     }
 
     return await db.transaction(async (tx) => {
@@ -2319,18 +2323,19 @@ export class DatabaseStorage implements IStorage {
 
       const [transaction] = await tx.insert(bankTransactions).values({
         ...data,
+        bankCharges: bankCharges.toFixed(3),
+        transactionDate: data.transactionDate ? new Date(data.transactionDate) : new Date(),
         shopId: account.shopId,
         branchId: account.branchId,
       }).returning();
 
       const currentBalance = parseFloat(account.currentBalance || "0");
-      const newBalance = data.type === "deposit" ? currentBalance + amount : currentBalance - amount;
+      const newBalance = data.type === "deposit" ? currentBalance + amount : currentBalance - totalDeduction;
       await tx.update(bankAccounts).set({ currentBalance: newBalance.toFixed(3) }).where(eq(bankAccounts.id, data.bankAccountId));
 
       // Create accounting journal entry for bank transaction
-      // For deposits: Debit Bank Account (1000), Credit Owner's Capital (3000) - initial/manual deposits
-      // For withdrawals: Debit Owner's Drawings (3100), Credit Bank Account (1000) - manual withdrawals
-      // Note: Automated deposits/withdrawals from sales, purchases, etc. create their own journal entries
+      // For deposits: Debit Bank Account (1000), Credit Owner's Capital (3000)
+      // For withdrawals: Debit Owner's Drawings (3100), Debit Bank Charges (6000 if >0), Credit Bank Account (1000)
       if (amount > 0 && !data.relatedType) {
         const journalLines = [];
         if (data.type === "deposit") {
@@ -2340,8 +2345,15 @@ export class DatabaseStorage implements IStorage {
           );
         } else {
           journalLines.push(
-            { accountCode: "3100", debit: amount, description: `Cash withdrawal from bank - ${data.reference || ""}` },
-            { accountCode: "1000", credit: amount, description: "Bank balance reduction" }
+            { accountCode: "3100", debit: amount, description: `Cash withdrawal from bank - ${data.reference || ""}` }
+          );
+          if (bankCharges > 0) {
+            journalLines.push(
+              { accountCode: "6000", debit: bankCharges, description: `Bank charges on withdrawal - ${data.reference || ""}` }
+            );
+          }
+          journalLines.push(
+            { accountCode: "1000", credit: totalDeduction, description: "Bank balance reduction (amount + bank charges)" }
           );
         }
 
@@ -2350,6 +2362,7 @@ export class DatabaseStorage implements IStorage {
           sourceId: transaction.id,
           shopId: account.shopId,
           branchId: account.branchId,
+          entryDate: data.transactionDate ? new Date(data.transactionDate) : new Date(),
           reference: data.reference || `BT-${Date.now()}`,
           description: data.description || `Bank ${data.type}`,
           lines: journalLines,
@@ -2357,6 +2370,128 @@ export class DatabaseStorage implements IStorage {
       }
 
       return transaction;
+    });
+  }
+
+  async updateBankTransaction(id: string, data: Partial<InsertBankTransaction>): Promise<BankTransaction | undefined> {
+    return await db.transaction(async (tx) => {
+      const [oldTx] = await tx.select().from(bankTransactions).where(eq(bankTransactions.id, id));
+      if (!oldTx) throw new Error("Transaction not found");
+
+      const oldAmount = parseFloat(oldTx.amount?.toString() || "0");
+      const oldCharges = oldTx.type === "withdrawal" ? parseFloat(oldTx.bankCharges?.toString() || "0") : 0;
+      const oldEffective = oldTx.type === "deposit" ? oldAmount : oldAmount + oldCharges;
+
+      const newType = data.type || oldTx.type;
+      const newAmount = data.amount !== undefined ? parseFloat(data.amount.toString() || "0") : oldAmount;
+      const newCharges = newType === "withdrawal"
+        ? (data.bankCharges !== undefined ? parseFloat(data.bankCharges.toString() || "0") : parseFloat(oldTx.bankCharges?.toString() || "0"))
+        : 0;
+      const newEffective = newType === "deposit" ? newAmount : newAmount + newCharges;
+      const targetAccountId = data.bankAccountId || oldTx.bankAccountId;
+
+      // Handle balance adjustment
+      if (oldTx.bankAccountId === targetAccountId) {
+        const [account] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, targetAccountId));
+        if (account) {
+          let bal = parseFloat(account.currentBalance?.toString() || "0");
+          bal = oldTx.type === "deposit" ? bal - oldEffective : bal + oldEffective;
+          bal = newType === "deposit" ? bal + newEffective : bal - newEffective;
+          await tx.update(bankAccounts).set({ currentBalance: bal.toFixed(3) }).where(eq(bankAccounts.id, account.id));
+        }
+      } else {
+        const [oldAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, oldTx.bankAccountId));
+        if (oldAccount) {
+          const oldBal = parseFloat(oldAccount.currentBalance?.toString() || "0");
+          const revertedBal = oldTx.type === "deposit" ? oldBal - oldEffective : oldBal + oldEffective;
+          await tx.update(bankAccounts).set({ currentBalance: revertedBal.toFixed(3) }).where(eq(bankAccounts.id, oldAccount.id));
+        }
+        const [newAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, targetAccountId));
+        if (newAccount) {
+          const newBal = parseFloat(newAccount.currentBalance?.toString() || "0");
+          const updatedBal = newType === "deposit" ? newBal + newEffective : newBal - newEffective;
+          await tx.update(bankAccounts).set({ currentBalance: updatedBal.toFixed(3) }).where(eq(bankAccounts.id, newAccount.id));
+        }
+      }
+
+      // Update bank transaction record
+      const updatePayload: any = { ...data };
+      if (data.bankCharges !== undefined || newType === "withdrawal") {
+        updatePayload.bankCharges = newCharges.toFixed(3);
+      }
+      if (data.transactionDate) {
+        updatePayload.transactionDate = new Date(data.transactionDate);
+      }
+      const [updatedTx] = await tx.update(bankTransactions).set(updatePayload).where(eq(bankTransactions.id, id)).returning();
+
+      // Update associated journal entry if it exists
+      const [entry] = await tx.select().from(journalEntries).where(and(
+        eq(journalEntries.sourceType, "bank_transaction"),
+        eq(journalEntries.sourceId, id)
+      ));
+      if (entry) {
+        const jeUpdate: any = {};
+        if (data.transactionDate) jeUpdate.entryDate = new Date(data.transactionDate);
+        if (data.description !== undefined) jeUpdate.description = data.description || `Bank ${newType}`;
+        if (data.reference !== undefined) jeUpdate.reference = data.reference;
+        if (Object.keys(jeUpdate).length > 0) {
+          await tx.update(journalEntries).set(jeUpdate).where(eq(journalEntries.id, entry.id));
+        }
+
+        if (data.amount !== undefined || data.bankCharges !== undefined || data.type !== undefined) {
+          await tx.delete(journalLines).where(eq(journalLines.journalEntryId, entry.id));
+          const newLines = [];
+          if (newType === "deposit") {
+            newLines.push(
+              { journalEntryId: entry.id, accountCode: "1000", debit: newAmount.toFixed(3), credit: "0.000", description: `Bank deposit - ${data.reference || oldTx.reference || ""}` },
+              { journalEntryId: entry.id, accountCode: "3000", debit: "0.000", credit: newAmount.toFixed(3), description: "Capital/cash deposit to bank" }
+            );
+          } else {
+            newLines.push(
+              { journalEntryId: entry.id, accountCode: "3100", debit: newAmount.toFixed(3), credit: "0.000", description: `Cash withdrawal from bank - ${data.reference || oldTx.reference || ""}` }
+            );
+            if (newCharges > 0) {
+              newLines.push(
+                { journalEntryId: entry.id, accountCode: "6000", debit: newCharges.toFixed(3), credit: "0.000", description: `Bank charges on withdrawal - ${data.reference || oldTx.reference || ""}` }
+              );
+            }
+            newLines.push(
+              { journalEntryId: entry.id, accountCode: "1000", debit: "0.000", credit: newEffective.toFixed(3), description: "Bank balance reduction (amount + bank charges)" }
+            );
+          }
+          await tx.insert(journalLines).values(newLines as any);
+        }
+      }
+
+      return updatedTx;
+    });
+  }
+
+  async deleteBankTransaction(id: string): Promise<void> {
+    await db.transaction(async (tx) => {
+      const [transaction] = await tx.select().from(bankTransactions).where(eq(bankTransactions.id, id));
+      if (!transaction) return;
+
+      const [account] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, transaction.bankAccountId));
+      if (account) {
+        const amount = parseFloat(transaction.amount?.toString() || "0");
+        const charges = transaction.type === "withdrawal" ? parseFloat(transaction.bankCharges?.toString() || "0") : 0;
+        const total = transaction.type === "deposit" ? amount : amount + charges;
+        const currentBalance = parseFloat(account.currentBalance?.toString() || "0");
+        const newBalance = transaction.type === "deposit" ? currentBalance - total : currentBalance + total;
+        await tx.update(bankAccounts).set({ currentBalance: newBalance.toFixed(3) }).where(eq(bankAccounts.id, account.id));
+      }
+
+      const entries = await tx.select().from(journalEntries).where(and(
+        eq(journalEntries.sourceType, "bank_transaction"),
+        eq(journalEntries.sourceId, id)
+      ));
+      for (const entry of entries) {
+        await tx.delete(journalLines).where(eq(journalLines.journalEntryId, entry.id));
+        await tx.delete(journalEntries).where(eq(journalEntries.id, entry.id));
+      }
+
+      await tx.delete(bankTransactions).where(eq(bankTransactions.id, id));
     });
   }
 
@@ -6316,6 +6451,7 @@ export class DatabaseStorage implements IStorage {
       sourceId: string;
       reference: string;
       description: string;
+      entryDate?: Date;
       shopId?: string | null;
       branchId: string;
       projectId?: string;
@@ -6335,7 +6471,7 @@ export class DatabaseStorage implements IStorage {
 
     const [entry] = await tx.insert(journalEntries).values({
       entryNumber,
-      entryDate: new Date(),
+      entryDate: data.entryDate || new Date(),
       sourceType: data.sourceType,
       sourceId: data.sourceId,
       reference: data.reference,

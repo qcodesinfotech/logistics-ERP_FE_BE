@@ -549,6 +549,7 @@ export const bankTransactions = pgTable("bank_transactions", {
   transactionDate: timestamp("transaction_date").defaultNow(),
   type: text("type").notNull(),
   amount: decimal("amount", { precision: 12, scale: 3 }).notNull(),
+  bankCharges: decimal("bank_charges", { precision: 12, scale: 3 }).default("0.000"),
   reference: text("reference"),
   description: text("description"),
   relatedType: text("related_type"),
@@ -1492,7 +1493,16 @@ export const insertPurchaseItemSchema = createInsertSchema(purchaseItems).omit({
 export const insertPurchasePaymentSchema = createInsertSchema(purchasePayments).omit({ id: true });
 export const insertSaleSchema = createInsertSchema(sales).omit({ id: true });
 export const insertBankAccountSchema = createInsertSchema(bankAccounts).omit({ id: true });
-export const insertBankTransactionSchema = createInsertSchema(bankTransactions).omit({ id: true });
+export const insertBankTransactionSchema = createInsertSchema(bankTransactions, {
+  transactionDate: z.preprocess(
+    (val) => (typeof val === "string" && val ? new Date(val) : val),
+    z.coerce.date().optional()
+  ),
+  bankCharges: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? "0.000" : String(val)),
+    z.string().optional()
+  ),
+}).omit({ id: true });
 export const insertPettyCashSchema = createInsertSchema(pettyCash).omit({ id: true });
 export const insertCapitalSchema = createInsertSchema(capital).omit({ id: true });
 export const insertEmployeeSchema = createInsertSchema(employees).omit({ id: true });
