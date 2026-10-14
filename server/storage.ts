@@ -2390,15 +2390,15 @@ export class DatabaseStorage implements IStorage {
       const newEffective = newType === "deposit" ? newAmount : newAmount + newCharges;
       const targetAccountId = data.bankAccountId || oldTx.bankAccountId;
 
+      const [targetAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, targetAccountId));
+      if (!targetAccount) throw new Error("Bank account not found");
+
       // Handle balance adjustment
       if (oldTx.bankAccountId === targetAccountId) {
-        const [account] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, targetAccountId));
-        if (account) {
-          let bal = parseFloat(account.currentBalance?.toString() || "0");
-          bal = oldTx.type === "deposit" ? bal - oldEffective : bal + oldEffective;
-          bal = newType === "deposit" ? bal + newEffective : bal - newEffective;
-          await tx.update(bankAccounts).set({ currentBalance: bal.toFixed(3) }).where(eq(bankAccounts.id, account.id));
-        }
+        let bal = parseFloat(targetAccount.currentBalance?.toString() || "0");
+        bal = oldTx.type === "deposit" ? bal - oldEffective : bal + oldEffective;
+        bal = newType === "deposit" ? bal + newEffective : bal - newEffective;
+        await tx.update(bankAccounts).set({ currentBalance: bal.toFixed(3) }).where(eq(bankAccounts.id, targetAccount.id));
       } else {
         const [oldAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, oldTx.bankAccountId));
         if (oldAccount) {
@@ -2406,12 +2406,9 @@ export class DatabaseStorage implements IStorage {
           const revertedBal = oldTx.type === "deposit" ? oldBal - oldEffective : oldBal + oldEffective;
           await tx.update(bankAccounts).set({ currentBalance: revertedBal.toFixed(3) }).where(eq(bankAccounts.id, oldAccount.id));
         }
-        const [newAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, targetAccountId));
-        if (newAccount) {
-          const newBal = parseFloat(newAccount.currentBalance?.toString() || "0");
-          const updatedBal = newType === "deposit" ? newBal + newEffective : newBal - newEffective;
-          await tx.update(bankAccounts).set({ currentBalance: updatedBal.toFixed(3) }).where(eq(bankAccounts.id, newAccount.id));
-        }
+        let bal = parseFloat(targetAccount.currentBalance?.toString() || "0");
+        const updatedBal = newType === "deposit" ? bal + newEffective : bal - newEffective;
+        await tx.update(bankAccounts).set({ currentBalance: updatedBal.toFixed(3) }).where(eq(bankAccounts.id, targetAccount.id));
       }
 
       // Update bank transaction record
@@ -2439,28 +2436,117 @@ export class DatabaseStorage implements IStorage {
         }
 
         if (data.amount !== undefined || data.bankCharges !== undefined || data.type !== undefined) {
+          // Revert old journal lines on chart_of_accounts
+          const oldLines = await tx.select().from(journalLines).where(eq(journalLines.journalEntryId, entry.id));
+          for (const line of oldLines) {
+            const [acc] = await tx.select().from(chartOfAccounts).where(eq(chartOfAccounts.id, line.accountId));
+            if (acc) {
+              const debitAmount = parseFloat(line.debit?.toString() || "0");
+              const creditAmount = parseFloat(line.credit?.toString() || "0");
+              const curBal = parseFloat(acc.balance || "0");
+              let revBal: number;
+              if (acc.accountType === "asset" || acc.accountType === "expense") {
+                revBal = curBal - debitAmount + creditAmount;
+              } else {
+                revBal = curBal - creditAmount + debitAmount;
+              }
+              await tx.update(chartOfAccounts).set({ balance: revBal.toFixed(3) }).where(eq(chartOfAccounts.id, acc.id));
+            }
+          }
           await tx.delete(journalLines).where(eq(journalLines.journalEntryId, entry.id));
-          const newLines = [];
-          if (newType === "deposit") {
-            newLines.push(
-              { journalEntryId: entry.id, accountCode: "1000", debit: newAmount.toFixed(3), credit: "0.000", description: `Bank deposit - ${data.reference || oldTx.reference || ""}` },
-              { journalEntryId: entry.id, accountCode: "3000", debit: "0.000", credit: newAmount.toFixed(3), description: "Capital/cash deposit to bank" }
-            );
-          } else {
-            newLines.push(
-              { journalEntryId: entry.id, accountCode: "3100", debit: newAmount.toFixed(3), credit: "0.000", description: `Cash withdrawal from bank - ${data.reference || oldTx.reference || ""}` }
-            );
-            if (newCharges > 0) {
-              newLines.push(
-                { journalEntryId: entry.id, accountCode: "6000", debit: newCharges.toFixed(3), credit: "0.000", description: `Bank charges on withdrawal - ${data.reference || oldTx.reference || ""}` }
+
+          // Resolve account by branch
+          const branchId = entry.branchId || targetAccount.branchId;
+          const getAccount = async (code: string) => {
+            let [acc] = branchId ? await tx.select().from(chartOfAccounts).where(
+              and(
+                eq(chartOfAccounts.accountCode, code),
+                eq(chartOfAccounts.branchId, branchId)
+              )
+            ) : [];
+            if (!acc) {
+              [acc] = await tx.select().from(chartOfAccounts).where(
+                eq(chartOfAccounts.accountCode, code)
               );
             }
-            newLines.push(
-              { journalEntryId: entry.id, accountCode: "1000", debit: "0.000", credit: newEffective.toFixed(3), description: "Bank balance reduction (amount + bank charges)" }
+            return acc;
+          };
+
+          const newLinesDef: Array<{ code: string; debit: number; credit: number; description: string }> = [];
+          if (newType === "deposit") {
+            newLinesDef.push(
+              { code: "1000", debit: newAmount, credit: 0, description: `Bank deposit - ${data.reference || oldTx.reference || ""}` },
+              { code: "3000", debit: 0, credit: newAmount, description: "Capital/cash deposit to bank" }
+            );
+          } else {
+            newLinesDef.push(
+              { code: "3100", debit: newAmount, credit: 0, description: `Cash withdrawal from bank - ${data.reference || oldTx.reference || ""}` }
+            );
+            if (newCharges > 0) {
+              newLinesDef.push(
+                { code: "6000", debit: newCharges, credit: 0, description: `Bank charges on withdrawal - ${data.reference || oldTx.reference || ""}` }
+              );
+            }
+            newLinesDef.push(
+              { code: "1000", debit: 0, credit: newEffective, description: "Bank balance reduction (amount + bank charges)" }
             );
           }
-          await tx.insert(journalLines).values(newLines as any);
+
+          for (const l of newLinesDef) {
+            const acc = await getAccount(l.code);
+            if (acc) {
+              await tx.insert(journalLines).values({
+                journalEntryId: entry.id,
+                accountId: acc.id,
+                debit: l.debit.toFixed(3),
+                credit: l.credit.toFixed(3),
+                description: l.description,
+              });
+
+              // Update chart of account balance
+              const curBal = parseFloat(acc.balance || "0");
+              let updatedBal: number;
+              if (acc.accountType === "asset" || acc.accountType === "expense") {
+                updatedBal = curBal + l.debit - l.credit;
+              } else {
+                updatedBal = curBal + l.credit - l.debit;
+              }
+              await tx.update(chartOfAccounts).set({ balance: updatedBal.toFixed(3) }).where(eq(chartOfAccounts.id, acc.id));
+            }
+          }
         }
+      } else if (newAmount > 0 && !oldTx.relatedType && targetAccount.branchId) {
+        // If no journal entry existed previously, create one now
+        const journalLinesDef = [];
+        if (newType === "deposit") {
+          journalLinesDef.push(
+            { accountCode: "1000", debit: newAmount, description: `Bank deposit - ${data.reference || oldTx.reference || ""}` },
+            { accountCode: "3000", credit: newAmount, description: "Capital/cash deposit to bank" }
+          );
+        } else {
+          journalLinesDef.push(
+            { accountCode: "3100", debit: newAmount, description: `Cash withdrawal from bank - ${data.reference || oldTx.reference || ""}` }
+          );
+          if (newCharges > 0) {
+            journalLinesDef.push(
+              { accountCode: "6000", debit: newCharges, description: `Bank charges on withdrawal - ${data.reference || oldTx.reference || ""}` }
+            );
+          }
+          journalLinesDef.push(
+            { accountCode: "1000", credit: newEffective, description: "Bank balance reduction (amount + bank charges)" }
+          );
+        }
+
+        await this.createJournalEntryInTx(tx, {
+          sourceType: "bank_transaction",
+          sourceId: id,
+          shopId: targetAccount.shopId,
+          branchId: targetAccount.branchId,
+          entryDate: data.transactionDate ? new Date(data.transactionDate) : (oldTx.transactionDate || new Date()),
+          reference: data.reference || oldTx.reference || `BT-${Date.now()}`,
+          description: data.description || oldTx.description || `Bank ${newType}`,
+          lines: journalLinesDef,
+        });
       }
 
       return updatedTx;
@@ -2487,6 +2573,22 @@ export class DatabaseStorage implements IStorage {
         eq(journalEntries.sourceId, id)
       ));
       for (const entry of entries) {
+        const oldLines = await tx.select().from(journalLines).where(eq(journalLines.journalEntryId, entry.id));
+        for (const line of oldLines) {
+          const [acc] = await tx.select().from(chartOfAccounts).where(eq(chartOfAccounts.id, line.accountId));
+          if (acc) {
+            const debitAmount = parseFloat(line.debit?.toString() || "0");
+            const creditAmount = parseFloat(line.credit?.toString() || "0");
+            const curBal = parseFloat(acc.balance || "0");
+            let revBal: number;
+            if (acc.accountType === "asset" || acc.accountType === "expense") {
+              revBal = curBal - debitAmount + creditAmount;
+            } else {
+              revBal = curBal - creditAmount + debitAmount;
+            }
+            await tx.update(chartOfAccounts).set({ balance: revBal.toFixed(3) }).where(eq(chartOfAccounts.id, acc.id));
+          }
+        }
         await tx.delete(journalLines).where(eq(journalLines.journalEntryId, entry.id));
         await tx.delete(journalEntries).where(eq(journalEntries.id, entry.id));
       }
