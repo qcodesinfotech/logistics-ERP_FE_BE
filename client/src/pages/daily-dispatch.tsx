@@ -7239,7 +7239,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
 
   const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
   const { data: availableAssistants = [] } = useQuery<any[]>({
-    queryKey: ["/api/crew/available-delivery-assistants"],
+    queryKey: ["/api/crew/available-delivery-assistants?all=true"],
   });
 
   const getAssistantName = (id: string | null | undefined) => {
@@ -7408,6 +7408,9 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   // Drivers already assigned in this sheet
   const assignedDriversInSheet = new Set(truckAssignments.map((ta: any) => ta.driverId).filter(Boolean));
 
+  // Crew members already assigned in this sheet
+  const assignedCrewInSheet = new Set(truckAssignments.map((ta: any) => ta.crewMemberId).filter(Boolean));
+
   // Helper to compute assigned items for a truck assignment
   const getTruckAssignedItemsCount = (truckAssignmentId: string) => {
     const taAssignments = outletAssignments.filter((oa: any) => oa.truckAssignmentId === truckAssignmentId);
@@ -7552,11 +7555,14 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     <SelectTrigger><SelectValue placeholder="Select assistant..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
-                      {availableAssistants.map((a: any) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.name} ({a.employeeCode || "DA"})
-                        </SelectItem>
-                      ))}
+                      {availableAssistants.map((a: any) => {
+                        const isAssigned = assignedCrewInSheet.has(a.id);
+                        return (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name} ({a.employeeCode || "DA"}){isAssigned ? " (Assigned)" : a.isCheckedIn ? " ✓" : " (Not checked in)"}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
@@ -8099,11 +8105,14 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   <SelectTrigger><SelectValue placeholder="Select delivery assistant" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
-                    {availableAssistants.map((a: any) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name} ({a.employeeCode || "DA"})
-                      </SelectItem>
-                    ))}
+                    {availableAssistants.map((a: any) => {
+                      const isAssignedToOther = assignedCrewInSheet.has(a.id) && editAssignment.crewMemberId !== a.id;
+                      return (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name} ({a.employeeCode || "DA"}){isAssignedToOther ? " (Assigned)" : a.isCheckedIn ? " ✓" : " (Not checked in)"}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

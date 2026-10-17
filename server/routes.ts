@@ -11217,42 +11217,55 @@ export async function registerRoutes(
     try {
       await ensureDriverTablesSchema();
       const targetDate = (req.query.date as string) || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const isAll = req.query.all === "true";
       
-      const [allEmployees, todayAttendance] = await Promise.all([
+      const [allEmployees, todayAttendance, allUsers] = await Promise.all([
         storage.getEmployees(),
         storage.getDriverAttendance(undefined, targetDate),
+        storage.getUsers(),
       ]);
+
+      const userToEmpId = new Map<string, string>();
+      for (const u of allUsers) {
+        if (u.employeeId) {
+          userToEmpId.set(u.id, u.employeeId);
+        }
+      }
 
       const deliveryAssistants = allEmployees.filter(emp => {
         const pos = (emp.position || "").trim().toLowerCase();
-        return pos === "delivery assistant" || pos === "delivery_assistant";
+        return (pos === "delivery assistant" || pos === "delivery_assistant") && emp.status === "active";
       });
 
       const attendanceByEmpId = new Map<string, any>();
       for (const att of todayAttendance) {
         if (att.driverId && att.checkInTime && att.status !== "absent") {
-          if (!attendanceByEmpId.has(att.driverId)) {
-            attendanceByEmpId.set(att.driverId, att);
+          const resolvedEmpId = userToEmpId.get(att.driverId) || att.driverId;
+          if (!attendanceByEmpId.has(resolvedEmpId)) {
+            attendanceByEmpId.set(resolvedEmpId, att);
           }
         }
       }
 
-      const available = deliveryAssistants
-        .filter(emp => attendanceByEmpId.has(emp.id))
-        .map(emp => {
-          const att = attendanceByEmpId.get(emp.id);
-          return {
-            id: emp.id,
-            name: emp.name,
-            employeeCode: emp.employeeCode,
-            phone: emp.phone,
-            position: emp.position,
-            checkInTime: att?.checkInTime,
-            checkInLocation: att?.checkInLocation,
-            attendanceId: att?.id,
-            status: att?.status || "present",
-          };
-        });
+      const assistantsToReturn = isAll
+        ? deliveryAssistants
+        : deliveryAssistants.filter(emp => attendanceByEmpId.has(emp.id));
+
+      const available = assistantsToReturn.map(emp => {
+        const att = attendanceByEmpId.get(emp.id);
+        return {
+          id: emp.id,
+          name: emp.name,
+          employeeCode: emp.employeeCode,
+          phone: emp.phone,
+          position: emp.position,
+          checkInTime: att?.checkInTime || null,
+          checkInLocation: att?.checkInLocation || null,
+          attendanceId: att?.id || null,
+          status: att?.status || "not_checked_in",
+          isCheckedIn: !!att,
+        };
+      });
 
       res.json(available);
     } catch (error: any) {
@@ -11554,19 +11567,10 @@ export async function registerRoutes(
         if (!isSupervisorOrAdmin) {
           return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
         }
-        const targetDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-        const [allEmployees, todayAttendance] = await Promise.all([
-          storage.getEmployees(),
-          storage.getDriverAttendance(undefined, targetDate),
-        ]);
-        const targetEmp = allEmployees.find(e => e.id === data.crewMemberId);
+        const targetEmp = await storage.getEmployee(data.crewMemberId);
         const empPos = (targetEmp?.position || "").trim().toLowerCase();
         if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
           return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
-        }
-        const hasCheckedIn = todayAttendance.some(att => att.driverId === data.crewMemberId && att.checkInTime && att.status !== "absent");
-        if (!hasCheckedIn) {
-          return res.status(400).json({ error: "Selected Delivery Assistant has not registered attendance for today." });
         }
       }
       const truck = await storage.createDispatchTruckAssignment(data);
@@ -11603,19 +11607,10 @@ export async function registerRoutes(
         if (!isSupervisorOrAdmin) {
           return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
         }
-        const targetDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Riyadh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-        const [allEmployees, todayAttendance] = await Promise.all([
-          storage.getEmployees(),
-          storage.getDriverAttendance(undefined, targetDate),
-        ]);
-        const targetEmp = allEmployees.find(e => e.id === data.crewMemberId);
+        const targetEmp = await storage.getEmployee(data.crewMemberId);
         const empPos = (targetEmp?.position || "").trim().toLowerCase();
         if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
           return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
-        }
-        const hasCheckedIn = todayAttendance.some(att => att.driverId === data.crewMemberId && att.checkInTime && att.status !== "absent");
-        if (!hasCheckedIn) {
-          return res.status(400).json({ error: "Selected Delivery Assistant has not registered attendance for today." });
         }
       }
       const truck = await storage.updateDispatchTruckAssignment(req.params.id, data);
