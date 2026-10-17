@@ -20,6 +20,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { exportLoadingMonitorExcel } from "@/lib/customer-excel-export";
 import { cn } from "@/lib/utils";
+import { formatDisplayTimeAST } from "@/pages/daily-dispatch";
 
 interface LoadingMonitorTabProps {
   boardSheetId: string | null;
@@ -1306,11 +1307,11 @@ export default function LoadingMonitorTab({
                                         <TableCell className="text-center">
                                           {alloc.isDeparted ? (
                                             <Badge className="bg-emerald-500/15 text-emerald-700 border-emerald-300 text-[10px] h-5 gap-1">
-                                              <CheckCircle2 className="h-2.5 w-2.5" /> Dispatched {alloc.departTime ? `@ ${alloc.departTime}` : ""}
+                                              <CheckCircle2 className="h-2.5 w-2.5" /> Dispatched {alloc.departTime ? `@ ${formatDisplayTimeAST(alloc.departTime)}` : ""}
                                             </Badge>
                                           ) : alloc.isLoaded ? (
                                             <Badge className="bg-blue-500/15 text-blue-700 border-blue-300 text-[10px] h-5 gap-1">
-                                              <Check className="h-2.5 w-2.5" /> Loaded {alloc.loadingEndTime ? `@ ${alloc.loadingEndTime}` : ""}
+                                              <Check className="h-2.5 w-2.5" /> Loaded {alloc.loadingEndTime ? `@ ${formatDisplayTimeAST(alloc.loadingEndTime)}` : ""}
                                             </Badge>
                                           ) : alloc.isLoading ? (
                                             <Badge className="bg-amber-500/15 text-amber-700 border-amber-300 text-[10px] h-5 animate-pulse">
@@ -1402,7 +1403,7 @@ export default function LoadingMonitorTab({
                     <div className="flex flex-col items-end gap-1">
                       {truck.isDeparted ? (
                         <Badge className="bg-emerald-600 text-white text-[10px] h-5">
-                          Departed {truck.departTime ? `@ ${truck.departTime}` : ""}
+                          Departed {truck.departTime ? `@ ${formatDisplayTimeAST(truck.departTime)}` : ""}
                         </Badge>
                       ) : truck.isLoaded ? (
                         <Badge className="bg-blue-600 text-white text-[10px] h-5">

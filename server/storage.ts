@@ -63,6 +63,26 @@ export const APP_TIMEZONE = "Asia/Bahrain"; // Arab Standard Time (AST, UTC+3)
 
 export const normalizeOutletCode = (c: any) => String(c || "").trim().toLowerCase().replace(/^0+/, "");
 
+export const formatDateStr = (dateInput?: any): string => {
+  if (!dateInput) return new Date().toLocaleDateString("en-CA", { timeZone: APP_TIMEZONE });
+  if (typeof dateInput === "string") {
+    const trimmed = dateInput.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-CA", { timeZone: APP_TIMEZONE });
+    }
+    return trimmed;
+  }
+  const d = new Date(dateInput);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleDateString("en-CA", { timeZone: APP_TIMEZONE });
+  }
+  return new Date().toLocaleDateString("en-CA", { timeZone: APP_TIMEZONE });
+};
+
 export const formatTime12h = (timeInput: any): string => {
   if (!timeInput) return "";
 
@@ -79,7 +99,7 @@ export const formatTime12h = (timeInput: any): string => {
 
   if (typeof timeInput === "string") {
     const trimmed = timeInput.trim();
-    if (!trimmed) return "";
+    if (!trimmed || trimmed === "-" || trimmed === "—") return "";
 
     // If it's an ISO timestamp or date-time string (e.g. 2026-09-29T07:18:00Z)
     if (trimmed.includes("T") || (trimmed.includes("-") && trimmed.includes(":")) || trimmed.endsWith("Z")) {
@@ -124,7 +144,7 @@ export const formatTime12h = (timeInput: any): string => {
     }).format(dateObj);
   }
 
-  return String(timeInput);
+  return "";
 };
 
 // Storage interface for all CRUD operations
@@ -4153,10 +4173,10 @@ export class DatabaseStorage implements IStorage {
     let sheetAttendances: any[] = [];
     try {
       const [sheetRow] = await db.select().from(dispatchSheets).where(eq(dispatchSheets.id, sheetId));
-      const sheetDateStr = sheetRow?.date ? (typeof sheetRow.date === 'string' ? sheetRow.date : new Date(sheetRow.date).toLocaleDateString("en-CA")) : new Date().toLocaleDateString("en-CA");
-      const allAttendances = await db.select().from(driverAttendance);
+      const sheetDateStr = formatDateStr(sheetRow?.date);
+      const allAttendances = await db.select().from(driverAttendance).orderBy(desc(driverAttendance.createdAt));
       sheetAttendances = allAttendances.filter(a => {
-        const attDate = a.checkInTime ? new Date(a.checkInTime).toLocaleDateString("en-CA") : (a.createdAt ? new Date(a.createdAt).toLocaleDateString("en-CA") : "");
+        const attDate = formatDateStr(a.checkInTime || a.createdAt);
         return attDate === sheetDateStr;
       });
 
@@ -4168,53 +4188,64 @@ export class DatabaseStorage implements IStorage {
         }
 
         const veh = truckMap.get(t.truckId);
-        const matchedAtt = sheetAttendances.find(a => {
-          if (t.driverId && a.driverId === t.driverId) return true;
-          if (t.truckId && a.truckId) {
+        // Find matching attendance for THIS truck / driver on THIS date
+        // Prioritize matching by assigned driverId first, then by truckId
+        let matchedAtt = null;
+        if (t.driverId) {
+          matchedAtt = sheetAttendances.find(a => a.driverId === t.driverId);
+        }
+        if (!matchedAtt && t.truckId) {
+          matchedAtt = sheetAttendances.find(a => {
+            if (!a.truckId) return false;
             const aTrk = a.truckId.trim().toLowerCase();
             const tTrk = t.truckId.trim().toLowerCase();
             const vehPlate = veh?.plateNumber?.trim().toLowerCase();
             const vehName = veh?.name?.trim().toLowerCase();
             return aTrk === tTrk || (vehPlate && aTrk === vehPlate) || (vehName && aTrk === vehName);
-          }
-          return false;
-        });
+          });
+        }
 
         let needsUpdate = false;
         const updateData: any = {};
 
         if (matchedAtt) {
+          // Reconcile reportingTime ONLY if t.reportingTime is NOT already set
           if (matchedAtt.checkInTime) {
             const formattedRep = formatTime12h(matchedAtt.checkInTime);
-            if (!t.reportingTime || t.reportingTime !== formattedRep) {
+            if (!t.reportingTime || t.reportingTime.trim() === "" || t.reportingTime === "-") {
               t.reportingTime = formattedRep;
               updateData.reportingTime = formattedRep;
               needsUpdate = true;
             }
           }
 
+          // Reconcile departureTime ONLY if t.departTime is NOT already set!
+          // NEVER mutate an already recorded departure time on read!
+          const hasExistingDepart = Boolean(t.departTime && t.departTime.trim() !== "" && t.departTime !== "-");
           if (matchedAtt.departureTime) {
             const formattedDep = formatTime12h(matchedAtt.departureTime);
-            if (!t.departTime || t.departTime !== formattedDep) {
+            if (!hasExistingDepart) {
               t.departTime = formattedDep;
               updateData.departTime = formattedDep;
               needsUpdate = true;
-            }
-            (t as any).isAutoDeparted = true;
-            if (t.loadingStatus !== "dispatched") {
-              t.loadingStatus = "dispatched";
-              updateData.loadingStatus = "dispatched";
-              needsUpdate = true;
-            }
-            if (!t.loadingEndTime || t.loadingEndTime.trim() === "" || t.loadingEndTime === "-") {
-              t.loadingEndTime = formattedDep;
-              updateData.loadingEndTime = formattedDep;
-              needsUpdate = true;
+              (t as any).isAutoDeparted = true;
+              if (t.loadingStatus !== "dispatched") {
+                t.loadingStatus = "dispatched";
+                updateData.loadingStatus = "dispatched";
+                needsUpdate = true;
+              }
+              if (!t.loadingEndTime || t.loadingEndTime.trim() === "" || t.loadingEndTime === "-") {
+                t.loadingEndTime = formattedDep;
+                updateData.loadingEndTime = formattedDep;
+                needsUpdate = true;
+              }
+            } else if (t.departTime === formattedDep) {
+              (t as any).isAutoDeparted = true;
             }
           }
 
-          // If driver clocked into this truck, synchronize driverId
-          if (matchedAtt.driverId && t.driverId !== matchedAtt.driverId) {
+          // If driverId is not yet assigned on this truck, synchronize from attendance
+          if (!t.driverId && matchedAtt.driverId) {
             t.driverId = matchedAtt.driverId;
             updateData.driverId = matchedAtt.driverId;
             needsUpdate = true;
@@ -9735,9 +9766,9 @@ export class DatabaseStorage implements IStorage {
     try {
       const attList = await db.select().from(driverAttendance);
       for (const att of attList) {
-        const attDate = att.checkInTime ? new Date(att.checkInTime).toISOString().split('T')[0] : (att.createdAt ? new Date(att.createdAt).toISOString().split('T')[0] : null);
+        const attDate = att.checkInTime || att.createdAt ? formatDateStr(att.checkInTime || att.createdAt) : null;
         if (attDate && att.truckId) {
-          attendanceMap.set(`${attDate}_${att.truckId}`, att);
+          attendanceMap.set(`${attDate}_${att.truckId.trim().toLowerCase()}`, att);
         }
       }
     } catch (e) {
@@ -9758,13 +9789,15 @@ export class DatabaseStorage implements IStorage {
       const stopCount = (truckStopsCounter.get(tripKey) || 0) + 1;
       truckStopsCounter.set(tripKey, stopCount);
 
-      // Check attendance for actual checkInTime and departureTime
-      const att = attendanceMap.get(`${rec.sheetDate}_${rec.truckNo}`);
+      // Check attendance for actual checkInTime and departureTime fallback
+      const att = attendanceMap.get(`${rec.sheetDate}_${rec.truckNo.trim().toLowerCase()}`);
       let repTime = rec.reportingTime;
       let depTime = rec.departTime;
-      if (att) {
-        if (att.checkInTime) repTime = formatTime12h(att.checkInTime);
-        if (att.departureTime) depTime = formatTime12h(att.departureTime);
+      if ((!repTime || repTime === "-" || repTime === "10:45 AM") && att?.checkInTime) {
+        repTime = formatTime12h(att.checkInTime);
+      }
+      if ((!depTime || depTime === "-" || depTime === "11:15 AM") && att?.departureTime) {
+        depTime = formatTime12h(att.departureTime);
       }
 
       return {

@@ -76,11 +76,15 @@ export default function DispatchPage() {
   const [configTrips, setConfigTrips] = useState("1");
   const [configTrucks, setConfigTrucks] = useState("1");
 
+  // Regional AST date and time helpers (Asia/Bahrain, UTC+3)
+  const getRegionalDateAST = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bahrain' }).format(new Date());
+  const getRegionalTimeAST = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bahrain', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+
   // Depart / Pickup Loading States
   const [isDepartDialogOpen, setIsDepartDialogOpen] = useState(false);
   const [departTrip, setDepartTrip] = useState<Trip | null>(null);
-  const [departPickupDate, setDepartPickupDate] = useState(new Date().toISOString().substring(0, 10));
-  const [departPickupTime, setDepartPickupTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+  const [departPickupDate, setDepartPickupDate] = useState(getRegionalDateAST());
+  const [departPickupTime, setDepartPickupTime] = useState(getRegionalTimeAST());
   const [departLoadedQty, setDepartLoadedQty] = useState("0");
   const [departCargoCondition, setDepartCargoCondition] = useState("Good");
   const [departLoadingNotes, setDepartLoadingNotes] = useState("");
@@ -98,8 +102,8 @@ export default function DispatchPage() {
   const [podStatus, setPodStatus] = useState<string>("delivered");
   const [podUrl, setPodUrl] = useState<string>("");
   const [issueLog, setIssueLog] = useState<string>("");
-  const [podDeliveryDate, setPodDeliveryDate] = useState(new Date().toISOString().substring(0, 10));
-  const [podDeliveryTime, setPodDeliveryTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+  const [podDeliveryDate, setPodDeliveryDate] = useState(getRegionalDateAST());
+  const [podDeliveryTime, setPodDeliveryTime] = useState(getRegionalTimeAST());
   const [podReceivedQty, setPodReceivedQty] = useState("0");
   const [podShortageQty, setPodShortageQty] = useState("0");
   const [podDamagedQty, setPodDamagedQty] = useState("0");
@@ -352,8 +356,8 @@ export default function DispatchPage() {
       setSelectedOrderIdForPOD("");
       setPodUrl("");
       setIssueLog("");
-      setPodDeliveryDate(new Date().toISOString().substring(0, 10));
-      setPodDeliveryTime(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+      setPodDeliveryDate(getRegionalDateAST());
+      setPodDeliveryTime(getRegionalTimeAST());
       setPodReceivedQty("0");
       setPodShortageQty("0");
       setPodDamagedQty("0");
@@ -604,8 +608,8 @@ export default function DispatchPage() {
                       className="h-8 text-xs border-green-200 text-green-600 hover:bg-green-50 dark:hover:bg-green-950/20"
                       onClick={() => {
                         setDepartTrip(trip);
-                        setDepartPickupDate(new Date().toISOString().substring(0, 10));
-                        setDepartPickupTime(new Date().toLocaleTimeString('en-US', { hour12: false }).substring(0, 5));
+                        setDepartPickupDate(getRegionalDateAST());
+                        setDepartPickupTime(getRegionalTimeAST());
                         setDepartLoadedQty("0");
                         setDepartCargoCondition("Good");
                         setDepartLoadingNotes("");

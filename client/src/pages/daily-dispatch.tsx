@@ -74,7 +74,7 @@ export const APP_TIMEZONE = "Asia/Bahrain"; // Arab Standard Time (AST, UTC+3)
 export const formatDisplayTimeAST = (timeInput?: string | null): string => {
   if (!timeInput) return "";
   const trimmed = timeInput.trim();
-  if (!trimmed || trimmed === "—") return "";
+  if (!trimmed || trimmed === "—" || trimmed === "-") return "";
 
   if (trimmed.includes("T") || (trimmed.includes("-") && trimmed.includes(":")) || trimmed.endsWith("Z")) {
     const d = new Date(trimmed);
@@ -87,6 +87,24 @@ export const formatDisplayTimeAST = (timeInput?: string | null): string => {
       }).format(d);
     }
   }
+
+  // If already formatted with AM or PM
+  if (trimmed.includes("AM") || trimmed.includes("PM")) {
+    return trimmed;
+  }
+
+  // If HH:mm format (e.g. "08:44" or "14:30")
+  if (trimmed.includes(":")) {
+    const parts = trimmed.split(":");
+    let h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) || 0;
+    if (!isNaN(h)) {
+      const ampm = h >= 12 ? "PM" : "AM";
+      h = h % 12 || 12;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+    }
+  }
+
   return trimmed;
 };
 
@@ -4093,14 +4111,8 @@ export default function DailyDispatchPage() {
 
         const formatTimeVal = (val: any) => {
           if (!val) return "-";
-          if (typeof val === "string" && (val.includes("AM") || val.includes("PM"))) return val;
-          try {
-            const d = new Date(val);
-            if (!isNaN(d.getTime())) {
-              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            }
-          } catch (e) {}
-          return String(val);
+          const res = formatDisplayTimeAST(String(val));
+          return res || "-";
         };
 
         for (const item of (outlet.items || [])) {

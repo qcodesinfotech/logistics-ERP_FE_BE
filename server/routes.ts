@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
-import { storage, formatTime12h } from "./storage";
+import { storage, formatTime12h, formatDateStr, APP_TIMEZONE } from "./storage";
 import { db, ensureDriverTablesSchema } from "./db";
 import { eq, and, or, inArray, desc, isNull, ne, sql } from "drizzle-orm";
 import PDFDocument from "pdfkit";
@@ -8355,7 +8355,7 @@ export async function registerRoutes(
 
       const [dispatchSheet] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, dispatchItem.sheetId));
       if (dispatchSheet) {
-        const todayStr = new Date().toLocaleDateString("en-CA");
+        const todayStr = formatDateStr(new Date());
         if (dispatchSheet.date > todayStr) {
           return res.status(400).json({ error: "Cannot record deliveries for a future date" });
         }
@@ -10869,11 +10869,23 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Active attendance record not found" });
       }
 
+      // If departureTime is already recorded and client is not explicitly forcing an update,
+      // preserve the existing departure time (prevents periodic background GPS pings from shifting departure time)
+      if (targetRecord.departureTime && !req.body.forceUpdate) {
+        return res.json({
+          success: true,
+          attendanceId: targetRecord.id,
+          departureTime: targetRecord.departureTime,
+          loadingDurationMinutes: targetRecord.loadingDurationMinutes || 0,
+          alreadyRecorded: true,
+          record: targetRecord,
+        });
+      }
+
       const depDate = departureTime ? new Date(departureTime) : new Date();
 
       // Check Daily Dispatch truck assignments for today / active sheets:
-      // Departure/checkout from store is NOT allowed until loading starting and completed is marked!
-      const todayStr = depDate.toLocaleDateString("en-CA");
+      const todayStr = formatDateStr(depDate);
       const activeSheets = await db.select().from(schema.dispatchSheets)
         .where(or(eq(schema.dispatchSheets.date, todayStr), eq(schema.dispatchSheets.status, "active")));
       const sheetIds = activeSheets.map(s => s.id);
@@ -10958,10 +10970,14 @@ export async function registerRoutes(
       let syncedTruckAssignments = 0;
       try {
         for (const ta of matchedTAs) {
+          const hasExistingDep = Boolean(ta.departTime && ta.departTime.trim() !== "" && ta.departTime !== "-");
           const updatePayload: any = {
-            departTime: formattedDepartTime,
             loadingStatus: "dispatched",
           };
+          // Only assign departure time if it was not already set manually
+          if (!hasExistingDep) {
+            updatePayload.departTime = formattedDepartTime;
+          }
           if (!ta.loadingEndTime || ta.loadingEndTime.trim() === "" || ta.loadingEndTime === "-") {
             updatePayload.loadingEndTime = formattedDepartTime;
           }
@@ -11622,8 +11638,9 @@ export async function registerRoutes(
     }
   });
 
-  async function findMatchingDepartureAttendance(driverId?: string | null, truckId?: string | null) {
+  async function findMatchingDepartureAttendance(driverId?: string | null, truckId?: string | null, targetDateStr?: string) {
     if (!driverId && !truckId) return null;
+    const effDate = targetDateStr ? formatDateStr(targetDateStr) : formatDateStr(new Date());
     const rawDriverIds = driverId ? [driverId] : [];
     const driverIdentifiers = new Set<string>(rawDriverIds);
     try {
@@ -11654,9 +11671,11 @@ export async function registerRoutes(
       }
     }
 
-    const attendanceList = await storage.getDriverAttendance();
+    const attendanceList = await db.select().from(schema.driverAttendance).orderBy(desc(schema.driverAttendance.createdAt));
     const matched = attendanceList.find(a => {
       if (!a.departureTime) return false;
+      const attDate = formatDateStr(a.checkInTime || a.createdAt);
+      if (attDate !== effDate) return false;
       const matchesDriver = a.driverId && driverIdentifiers.has(a.driverId);
       const matchesTruck = a.truckId && truckIdentifiers.has(a.truckId.toLowerCase());
       return matchesDriver || matchesTruck;
@@ -11697,15 +11716,14 @@ export async function registerRoutes(
         }
       }
 
-      // Auto-retroactive dispatch: If loading is completed (or marked loaded) and departTime is not set, check if driver already departed
-      if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
-        const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
-        if (existingTa) {
-          const matchedAtt = await findMatchingDepartureAttendance(existingTa.driverId, existingTa.truckId);
-          if (matchedAtt?.departureTime) {
-            updateData.departTime = formatTime12h(matchedAtt.departureTime);
-            updateData.loadingStatus = "dispatched";
-          }
+      // Auto-retroactive dispatch: Only check if supervisor did not specify loadingStatus/departTime, and loading is completed
+      if (!updateData.departTime && updateData.loadingStatus === undefined && existingTa?.loadingStatus !== "dispatched" && updateData.loadingEndTime) {
+        const [sheet] = existingTa?.sheetId ? await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, existingTa.sheetId)) : [null];
+        const sheetDate = sheet?.date ? formatDateStr(sheet.date) : formatDateStr(new Date());
+        const matchedAtt = await findMatchingDepartureAttendance(existingTa?.driverId, existingTa?.truckId, sheetDate);
+        if (matchedAtt?.departureTime) {
+          updateData.departTime = formatTime12h(matchedAtt.departureTime);
+          updateData.loadingStatus = "dispatched";
         }
       }
 
@@ -11765,11 +11783,13 @@ export async function registerRoutes(
         }
         if (driverId) updateData.driverId = driverId;
 
-        // Auto-retroactive dispatch: If loading is completed (or marked loaded) and departTime is not set, check if driver already departed
-        if (!updateData.departTime && (updateData.loadingEndTime || updateData.loadingStatus === "loaded")) {
+        // Auto-retroactive dispatch: Only check if caller did not specify loadingStatus/departTime, and loading is completed
+        if (!updateData.departTime && updateData.loadingStatus === undefined && matched.loadingStatus !== "dispatched" && updateData.loadingEndTime) {
+          const [sheet] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, sheetId));
+          const sheetDate = sheet?.date ? formatDateStr(sheet.date) : formatDateStr(new Date());
           const effDriverId = driverId || matched.driverId;
           const effTruckId = truckId || matched.truckId;
-          const matchedAtt = await findMatchingDepartureAttendance(effDriverId, effTruckId);
+          const matchedAtt = await findMatchingDepartureAttendance(effDriverId, effTruckId, sheetDate);
           if (matchedAtt?.departureTime) {
             updateData.departTime = formatTime12h(matchedAtt.departureTime);
             updateData.loadingStatus = "dispatched";
