@@ -11283,6 +11283,19 @@ export async function registerRoutes(
         };
       });
 
+      available.push({
+        id: "extra_labour",
+        name: "Extra Labour",
+        employeeCode: "TEMP",
+        phone: "",
+        position: "Delivery Assistant",
+        checkInTime: null,
+        checkInLocation: null,
+        attendanceId: null,
+        status: "active",
+        isCheckedIn: true,
+      });
+
       res.json(available);
     } catch (error: any) {
       console.error("Get available delivery assistants error:", error);
@@ -11583,10 +11596,27 @@ export async function registerRoutes(
         if (!isSupervisorOrAdmin) {
           return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
         }
-        const targetEmp = await storage.getEmployee(data.crewMemberId);
-        const empPos = (targetEmp?.position || "").trim().toLowerCase();
-        if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
-          return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
+        if (data.crewMemberId !== "extra_labour") {
+          const targetEmp = await storage.getEmployee(data.crewMemberId);
+          const empPos = (targetEmp?.position || "").trim().toLowerCase();
+          if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
+            return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
+          }
+        }
+      }
+      if (data.secondCrewMemberId) {
+        const userRole = (req.user?.role || "").toLowerCase();
+        const userPos = String((req.user as any)?.position || "").toLowerCase();
+        const isSupervisorOrAdmin = userRole === "supervisor" || userRole === "admin" || userRole === "super_admin" || userPos.includes("supervisor") || userPos.includes("admin") || userPos.includes("manager");
+        if (!isSupervisorOrAdmin) {
+          return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
+        }
+        if (data.secondCrewMemberId !== "extra_labour") {
+          const targetEmp = await storage.getEmployee(data.secondCrewMemberId);
+          const empPos = (targetEmp?.position || "").trim().toLowerCase();
+          if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
+            return res.status(400).json({ error: "Second crew member must be a Delivery Assistant." });
+          }
         }
       }
       const truck = await storage.createDispatchTruckAssignment(data);
@@ -11623,10 +11653,27 @@ export async function registerRoutes(
         if (!isSupervisorOrAdmin) {
           return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
         }
-        const targetEmp = await storage.getEmployee(data.crewMemberId);
-        const empPos = (targetEmp?.position || "").trim().toLowerCase();
-        if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
-          return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
+        if (data.crewMemberId !== "extra_labour") {
+          const targetEmp = await storage.getEmployee(data.crewMemberId);
+          const empPos = (targetEmp?.position || "").trim().toLowerCase();
+          if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
+            return res.status(400).json({ error: "Crew member must be a Delivery Assistant." });
+          }
+        }
+      }
+      if (data.secondCrewMemberId) {
+        const userRole = (req.user?.role || "").toLowerCase();
+        const userPos = String((req.user as any)?.position || "").toLowerCase();
+        const isSupervisorOrAdmin = userRole === "supervisor" || userRole === "admin" || userRole === "super_admin" || userPos.includes("supervisor") || userPos.includes("admin") || userPos.includes("manager");
+        if (!isSupervisorOrAdmin) {
+          return res.status(403).json({ error: "Crew assignment is to be done by the supervisor." });
+        }
+        if (data.secondCrewMemberId !== "extra_labour") {
+          const targetEmp = await storage.getEmployee(data.secondCrewMemberId);
+          const empPos = (targetEmp?.position || "").trim().toLowerCase();
+          if (empPos !== "delivery assistant" && empPos !== "delivery_assistant") {
+            return res.status(400).json({ error: "Second crew member must be a Delivery Assistant." });
+          }
         }
       }
       const truck = await storage.updateDispatchTruckAssignment(req.params.id, data);
@@ -12118,7 +12165,7 @@ export async function registerRoutes(
 
   app.get("/api/dispatch/activity-utilization-report", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      let { startDate, endDate, date, brandId, truckNo, storageType } = req.query as any;
+      let { startDate, endDate, date, brandId, truckNo, storageType, clientId } = req.query as any;
       if (date && !startDate && !endDate) {
         startDate = date;
         endDate = date;
@@ -12129,7 +12176,8 @@ export async function registerRoutes(
         date,
         brandId,
         truckNo,
-        storageType
+        storageType,
+        clientId
       });
       res.json(report);
     } catch (error) {

@@ -4199,58 +4199,75 @@ export default function DailyDispatchPage() {
           </TabsList>
         </div>
 
+        {/* Global Dispatch Date & Client Filter Bar (Active across all tabs) */}
+        <div className="px-6 py-2 border-b flex items-center gap-3 bg-muted/20 print:hidden flex-nowrap overflow-x-auto scrollbar-none text-xs">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <Calendar className="h-3.5 w-3.5 text-primary" />
+            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Date:</span>
+            <Input
+              type="date"
+              value={selectedDate}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="w-36 h-8 text-xs px-2 bg-background font-medium"
+            />
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Client:</span>
+            <select
+              value={boardClientId}
+              onChange={e => setBoardClientId(e.target.value)}
+              className="h-8 border rounded-md px-2 bg-background text-xs w-48 font-semibold text-primary"
+            >
+              <option value="all">All Clients</option>
+              {clientOptions.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.displayName}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Brand:</span>
+            <select
+              value={boardBrandId}
+              onChange={e => setBoardBrandId(e.target.value)}
+              className="h-8 border rounded-md px-2 bg-background text-xs w-36 font-medium"
+            >
+              <option value="all">All Brands</option>
+              {filteredBrands.map((b: any) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+          {sheetForDate ? (
+            <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+              <span className="px-2.5 py-1 rounded bg-emerald-100/80 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 text-[11px] font-semibold border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                Sheet: {sheetForDate.fileName || sheetForDate.date}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-shrink-0 ml-auto">
+              <FileText className="h-3.5 w-3.5" />
+              <span>No sheet for this client on {selectedDate}</span>
+              <Button size="sm" variant="ghost" className="h-7 text-xs px-1 text-primary hover:underline" onClick={() => {
+                setUploadDate(selectedDate);
+                if (boardClientId && boardClientId !== "all") setUploadClientId(boardClientId);
+                setActiveTab("upload");
+              }}>
+                Upload Sheet →
+              </Button>
+            </div>
+          )}
+        </div>
+
         {/* ===== BOARD TAB ===== */}
         <TabsContent value="board" className="flex-1 flex flex-col min-h-0 m-0 p-0 data-[state=inactive]:hidden">
-          <div className="px-6 py-3 border-b flex items-center gap-3 bg-background flex-nowrap overflow-x-auto scrollbar-none">
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-                className="w-36 h-8 text-xs px-2" />
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Client:</span>
-              <select
-                value={boardClientId}
-                onChange={e => setBoardClientId(e.target.value)}
-                className="h-8 border rounded-md px-2 bg-transparent text-xs w-48 font-medium"
-              >
-                <option value="all">All Clients</option>
-                {clientOptions.map((c: any) => (
-                  <option key={c.id} value={c.id}>{c.displayName}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Brand:</span>
-              <select
-                value={boardBrandId}
-                onChange={e => setBoardBrandId(e.target.value)}
-                className="h-8 border rounded-md px-2 bg-transparent text-xs w-36"
-              >
-                <option value="all">All Brands</option>
-                {filteredBrands.map((b: any) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-            </div>
-            {sheetForDate ? (
+          <div className="px-6 py-2.5 border-b flex items-center gap-3 bg-background flex-nowrap overflow-x-auto scrollbar-none">
+            {sheetForDate && (
               <Button size="sm" variant={boardSheetId === sheetForDate.id ? "default" : "outline"}
                 onClick={() => setBoardSheetId(sheetForDate.id)} className="flex-shrink-0 h-8 text-xs">
                 <Eye className="h-3.5 w-3.5 mr-1" />
                 {boardSheetId === sheetForDate.id ? "Viewing Board" : "Load Board"}
               </Button>
-            ) : (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-shrink-0">
-                <FileText className="h-3.5 w-3.5" />
-                No sheet.
-                <Button size="sm" variant="ghost" className="h-8 text-xs px-1" onClick={() => {
-                  setUploadDate(selectedDate);
-                  if (boardClientId && boardClientId !== "all") setUploadClientId(boardClientId);
-                  setActiveTab("upload");
-                }}>
-                  Upload one →
-                </Button>
-              </div>
             )}
             {boardSheetId && (
               <Button size="sm" variant="ghost" onClick={() => refetchBoard()} className="flex-shrink-0 h-8 text-xs">
@@ -4673,7 +4690,7 @@ export default function DailyDispatchPage() {
           ) : !boardData ? (
             <div className="flex-1 flex items-center justify-center min-h-0 text-muted-foreground">Failed to load summary.</div>
           ) : (
-            <PivotSummaryTab boardData={boardData} searchQuery={pivotSearchQuery} />
+            <PivotSummaryTab boardData={boardData} searchQuery={pivotSearchQuery} clientId={boardClientId} />
           )}
         </TabsContent>
 
@@ -4935,7 +4952,7 @@ export default function DailyDispatchPage() {
         {/* ===== CUSTOMER REPORT TAB ===== */}
         <TabsContent value="customer-report" className="flex-1 overflow-auto p-2 sm:p-4 min-h-0 bg-background print:overflow-visible print:bg-white print:p-0 print:block data-[state=inactive]:hidden">
           <ErrorBoundary>
-            <CustomerReportView />
+            <CustomerReportView initialDate={selectedDate} clientId={boardClientId} />
           </ErrorBoundary>
         </TabsContent>
 
@@ -6751,7 +6768,7 @@ export default function DailyDispatchPage() {
 }
 
 // ===== PIVOT SUMMARY TAB =====
-function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; searchQuery?: string }) {
+function PivotSummaryTab({ boardData, searchQuery, clientId }: { boardData: BoardData; searchQuery?: string; clientId?: string }) {
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [expandedOutlets, setExpandedOutlets] = useState<Record<string, boolean>>({});
   const [expandedSummaryItems, setExpandedSummaryItems] = useState<Record<string, boolean>>({});
@@ -6836,9 +6853,16 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
   }, []);
 
   const filteredZones = useMemo(() => {
-    if (!query) return boardData.zones;
+    let zones = boardData.zones;
+    if (clientId && clientId !== "all") {
+      zones = zones.map(zone => ({
+        ...zone,
+        outlets: zone.outlets.filter((outlet: any) => !outlet.clientId || outlet.clientId === clientId)
+      })).filter(zone => zone.outlets.length > 0);
+    }
+    if (!query) return zones;
 
-    return boardData.zones
+    return zones
       .map(zone => {
         const zoneMatches = zone.zoneName.toLowerCase().includes(query);
 
@@ -7242,8 +7266,8 @@ function PivotSummaryTab({ boardData, searchQuery }: { boardData: BoardData; sea
 function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelectSheet, sheets }: any) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", crewMemberId: "", zoneId: "", tripNumber: 1 });
-  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string; crewMemberId?: string; tripNumber: number } | null>(null);
+  const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", crewMemberId: "", secondCrewMemberId: "", extraLabourName: "", zoneId: "", tripNumber: 1 });
+  const [editAssignment, setEditAssignment] = useState<{ open: boolean; id: string; truckId: string; driverId: string; crewMemberId?: string; secondCrewMemberId?: string; extraLabourName?: string; tripNumber: number } | null>(null);
   const [expandedStorageTypes, setExpandedStorageTypes] = useState<Record<string, boolean>>({});
   const [expandedRoutes, setExpandedRoutes] = useState<Record<string, boolean>>({});
   const [planningTab, setPlanningTab] = useState("unassigned");
@@ -7254,10 +7278,13 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     queryKey: ["/api/crew/available-delivery-assistants?all=true"],
   });
 
-  const getAssistantName = (id: string | null | undefined) => {
+  const getAssistantName = (id: string | null | undefined, extraLabourName?: string | null) => {
     if (!id) return "";
+    if (id === "extra_labour") {
+      return extraLabourName ? `Extra Labour (${extraLabourName})` : "Extra Labour";
+    }
     const a = availableAssistants.find((item: any) => item.id === id);
-    return a ? a.name : "Assigned Crew";
+    return a ? a.name : (extraLabourName || "Assigned Crew");
   };
 
   const { data: truckData, refetch } = useQuery<any>({
@@ -7279,7 +7306,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Truck added to dispatch!" });
-      setTruckForm({ truckId: "", driverId: "", crewMemberId: "", zoneId: "", tripNumber: 1 });
+      setTruckForm({ truckId: "", driverId: "", crewMemberId: "", secondCrewMemberId: "", extraLabourName: "", zoneId: "", tripNumber: 1 });
     },
     onError: (e: any) => toast({ title: getErrorMessage(e), variant: "destructive" }),
   });
@@ -7293,8 +7320,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   });
 
   const updateTruckAssignmentMutation = useMutation({
-    mutationFn: (data: { id: string; truckId: string; driverId: string | null; crewMemberId?: string | null; tripNumber: number }) =>
-      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId, crewMemberId: data.crewMemberId, tripNumber: data.tripNumber }),
+    mutationFn: (data: { id: string; truckId: string; driverId: string | null; crewMemberId?: string | null; secondCrewMemberId?: string | null; extraLabourName?: string | null; tripNumber: number }) =>
+      apiRequest("PATCH", `/api/dispatch/truck-assignments/${data.id}`, { truckId: data.truckId, driverId: data.driverId, crewMemberId: data.crewMemberId, secondCrewMemberId: data.secondCrewMemberId, extraLabourName: data.extraLabourName, tripNumber: data.tripNumber }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
       toast({ title: "Assignment updated successfully!" });
@@ -7420,8 +7447,13 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
   // Drivers already assigned in this sheet
   const assignedDriversInSheet = new Set(truckAssignments.map((ta: any) => ta.driverId).filter(Boolean));
 
-  // Crew members already assigned in this sheet
-  const assignedCrewInSheet = new Set(truckAssignments.map((ta: any) => ta.crewMemberId).filter(Boolean));
+  // Crew members already assigned in this sheet (excluding extra_labour so multiple extra labour can be added)
+  const assignedCrewInSheet = new Set(
+    [
+      ...truckAssignments.map((ta: any) => ta.crewMemberId),
+      ...truckAssignments.map((ta: any) => ta.secondCrewMemberId),
+    ].filter((id) => Boolean(id) && id !== "extra_labour")
+  );
 
   // Helper to compute assigned items for a truck assignment
   const getTruckAssignedItemsCount = (truckAssignmentId: string) => {
@@ -7497,7 +7529,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
               <CardDescription>Select a zone first, then assign a vehicle and optional driver.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
                 {/* Zone — primary field */}
                 <div className="space-y-2">
                   <Label>Zone <span className="text-red-500">*</span></Label>
@@ -7521,8 +7553,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                       {vehiclesList
                         .filter((v: any) => {
                           if (!truckForm.zoneId) return false;
-                          // Show all active vehicles
-                          return v.status !== "inactive";
+                          // Show all active owned/rented vehicles (exclude outsourced)
+                          return v.status !== "inactive" && v.type !== "outsourced";
                         })
                         .sort((a: any, b: any) => {
                           // Sort: zone-matched vehicles first
@@ -7560,14 +7592,34 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     </SelectContent>
                   </Select>
                 </div>
-                {/* Delivery Assistant */}
+                {/* Delivery Assistant 1 */}
                 <div className="space-y-2">
-                  <Label>Delivery Assistant (Optional)</Label>
+                  <Label>Crew Member 1</Label>
                   <Select value={truckForm.crewMemberId || "unassigned"} onValueChange={v => setTruckForm(f => ({ ...f, crewMemberId: v === "unassigned" ? "" : v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select assistant..." /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select crew 1..." /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
-                      {availableAssistants.map((a: any) => {
+                      <SelectItem value="extra_labour">➕ Extra Labour (Temp / Daily)</SelectItem>
+                      {availableAssistants.filter((a: any) => a.id !== "extra_labour").map((a: any) => {
+                        const isAssigned = assignedCrewInSheet.has(a.id);
+                        return (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name} ({a.employeeCode || "DA"}){isAssigned ? " (Assigned)" : a.isCheckedIn ? " ✓" : " (Not checked in)"}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Delivery Assistant 2 */}
+                <div className="space-y-2">
+                  <Label>Second Crew Member</Label>
+                  <Select value={truckForm.secondCrewMemberId || "unassigned"} onValueChange={v => setTruckForm(f => ({ ...f, secondCrewMemberId: v === "unassigned" ? "" : v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select 2nd crew..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
+                      <SelectItem value="extra_labour">➕ Extra Labour (Temp / Daily)</SelectItem>
+                      {availableAssistants.filter((a: any) => a.id !== "extra_labour").map((a: any) => {
                         const isAssigned = assignedCrewInSheet.has(a.id);
                         return (
                           <SelectItem key={a.id} value={a.id}>
@@ -7594,6 +7646,17 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   </Select>
                 </div>
               </div>
+              {(truckForm.crewMemberId === "extra_labour" || truckForm.secondCrewMemberId === "extra_labour") && (
+                <div className="max-w-md space-y-1.5 p-3 rounded-md bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+                  <Label className="text-xs font-semibold text-amber-900 dark:text-amber-200">Extra Labour Name / Note (Optional)</Label>
+                  <Input
+                    placeholder="e.g. Ramesh (Daily temporary worker)"
+                    value={truckForm.extraLabourName || ""}
+                    onChange={e => setTruckForm(f => ({ ...f, extraLabourName: e.target.value }))}
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <Button
                   onClick={() => addTruckMutation.mutate(truckForm)}
@@ -7684,7 +7747,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                 </div>
                                 <div className="flex items-center shrink-0">
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
-                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", crewMemberId: ta.crewMemberId || "", tripNumber: ta.tripNumber })}>
+                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", crewMemberId: ta.crewMemberId || "", secondCrewMemberId: ta.secondCrewMemberId || "", extraLabourName: ta.extraLabourName || "", tripNumber: ta.tripNumber })}>
                                     <Edit2 className="h-3 w-3" />
                                   </Button>
                                   <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
@@ -7719,13 +7782,25 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     : getDriverName(ta.driverId)}
                                 </span>
                               </p>
-                              {ta.crewMemberId && (
-                                <p className="text-[10px] text-primary/80 flex items-center gap-0.5 mt-0.5" title={`Crew: ${getAssistantName(ta.crewMemberId)}`}>
-                                  <Users className="h-2.5 w-2.5 shrink-0" />
-                                  <span className="truncate font-medium">
-                                    {getAssistantName(ta.crewMemberId)}
-                                  </span>
-                                </p>
+                              {(ta.crewMemberId || ta.secondCrewMemberId) && (
+                                <div className="space-y-0.5 mt-0.5">
+                                  {ta.crewMemberId && (
+                                    <p className="text-[10px] text-primary/80 flex items-center gap-0.5" title={`Crew 1: ${getAssistantName(ta.crewMemberId, ta.extraLabourName)}`}>
+                                      <Users className="h-2.5 w-2.5 shrink-0" />
+                                      <span className="truncate font-medium">
+                                        {getAssistantName(ta.crewMemberId, ta.extraLabourName)}
+                                      </span>
+                                    </p>
+                                  )}
+                                  {ta.secondCrewMemberId && (
+                                    <p className="text-[10px] text-primary/80 flex items-center gap-0.5" title={`Crew 2: ${getAssistantName(ta.secondCrewMemberId, ta.extraLabourName)}`}>
+                                      <Users className="h-2.5 w-2.5 shrink-0" />
+                                      <span className="truncate font-medium">
+                                        {getAssistantName(ta.secondCrewMemberId, ta.extraLabourName)}
+                                      </span>
+                                    </p>
+                                  )}
+                                </div>
                               )}
                               <div className="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
                                 <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
@@ -8080,7 +8155,9 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                 >
                   <SelectTrigger><SelectValue placeholder="Select vehicle" /></SelectTrigger>
                   <SelectContent>
-                    {vehiclesList.map((v: any) => (
+                    {vehiclesList
+                      .filter((v: any) => v.status !== "inactive" && (v.type !== "outsourced" || v.id === editAssignment.truckId))
+                      .map((v: any) => (
                       <SelectItem key={v.id} value={v.id}>
                         {v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})
                       </SelectItem>
@@ -8109,7 +8186,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Delivery Assistant (Crew)</Label>
+                <Label>Crew Member 1</Label>
                 <Select
                   value={editAssignment.crewMemberId || "unassigned"}
                   onValueChange={(val) => setEditAssignment((prev) => prev ? { ...prev, crewMemberId: val === "unassigned" ? "" : val } : null)}
@@ -8117,7 +8194,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   <SelectTrigger><SelectValue placeholder="Select delivery assistant" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
-                    {availableAssistants.map((a: any) => {
+                    <SelectItem value="extra_labour">➕ Extra Labour (Temp / Daily)</SelectItem>
+                    {availableAssistants.filter((a: any) => a.id !== "extra_labour").map((a: any) => {
                       const isAssignedToOther = assignedCrewInSheet.has(a.id) && editAssignment.crewMemberId !== a.id;
                       return (
                         <SelectItem key={a.id} value={a.id}>
@@ -8128,6 +8206,38 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label>Second Crew Member (Optional)</Label>
+                <Select
+                  value={editAssignment.secondCrewMemberId || "unassigned"}
+                  onValueChange={(val) => setEditAssignment((prev) => prev ? { ...prev, secondCrewMemberId: val === "unassigned" ? "" : val } : null)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select 2nd crew..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned" className="text-muted-foreground italic">None (Unassigned)</SelectItem>
+                    <SelectItem value="extra_labour">➕ Extra Labour (Temp / Daily)</SelectItem>
+                    {availableAssistants.filter((a: any) => a.id !== "extra_labour").map((a: any) => {
+                      const isAssignedToOther = assignedCrewInSheet.has(a.id) && editAssignment.secondCrewMemberId !== a.id;
+                      return (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name} ({a.employeeCode || "DA"}){isAssignedToOther ? " (Assigned)" : a.isCheckedIn ? " ✓" : " (Not checked in)"}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+              {(editAssignment.crewMemberId === "extra_labour" || editAssignment.secondCrewMemberId === "extra_labour") && (
+                <div className="space-y-1.5 p-3 rounded-md bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+                  <Label className="text-xs font-semibold text-amber-900 dark:text-amber-200">Extra Labour Name / Note (Optional)</Label>
+                  <Input
+                    placeholder="e.g. Ramesh (Day hire)"
+                    value={editAssignment.extraLabourName || ""}
+                    onChange={(e) => setEditAssignment((prev) => prev ? { ...prev, extraLabourName: e.target.value } : null)}
+                    className="h-8 text-xs bg-background"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Trip Number</Label>
                 <Select
@@ -8150,6 +8260,8 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                     truckId: editAssignment.truckId,
                     driverId: editAssignment.driverId || null,
                     crewMemberId: editAssignment.crewMemberId || null,
+                    secondCrewMemberId: editAssignment.secondCrewMemberId || null,
+                    extraLabourName: editAssignment.extraLabourName || null,
                     tripNumber: editAssignment.tripNumber || 1,
                   })}
                   disabled={updateTruckAssignmentMutation.isPending}
@@ -9558,7 +9670,18 @@ function TruckTransfersTab({ zones, vehicles: _v }: any) {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>Truck</Label>
-              <Select value={form.truckId} onValueChange={v => setForm(f => ({ ...f, truckId: v }))}>
+              <Select
+                value={form.truckId}
+                onValueChange={v => {
+                  const veh = vehiclesList.find((item: any) => item.id === v);
+                  const currentZone = veh?.currentZoneId || "";
+                  setForm(f => ({
+                    ...f,
+                    truckId: v,
+                    fromZoneId: currentZone || f.fromZoneId,
+                  }));
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Select truck..." /></SelectTrigger>
                 <SelectContent>{vehiclesList.map((v: any) => <SelectItem key={v.id} value={v.id}>{v.plateNumber} — {v.name} ({v.capacity || "?"} T{v.storageType ? ` - ${v.storageType}` : ""})</SelectItem>)}</SelectContent>
               </Select>

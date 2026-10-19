@@ -2433,6 +2433,8 @@ export const dispatchTruckAssignments = pgTable("dispatch_truck_assignments", {
   loadingStatus: text("loading_status").default("pending"),
   supervisorNotes: text("supervisor_notes"),
   crewMemberId: varchar("crew_member_id"),
+  secondCrewMemberId: varchar("second_crew_member_id"),
+  extraLabourName: text("extra_labour_name"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

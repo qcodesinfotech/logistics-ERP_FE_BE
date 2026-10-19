@@ -22,25 +22,46 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { exportCustomerReportExcel } from "@/lib/customer-excel-export";
 
-export default function CustomerReportView() {
+export default function CustomerReportView({
+  initialDate,
+  clientId,
+}: {
+  initialDate?: string;
+  clientId?: string;
+} = {}) {
   const [dateMode, setDateMode] = useState<"single" | "range">("single");
-  const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>(initialDate || "");
+  const [endDate, setEndDate] = useState<string>(initialDate || "");
+  const [selectedClient, setSelectedClient] = useState<string>(clientId || "all");
   const [selectedBrand, setSelectedBrand] = useState<string>("all");
   const [selectedStorageType, setSelectedStorageType] = useState<string>("all");
   const [selectedTruck, setSelectedTruck] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeSubTab, setActiveSubTab] = useState<string>("activity");
 
+  useEffect(() => {
+    if (initialDate) {
+      setStartDate(initialDate);
+      setEndDate(initialDate);
+    }
+  }, [initialDate]);
+
+  useEffect(() => {
+    if (clientId) {
+      setSelectedClient(clientId);
+    }
+  }, [clientId]);
+
   const queryUrl = useMemo(() => {
     const params = new URLSearchParams();
     if (startDate) params.append("startDate", startDate);
     if (endDate) params.append("endDate", endDate);
+    if (selectedClient && selectedClient !== "all") params.append("clientId", selectedClient);
     if (selectedBrand !== "all") params.append("brandId", selectedBrand);
     if (selectedStorageType !== "all") params.append("storageType", selectedStorageType);
     if (selectedTruck !== "all") params.append("truckNo", selectedTruck);
     return `/api/dispatch/activity-utilization-report?${params.toString()}`;
-  }, [startDate, endDate, selectedBrand, selectedStorageType, selectedTruck]);
+  }, [startDate, endDate, selectedClient, selectedBrand, selectedStorageType, selectedTruck]);
 
   const { data: reportData, isLoading, refetch, isFetching } = useQuery<any>({
     queryKey: [queryUrl],

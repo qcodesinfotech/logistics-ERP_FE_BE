@@ -708,7 +708,7 @@ export interface IStorage {
   updateDriverAttendance(id: string, data: Partial<DriverAttendance>): Promise<DriverAttendance>;
   getDriverAttendanceReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]>;
   getCompletedDeliveries(startDate?: string, endDate?: string, clientId?: string): Promise<any[]>;
-  getActivityUtilizationReport(options?: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string }): Promise<any>;
+  getActivityUtilizationReport(options?: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string; clientId?: string }): Promise<any>;
   getTruckLastClosingKm(truckId: string): Promise<number>;
 
   // Logistics Fleet Advanced
@@ -9661,14 +9661,14 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getActivityUtilizationReport(options: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string } = {}): Promise<any> {
+  async getActivityUtilizationReport(options: { startDate?: string; endDate?: string; date?: string; brandId?: string; truckNo?: string; storageType?: string; clientId?: string } = {}): Promise<any> {
     let sDate = options.startDate;
     let eDate = options.endDate;
     if (options.date && !sDate && !eDate) {
       sDate = options.date;
       eDate = options.date;
     }
-    const deliveries = await this.getCompletedDeliveries(sDate, eDate);
+    const deliveries = await this.getCompletedDeliveries(sDate, eDate, options.clientId);
 
     // Filter by criteria if provided
     let filtered = deliveries;
