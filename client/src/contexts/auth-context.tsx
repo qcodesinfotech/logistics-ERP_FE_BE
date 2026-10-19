@@ -7,11 +7,13 @@ interface AuthUser {
   username: string;
   name: string | null;
   role: string;
+  position?: string | null;
   employeeId: string | null;
   companyId: string | null;
   shopId: string | null;
   branchId: string | null;
   warehouseId: string | null;
+  assignedClientIds?: string[] | null;
 }
 
 interface AuthContextType {
@@ -119,11 +121,45 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = async (username: string, password: string): Promise<string | true> => {
     try {
+      let locationPayload: { latitude?: number; longitude?: number; accuracy?: number; deviceType?: string } = {
+        deviceType: "Web Browser",
+      };
+
+      if (typeof window !== "undefined" && "geolocation" in navigator) {
+        try {
+          const pos = await new Promise<GeolocationPosition | null>((resolve) => {
+            const timer = setTimeout(() => resolve(null), 1500);
+            navigator.geolocation.getCurrentPosition(
+              (p) => {
+                clearTimeout(timer);
+                resolve(p);
+              },
+              () => {
+                clearTimeout(timer);
+                resolve(null);
+              },
+              { timeout: 1500, maximumAge: 60000, enableHighAccuracy: true }
+            );
+          });
+
+          if (pos?.coords) {
+            locationPayload = {
+              ...locationPayload,
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+            };
+          }
+        } catch (e) {
+          // Geolocation capture is non-blocking
+        }
+      }
+
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, ...locationPayload }),
       });
 
       if (!response.ok) {

@@ -394,6 +394,14 @@ export async function ensureDriverTablesSchema() {
         shop_id = EXCLUDED.shop_id,
         branch_id = EXCLUDED.branch_id,
         company_id = EXCLUDED.company_id;
+
+      -- Employee & User Client Scoping and Supervisor Category updates
+      ALTER TABLE "employees" ADD COLUMN IF NOT EXISTS "assigned_client_ids" jsonb DEFAULT '[]'::jsonb;
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "assigned_client_ids" jsonb DEFAULT '[]'::jsonb;
+
+      -- Mark current Supervisors as Supervisor LMD under employees category
+      UPDATE "employees" SET "position" = 'Supervisor LMD' WHERE LOWER(TRIM("position")) = 'supervisor';
+      UPDATE "users" SET "role" = 'supervisor_lmd' WHERE LOWER(TRIM("role")) = 'supervisor';
     `);
     schemaCheckDone = true;
     console.log("[db] Driver tables schema verified and updated successfully");

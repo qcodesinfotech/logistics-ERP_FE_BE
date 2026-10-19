@@ -161,6 +161,7 @@ interface ZoneGroup {
     loadingStatus?: string | null;
     supervisorNotes?: string | null;
     isAutoDeparted?: boolean | null;
+    tripNumber?: number | null;
   }[];
   outlets: OutletGroup[];
 }
@@ -1700,39 +1701,47 @@ function ZoneColumn({
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const primaryTruck = zone.trucks?.[0];
+  const trip1Truck = zone.trucks?.find(t => (t.tripNumber || 1) === 1) || zone.trucks?.[0];
+  const trip2Truck = zone.trucks?.find(t => (t.tripNumber || 1) === 2);
+  const [selectedTrip, setSelectedTrip] = useState<1 | 2>(1);
+
+  const activeTruck = selectedTrip === 2 ? trip2Truck : trip1Truck;
+  const primaryTruck = activeTruck;
 
   const [timingForm, setTimingForm] = useState({
-    loadingStartTime: primaryTruck?.loadingStartTime || "",
-    loadingEndTime: primaryTruck?.loadingEndTime || "",
-    departTime: primaryTruck?.departTime || "",
-    reportingTime: primaryTruck?.reportingTime || "",
-    loadingStatus: primaryTruck?.loadingStatus || "pending",
-    supervisorNotes: primaryTruck?.supervisorNotes || "",
+    loadingStartTime: activeTruck?.loadingStartTime || "",
+    loadingEndTime: activeTruck?.loadingEndTime || "",
+    departTime: activeTruck?.departTime || "",
+    reportingTime: activeTruck?.reportingTime || "",
+    loadingStatus: activeTruck?.loadingStatus || "pending",
+    supervisorNotes: activeTruck?.supervisorNotes || "",
   });
 
   useEffect(() => {
-    if (primaryTruck) {
-      setTimingForm({
-        loadingStartTime: primaryTruck.loadingStartTime || "",
-        loadingEndTime: primaryTruck.loadingEndTime || "",
-        departTime: primaryTruck.departTime || "",
-        reportingTime: primaryTruck.reportingTime || "",
-        loadingStatus: primaryTruck.loadingStatus || "pending",
-        supervisorNotes: primaryTruck.supervisorNotes || "",
-      });
-    }
-  }, [primaryTruck]);
+    const curTruck = selectedTrip === 2 ? trip2Truck : trip1Truck;
+    setTimingForm({
+      loadingStartTime: curTruck?.loadingStartTime || "",
+      loadingEndTime: curTruck?.loadingEndTime || "",
+      departTime: curTruck?.departTime || "",
+      reportingTime: curTruck?.reportingTime || "",
+      loadingStatus: curTruck?.loadingStatus || "pending",
+      supervisorNotes: curTruck?.supervisorNotes || "",
+    });
+  }, [selectedTrip, trip1Truck, trip2Truck]);
 
   const updateTimingMutation = useMutation({
     mutationFn: async (payload: any) => {
-      const res = await apiRequest("POST", `/api/dispatch/sheets/${sheetId}/routes/${zone.zoneId}/timing`, payload);
+      const res = await apiRequest("POST", `/api/dispatch/sheets/${sheetId}/routes/${zone.zoneId}/timing`, {
+        ...payload,
+        tripNumber: selectedTrip,
+        truckAssignmentId: (selectedTrip === 2 ? trip2Truck?.id : trip1Truck?.id),
+      });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/trucks`] });
-      toast({ title: "Route timings updated successfully!" });
+      toast({ title: `Trip ${selectedTrip} timings updated successfully!` });
       setIsTimingDialogOpen(false);
     },
     onError: (err: any) => {
@@ -2063,40 +2072,88 @@ function ZoneColumn({
                     ? formattedTotalQty
                     : `${formattedTotalQty}/${formattedInitialTotalQty}`}
                 </p>
-                {/* Timing Badge */}
+                {/* Timing Badges for Trip 1 and Trip 2 */}
                 <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                  {primaryTruck?.loadingStatus === "dispatched" ? (
+                  {/* Trip 1 Badge */}
+                  {trip1Truck?.loadingStatus === "dispatched" ? (
                     <Badge 
-                      className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5"
-                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
-                      title={primaryTruck.isAutoDeparted ? "Auto-detected by driver premises GPS departure" : "Click to view/edit timings"}
+                      className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                      title={trip1Truck.isAutoDeparted ? "Trip 1 auto-detected by GPS departure" : "Click to view/edit Trip 1 timings"}
                     >
-                      <Truck className="h-3 w-3" /> Dispatched {primaryTruck.departTime ? `@ ${formatDisplayTimeAST(primaryTruck.departTime)}` : ""} {primaryTruck.isAutoDeparted ? "📍" : ""}
+                      <Truck className="h-2.5 w-2.5" /> T1 Dispatched {trip1Truck.departTime ? `@ ${formatDisplayTimeAST(trip1Truck.departTime)}` : ""}
                     </Badge>
-                  ) : primaryTruck?.loadingStatus === "loaded" ? (
+                  ) : trip1Truck?.loadingStatus === "loaded" ? (
                     <Badge 
-                      className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5"
-                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
-                      title="Click to view/edit timings"
+                      className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit Trip 1 timings"
                     >
-                      <CheckCircle2 className="h-3 w-3" /> Loaded {primaryTruck.loadingEndTime ? `@ ${primaryTruck.loadingEndTime}` : ""}
+                      <CheckCircle2 className="h-2.5 w-2.5" /> T1 Loaded {trip1Truck.loadingEndTime ? `@ ${trip1Truck.loadingEndTime}` : ""}
                     </Badge>
-                  ) : primaryTruck?.loadingStatus === "loading" ? (
+                  ) : trip1Truck?.loadingStatus === "loading" ? (
                     <Badge 
-                      className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5 animate-pulse"
-                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
-                      title="Click to view/edit timings"
+                      className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 animate-pulse"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit Trip 1 timings"
                     >
-                      <RefreshCw className="h-3 w-3 animate-spin" /> Loading {primaryTruck.loadingStartTime ? `@ ${primaryTruck.loadingStartTime}` : ""}
+                      <RefreshCw className="h-2.5 w-2.5 animate-spin" /> T1 Loading {trip1Truck.loadingStartTime ? `@ ${trip1Truck.loadingStartTime}` : ""}
                     </Badge>
                   ) : (
                     <Badge 
                       variant="outline"
-                      className="text-muted-foreground hover:bg-muted/80 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-2 h-5 border-dashed"
-                      onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
-                      title="Click to record loading/dispatch timing"
+                      className="text-muted-foreground hover:bg-muted/80 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-dashed"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                      title="Click to record Trip 1 loading/dispatch timing"
                     >
-                      <Clock className="h-3 w-3" /> Record Timings
+                      <Clock className="h-2.5 w-2.5" /> T1 Timings
+                    </Badge>
+                  )}
+
+                  {/* Trip 2 Badge or Option */}
+                  {trip2Truck ? (
+                    trip2Truck.loadingStatus === "dispatched" ? (
+                      <Badge 
+                        className="bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-300 hover:bg-purple-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                        onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                        title="Click to view/edit Trip 2 timings"
+                      >
+                        <Truck className="h-2.5 w-2.5" /> T2 Dispatched {trip2Truck.departTime ? `@ ${formatDisplayTimeAST(trip2Truck.departTime)}` : ""}
+                      </Badge>
+                    ) : trip2Truck.loadingStatus === "loaded" ? (
+                      <Badge 
+                        className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-300 hover:bg-indigo-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                        onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                        title="Click to view/edit Trip 2 timings"
+                      >
+                        <CheckCircle2 className="h-2.5 w-2.5" /> T2 Loaded {trip2Truck.loadingEndTime ? `@ ${trip2Truck.loadingEndTime}` : ""}
+                      </Badge>
+                    ) : trip2Truck.loadingStatus === "loading" ? (
+                      <Badge 
+                        className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 animate-pulse"
+                        onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                        title="Click to view/edit Trip 2 timings"
+                      >
+                        <RefreshCw className="h-2.5 w-2.5 animate-spin" /> T2 Loading {trip2Truck.loadingStartTime ? `@ ${trip2Truck.loadingStartTime}` : ""}
+                      </Badge>
+                    ) : (
+                      <Badge 
+                        variant="outline"
+                        className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-purple-200"
+                        onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                        title="Click to record Trip 2 loading/dispatch timing"
+                      >
+                        <Clock className="h-2.5 w-2.5" /> T2 Timings
+                      </Badge>
+                    )
+                  ) : (
+                    <Badge 
+                      variant="outline"
+                      className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-0.5 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-dotted"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                      title="Click to prepare and record second trip loading & dispatch"
+                    >
+                      <Plus className="h-2.5 w-2.5" /> Trip 2
                     </Badge>
                   )}
                 </div>
@@ -2621,14 +2678,46 @@ function ZoneColumn({
                 Loading & Dispatch Timings
               </DialogTitle>
               <DialogDescription>
-                Route: <strong className="text-foreground">{zone.zoneName}</strong>
-                {primaryTruck?.vehicle && (
-                  <span> · Truck: <strong className="text-foreground">{primaryTruck.vehicle.plateNumber || primaryTruck.vehicle.name}</strong></span>
+                Route: <strong className="text-foreground">{zone.zoneName}</strong> ·{" "}
+                <Badge variant="outline" className="text-[10px] px-1.5 font-bold">
+                  Trip {selectedTrip}
+                </Badge>
+                {activeTruck?.vehicle && (
+                  <span> · Truck: <strong className="text-foreground">{activeTruck.vehicle.plateNumber || activeTruck.vehicle.name}</strong></span>
                 )}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-3.5 py-2">
+              {/* Trip Selector */}
+              <div className="flex items-center gap-2 p-1.5 bg-muted/60 rounded-lg">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedTrip === 1 ? "default" : "outline"}
+                  className="flex-1 h-8 text-xs font-semibold gap-1.5"
+                  onClick={() => setSelectedTrip(1)}
+                >
+                  <Truck className="h-3.5 w-3.5" />
+                  Trip 1 {trip1Truck?.vehicle ? `(${trip1Truck.vehicle.plateNumber || trip1Truck.vehicle.name})` : ""}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedTrip === 2 ? "default" : "outline"}
+                  className={`flex-1 h-8 text-xs font-semibold gap-1.5 ${selectedTrip === 2 ? "bg-purple-600 hover:bg-purple-700 text-white" : "border-purple-200 text-purple-700"}`}
+                  onClick={() => setSelectedTrip(2)}
+                >
+                  <Truck className="h-3.5 w-3.5" />
+                  Trip 2 {trip2Truck?.vehicle ? `(${trip2Truck.vehicle.plateNumber || trip2Truck.vehicle.name})` : "(Load / Despatch)"}
+                </Button>
+              </div>
+
+              {selectedTrip === 2 && !trip2Truck && (
+                <div className="p-2 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded text-[11px] text-purple-800 dark:text-purple-200">
+                  Saving timings here will initialize Trip 2 loading for route <strong>{zone.zoneName}</strong>.
+                </div>
+              )}
               {/* Status Selector */}
               <div className="space-y-1.5">
                 <Label className="text-xs">Loading & Dispatch Status</Label>
@@ -2743,30 +2832,36 @@ function ZoneColumn({
               >
                 Cancel
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => {
-                  // Only validate dispatch completion if user is explicitly setting dispatched status or a new depart time
-                  const isExplicitDispatch = (timingForm.loadingStatus === "dispatched" && primaryTruck?.loadingStatus !== "dispatched") ||
-                                             (timingForm.departTime && !primaryTruck?.departTime);
-                  if (isExplicitDispatch) {
-                    const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
-                    const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded";
-                    if (!hasStarted || !hasCompleted) {
-                      toast({
-                        title: "Loading Incomplete",
-                        description: "Cannot mark truck departed: Both loading start and loading completion must be recorded first.",
-                        variant: "destructive",
-                      });
-                      return;
+              {isSupervisor ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    // Only validate dispatch completion if user is explicitly setting dispatched status or a new depart time
+                    const isExplicitDispatch = (timingForm.loadingStatus === "dispatched" && primaryTruck?.loadingStatus !== "dispatched") ||
+                                               (timingForm.departTime && !primaryTruck?.departTime);
+                    if (isExplicitDispatch) {
+                      const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
+                      const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded";
+                      if (!hasStarted || !hasCompleted) {
+                        toast({
+                          title: "Loading Incomplete",
+                          description: "Cannot mark truck departed: Both loading start and loading completion must be recorded first.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
                     }
-                  }
-                  updateTimingMutation.mutate(timingForm);
-                }}
-              >
-                {updateTimingMutation.isPending ? "Saving..." : "Save Timings"}
-              </Button>
+                    updateTimingMutation.mutate(timingForm);
+                  }}
+                >
+                  {updateTimingMutation.isPending ? "Saving..." : "Save Timings"}
+                </Button>
+              ) : (
+                <Badge variant="outline" className="text-xs text-amber-700 border-amber-300 bg-amber-50">
+                  View-Only Mode
+                </Badge>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -3047,7 +3142,9 @@ function TruckHistoryTab({ vehicles }: { vehicles: any[] }) {
 export default function DailyDispatchPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
-  const isSupervisor = user?.role === "supervisor" || (!isAdmin && user?.role?.toLowerCase().includes("supervisor"));
+  const isSupervisorLmd = !isAdmin && (user?.role === "supervisor_lmd" || user?.position === "Supervisor LMD" || (user?.role === "supervisor" && user?.position !== "Supervisor Operations"));
+  const isSupervisorOps = user?.role === "supervisor_operations" || user?.position === "Supervisor Operations";
+  const isSupervisor = isSupervisorLmd || isSupervisorOps || user?.role === "supervisor" || (!isAdmin && user?.role?.toLowerCase().includes("supervisor"));
   const canSupervise = isSupervisor || isAdmin;
 
   const { toast } = useToast();
@@ -4036,6 +4133,35 @@ export default function DailyDispatchPage() {
     return false;
   });
 
+  const assignedClientIds: string[] = useMemo(() => {
+    return Array.isArray(user?.assignedClientIds) ? (user.assignedClientIds as string[]) : [];
+  }, [user?.assignedClientIds]);
+
+  const isClientAssigned = useCallback((clientId: string | null | undefined): boolean => {
+    if (!clientId) return false;
+    if (assignedClientIds.includes(clientId)) return true;
+    const clientObj = clientList.find((c: any) => c.id === clientId);
+    if (clientObj?.parentClientId && assignedClientIds.includes(clientObj.parentClientId)) return true;
+    if (clientList.some((c: any) => c.parentClientId === clientId && assignedClientIds.includes(c.id))) return true;
+    return false;
+  }, [assignedClientIds, clientList]);
+
+  const currentSheet = useMemo(() => {
+    return sheets.find(s => s.id === boardSheetId) || sheetForDate || null;
+  }, [sheets, boardSheetId, sheetForDate]);
+
+  const currentEffectiveClientId = useMemo(() => {
+    return currentSheet?.clientId || (boardClientId !== "all" ? boardClientId : null);
+  }, [currentSheet, boardClientId]);
+
+  const canManageCurrentClient = useMemo(() => {
+    if (!isSupervisorLmd) return true;
+    if (!currentEffectiveClientId) return false;
+    return isClientAssigned(currentEffectiveClientId);
+  }, [isSupervisorLmd, currentEffectiveClientId, isClientAssigned]);
+
+  const isCurrentClientReadOnly = isSupervisorLmd && !canManageCurrentClient;
+
   const driverMap = new Map(drivers.map(d => [d.id, d]));
   const zoneMap = new Map(zones.map(z => [z.id, z]));
 
@@ -4278,8 +4404,18 @@ export default function DailyDispatchPage() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-orange-200 text-orange-700 hover:bg-orange-50 flex-shrink-0 h-8 text-xs"
-                onClick={() => setGlobalAddModal({ isOpen: true, selectedOutletCode: "" })}
+                disabled={isCurrentClientReadOnly}
+                className={cn(
+                  "border-orange-200 text-orange-700 hover:bg-orange-50 flex-shrink-0 h-8 text-xs",
+                  isCurrentClientReadOnly && "opacity-50 cursor-not-allowed hover:bg-transparent"
+                )}
+                onClick={() => {
+                  if (isCurrentClientReadOnly) {
+                    toast({ title: "View-Only Access", description: "Deliveries for this client can be viewed, but adding items is restricted to your assigned clients.", variant: "destructive" });
+                    return;
+                  }
+                  setGlobalAddModal({ isOpen: true, selectedOutletCode: "" });
+                }}
               >
                 <PlusCircle className="h-3.5 w-3.5 mr-1" />Add Item / Outlet
               </Button>
@@ -4288,8 +4424,16 @@ export default function DailyDispatchPage() {
               <Button
                 size="sm"
                 variant="outline"
-                className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 flex-shrink-0 h-8 text-xs"
+                disabled={isCurrentClientReadOnly}
+                className={cn(
+                  "border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 flex-shrink-0 h-8 text-xs",
+                  isCurrentClientReadOnly && "opacity-50 cursor-not-allowed hover:bg-transparent"
+                )}
                 onClick={() => {
+                  if (isCurrentClientReadOnly) {
+                    toast({ title: "View-Only Access", description: "Deliveries for this client can be viewed, but deleting items is restricted to your assigned clients.", variant: "destructive" });
+                    return;
+                  }
                   refetchSheetSkus();
                   setGlobalDeleteSkuModal({ isOpen: true, selectedSku: "" });
                 }}
@@ -4315,8 +4459,32 @@ export default function DailyDispatchPage() {
             )}
           </div>
 
-          {/* Supervisor Assigned Mode Banner */}
-          {isSupervisor && !isAdmin && (
+          {/* Supervisor LMD View-Only vs Managed Client Banner */}
+          {isCurrentClientReadOnly ? (
+            <div className="mx-6 mt-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-amber-600 text-white hover:bg-amber-600 text-xs font-semibold">View-Only Mode</Badge>
+                <span className="text-xs text-amber-900 dark:text-amber-200">
+                  Deliveries for this client can be viewed, but editing and planning are restricted to your assigned clients.
+                </span>
+              </div>
+              <span className="text-[11px] text-amber-700 dark:text-amber-300 font-medium hidden sm:inline">
+                Assigned Clients: {clientList.filter((c: any) => assignedClientIds.includes(c.id)).map((c: any) => c.name).join(", ") || "None"}
+              </span>
+            </div>
+          ) : isSupervisorLmd && canManageCurrentClient ? (
+            <div className="mx-6 mt-3 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-emerald-600 text-white hover:bg-emerald-600 text-xs font-semibold">Supervisor LMD Management</Badge>
+                <span className="text-xs text-emerald-900 dark:text-emerald-200">
+                  Active Client: <strong className="font-semibold">{clientList.find((c: any) => c.id === currentEffectiveClientId)?.name || "Assigned Client"}</strong>
+                </span>
+              </div>
+              <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium hidden sm:inline">
+                Full delivery management & second trip dispatching enabled.
+              </span>
+            </div>
+          ) : isSupervisor && !isAdmin ? (
             <div className="mx-6 mt-3 px-4 py-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 rounded-lg flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Badge className="bg-blue-600 text-white hover:bg-blue-600 text-xs">Supervisor Assigned Mode</Badge>
@@ -4328,7 +4496,7 @@ export default function DailyDispatchPage() {
                 Record loading and dispatching times directly on route cards.
               </span>
             </div>
-          )}
+          ) : null}
 
           {boardData && (
             <>
@@ -4607,7 +4775,7 @@ export default function DailyDispatchPage() {
                       .filter(z => z.outlets.length > 0)
                       .map(zone => (
                         <ZoneColumn key={zone.zoneId} zone={zone} sheetId={boardSheetId!}
-                          zones={zones} isSupervisor={canSupervise}
+                          zones={zones} isSupervisor={canSupervise && !isCurrentClientReadOnly}
                           onDeliveryUpdate={item => setDeliveryDialog(item)}
                           onOverride={outlet => setOverrideDialog(outlet)}
                           onOverrideItem={item => setItemOverrideDialog(item)}
@@ -4905,7 +5073,7 @@ export default function DailyDispatchPage() {
 
         {/* ===== TRUCK PLANNING TAB ===== */}
         <TabsContent value="trucks" className="flex-1 overflow-y-auto p-6 m-0 data-[state=inactive]:hidden">
-          <TruckPlanningTab boardSheetId={boardSheetId} zones={zones} drivers={drivers} selectedDate={selectedDate} onSelectSheet={(id: string | null) => { setBoardSheetId(id); }} sheets={sheets} />
+          <TruckPlanningTab boardSheetId={boardSheetId} zones={zones} drivers={drivers} selectedDate={selectedDate} onSelectSheet={(id: string | null) => { setBoardSheetId(id); }} sheets={sheets} isReadOnly={isCurrentClientReadOnly} />
         </TabsContent>
 
         {/* ===== LOADING MONITOR TAB ===== */}
@@ -7263,7 +7431,7 @@ function PivotSummaryTab({ boardData, searchQuery, clientId }: { boardData: Boar
 }
 
 // ===== TRUCK PLANNING TAB =====
-function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelectSheet, sheets }: any) {
+function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelectSheet, sheets, isReadOnly = false }: any) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [truckForm, setTruckForm] = useState({ truckId: "", driverId: "", crewMemberId: "", secondCrewMemberId: "", extraLabourName: "", zoneId: "", tripNumber: 1 });
@@ -7520,6 +7688,15 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
         </Card>
       ) : (
         <>
+          {isReadOnly && (
+            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-2.5 text-amber-800 dark:text-amber-200 text-xs">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                <strong>View-Only Mode:</strong> Vehicle planning and assignments for this client cannot be modified because this client is not in your assigned LMD scope.
+              </span>
+            </div>
+          )}
+
           {/* ─── Add Truck Form ─── */}
           <Card>
             <CardHeader>
@@ -7660,7 +7837,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
               <div className="flex gap-2">
                 <Button
                   onClick={() => addTruckMutation.mutate(truckForm)}
-                  disabled={!truckForm.truckId || !truckForm.zoneId || addTruckMutation.isPending}
+                  disabled={isReadOnly || !truckForm.truckId || !truckForm.zoneId || addTruckMutation.isPending}
                   className="gap-2"
                 >
                   <Plus className="h-4 w-4" /> Add Truck
@@ -7668,7 +7845,7 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                 <Button
                   variant="outline"
                   onClick={() => autoAllocateMutation.mutate()}
-                  disabled={truckAssignments.length === 0 || autoAllocateMutation.isPending}
+                  disabled={isReadOnly || truckAssignments.length === 0 || autoAllocateMutation.isPending}
                   className="gap-2"
                 >
                   <RefreshCw className={`h-4 w-4 ${autoAllocateMutation.isPending ? "animate-spin" : ""}`} />
@@ -7745,16 +7922,18 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                     {veh?.plateNumber || "Truck"} (Trip {ta.tripNumber})
                                   </span>
                                 </div>
-                                <div className="flex items-center shrink-0">
-                                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
-                                    onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", crewMemberId: ta.crewMemberId || "", secondCrewMemberId: ta.secondCrewMemberId || "", extraLabourName: ta.extraLabourName || "", tripNumber: ta.tripNumber })}>
-                                    <Edit2 className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
-                                    onClick={() => removeTruckMutation.mutate(ta.id)}>
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
+                                {!isReadOnly && (
+                                  <div className="flex items-center shrink-0">
+                                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-primary mr-1"
+                                      onClick={() => setEditAssignment({ open: true, id: ta.id, truckId: ta.truckId, driverId: ta.driverId || "", crewMemberId: ta.crewMemberId || "", secondCrewMemberId: ta.secondCrewMemberId || "", extraLabourName: ta.extraLabourName || "", tripNumber: ta.tripNumber })}>
+                                      <Edit2 className="h-3 w-3" />
+                                    </Button>
+                                    <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
+                                      onClick={() => removeTruckMutation.mutate(ta.id)}>
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                )}
                               </div>
                               {displayCap > 0 && (
                                 <div className="mb-1">
@@ -7899,16 +8078,22 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                             <Truck className="h-3 w-3" />
                                             {assignedVeh?.plateNumber || "Truck"}
                                           </Badge>
-                                          <Button
-                                            variant="ghost" size="sm"
-                                            className="h-6 w-6 p-0 text-red-400 hover:text-red-600"
-                                            onClick={() => unassignOutletMutation.mutate({
-                                              outletCode: outlet.outletCode,
-                                              sheetId: boardSheetId!
-                                            })}
-                                          >
-                                            <X className="h-3 w-3" />
-                                          </Button>
+                                          {!isReadOnly && (
+                                            <Button
+                                              variant="ghost" size="sm"
+                                              className="h-6 w-6 p-0 text-red-400 hover:text-red-600"
+                                              onClick={() => unassignOutletMutation.mutate({
+                                                outletCode: outlet.outletCode,
+                                                sheetId: boardSheetId!
+                                              })}
+                                            >
+                                              <X className="h-3 w-3" />
+                                            </Button>
+                                          )}
+                                        </div>
+                                      ) : isReadOnly ? (
+                                        <div className="flex items-center justify-end">
+                                          <span className="text-[11px] text-muted-foreground italic">Unassigned</span>
                                         </div>
                                       ) : (
                                         <div className="flex items-center justify-end gap-1">
@@ -8006,20 +8191,26 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
                                                   <Truck className="h-2.5 w-2.5" />
                                                   {stAssignedVeh?.plateNumber || "Truck"} (Trip {stAssignedTruck.tripNumber})
                                                 </Badge>
-                                                <Button
-                                                  variant="ghost" size="sm"
-                                                  className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    unassignOutletMutation.mutate({
-                                                      outletCode: outlet.outletCode,
-                                                      sheetId: boardSheetId!,
-                                                      storageType: st
-                                                    } as any);
-                                                  }}
-                                                >
-                                                  <X className="h-3 w-3" />
-                                                </Button>
+                                                {!isReadOnly && (
+                                                  <Button
+                                                    variant="ghost" size="sm"
+                                                    className="h-5 w-5 p-0 text-red-400 hover:text-red-600"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      unassignOutletMutation.mutate({
+                                                        outletCode: outlet.outletCode,
+                                                        sheetId: boardSheetId!,
+                                                        storageType: st
+                                                      } as any);
+                                                    }}
+                                                  >
+                                                    <X className="h-3 w-3" />
+                                                  </Button>
+                                                )}
+                                              </div>
+                                            ) : isReadOnly ? (
+                                              <div className="flex items-center justify-end" onClick={e => e.stopPropagation()}>
+                                                <span className="text-[10px] text-muted-foreground italic">Unassigned</span>
                                               </div>
                                             ) : (
                                               <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>

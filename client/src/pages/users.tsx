@@ -265,10 +265,12 @@ export default function UsersPage() {
                         <SelectItem value="super_admin">Super Admin</SelectItem>
                         <SelectItem value="admin">Admin</SelectItem>
                         <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="supervisor">Supervisor</SelectItem>
+                        <SelectItem value="supervisor_lmd">Supervisor LMD</SelectItem>
+                        <SelectItem value="supervisor_operations">Supervisor Operations</SelectItem>
+                        <SelectItem value="supervisor">Supervisor (Legacy)</SelectItem>
                         <SelectItem value="driver">Driver</SelectItem>
                         <SelectItem value="delivery_assistant">Delivery Assistant</SelectItem>
-                        {roles.filter(r => r.status === "active" && !["super_admin", "admin", "manager", "supervisor", "driver", "delivery_assistant"].includes(r.name.toLowerCase().replace(/\s+/g, "_"))).map(r => (
+                        {roles.filter(r => r.status === "active" && !["super_admin", "admin", "manager", "supervisor", "supervisor_lmd", "supervisor_operations", "driver", "delivery_assistant"].includes(r.name.toLowerCase().replace(/\s+/g, "_"))).map(r => (
                           <SelectItem key={r.id} value={r.name.toLowerCase().replace(/\s+/g, "_")}>{r.name}</SelectItem>
                         ))}
                       </SelectContent>

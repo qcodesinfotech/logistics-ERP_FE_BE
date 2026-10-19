@@ -12,9 +12,17 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from "@/components/ui/table";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+} from "@/components/ui/select";
+import {
   Truck, Package, CheckCircle2, Clock, Hourglass, Search, Printer,
   Download, RefreshCw, Calendar, Boxes, ChevronDown, ChevronRight,
-  Filter, AlertTriangle, ArrowRight, RotateCcw, ShieldCheck, Check
+  Filter, AlertTriangle, ArrowRight, RotateCcw, ShieldCheck, Check, Edit2
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -69,6 +77,21 @@ export default function LoadingMonitorTab({
   const { data: vehiclesList = [] } = useQuery<any[]>({ queryKey: ["/api/vehicles"] });
   const { data: driversList = [] } = useQuery<any[]>({ queryKey: ["/api/drivers"] });
 
+  const [tripFilter, setTripFilter] = useState<"all" | "1" | "2">("all");
+  const [timingModal, setTimingModal] = useState<{
+    isOpen: boolean;
+    truckAssignmentId: string;
+    routeNo: string;
+    tripNumber: number;
+    plateNumber: string;
+    driverName: string;
+    loadingStartTime: string;
+    loadingEndTime: string;
+    departTime: string;
+    loadingStatus: string;
+    supervisorNotes: string;
+  } | null>(null);
+
   // Quick Truck Departure Mutation
   const updateTruckTimingMutation = useMutation({
     mutationFn: async ({ truckAssignmentId, departTime, loadingStatus }: { truckAssignmentId: string; departTime?: string; loadingStatus?: string }) => {
@@ -91,6 +114,35 @@ export default function LoadingMonitorTab({
       refetchTrucks();
     },
     onError: (e: any) => toast({ title: e?.message || "Failed to update truck departure", variant: "destructive" }),
+  });
+
+  // Comprehensive Loading & Despatch Timing Mutation
+  const saveFullTimingMutation = useMutation({
+    mutationFn: async (payload: {
+      truckAssignmentId: string;
+      loadingStartTime: string;
+      loadingEndTime: string;
+      departTime: string;
+      loadingStatus: string;
+      supervisorNotes: string;
+    }) => {
+      return apiRequest("PATCH", `/api/dispatch/trucks/${payload.truckAssignmentId}/timing`, {
+        loadingStartTime: payload.loadingStartTime,
+        loadingEndTime: payload.loadingEndTime,
+        departTime: payload.departTime,
+        loadingStatus: payload.loadingStatus,
+        supervisorNotes: payload.supervisorNotes,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: `Trip ${timingModal?.tripNumber || 1} loading & despatch details updated!` });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      refetchBoard();
+      refetchTrucks();
+      setTimingModal(null);
+    },
+    onError: (e: any) => toast({ title: e?.message || "Failed to save timing details", variant: "destructive" }),
   });
 
   // Revert Truck Departure Mutation
@@ -633,6 +685,10 @@ export default function LoadingMonitorTab({
         if (storageFilter === "CLEANING" && !raw.includes("CLEAN")) return false;
         if (storageFilter === "CHEMICAL" && !raw.includes("CHEM")) return false;
       }
+      if (tripFilter !== "all") {
+        const matchesTrip = sku.allocations.some((a: any) => String(a.tripNumber || 1) === tripFilter);
+        if (!matchesTrip) return false;
+      }
       if (statusFilter === "pending_only" && (sku.purePendingQty || 0) <= 0) return false;
       if (statusFilter === "allocated" && (sku.allocatedQty || 0) <= 0) return false;
       if (statusFilter === "fully_loaded" && sku.balanceQty > 0) return false;
@@ -650,11 +706,12 @@ export default function LoadingMonitorTab({
       }
       return true;
     });
-  }, [skuList, storageFilter, statusFilter, searchQuery]);
+  }, [skuList, storageFilter, statusFilter, searchQuery, tripFilter]);
 
   // Filtered Trucks for Trucks & Trips View
   const filteredTrucks = useMemo(() => {
     return truckList.filter((t: any) => {
+      if (tripFilter !== "all" && String(t.tripNumber || 1) !== tripFilter) return false;
       if (statusFilter === "pending_only" && (t.isDeparted || t.isLoading)) return false;
       if (statusFilter === "allocated" && !t.isLoading) return false;
       if (statusFilter === "fully_loaded" && !t.isDeparted) return false;
@@ -668,7 +725,7 @@ export default function LoadingMonitorTab({
       }
       return true;
     });
-  }, [truckList, statusFilter, searchQuery]);
+  }, [truckList, statusFilter, searchQuery, tripFilter]);
 
   // Export Excel
   const handleExportExcel = async () => {
@@ -1045,6 +1102,29 @@ export default function LoadingMonitorTab({
                   }`}
               >
                 {sf.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Trip Selector Filter Pills */}
+          <div className="flex items-center gap-1 border-l pl-2 text-xs">
+            <span className="text-[10px] text-muted-foreground uppercase font-semibold mr-1">Trip:</span>
+            {[
+              { id: "all", label: "All Trips" },
+              { id: "1", label: "Trip 1" },
+              { id: "2", label: "Trip 2" },
+            ].map(tf => (
+              <button
+                key={tf.id}
+                onClick={() => setTripFilter(tf.id as any)}
+                className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors ${tripFilter === tf.id
+                  ? tf.id === "2"
+                    ? "bg-purple-600 text-white shadow-sm font-semibold"
+                    : "bg-primary text-primary-foreground shadow-sm font-semibold"
+                  : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                  }`}
+              >
+                {tf.label}
               </button>
             ))}
           </div>
@@ -1465,38 +1545,61 @@ export default function LoadingMonitorTab({
                       )}
                     </div>
 
-                    <div className="pt-2 border-t flex items-center justify-between">
-                      <span className="text-[11px] text-muted-foreground">
-                        {truck.isDeparted ? "Departed & deducted from warehouse" : "Pending departure"}
-                      </span>
-                      {!truck.isDeparted ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className={cn(
-                            "h-7 text-xs gap-1",
-                            isTruckLoaded(truck)
-                              ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                              : "border-slate-200 text-slate-400 bg-slate-50 opacity-60 cursor-not-allowed"
-                          )}
-                          onClick={() => handleQuickDepart(truck.id)}
-                          disabled={updateTruckTimingMutation.isPending || !isTruckLoaded(truck)}
-                          title={!isTruckLoaded(truck) ? "Loading must be started and completed before departure" : "Mark Departed"}
-                        >
-                          <Truck className="h-3 w-3 text-emerald-600" />
-                          Mark Departed
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-slate-400 hover:text-red-600 h-7 text-xs"
-                          onClick={() => handleRevertDepart(truck.id)}
-                        >
-                          <RotateCcw className="h-3 w-3 mr-1" />
-                          Revert
-                        </Button>
-                      )}
+                    <div className="pt-2 border-t flex items-center justify-between gap-1.5 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1 border-blue-200 text-blue-700 hover:bg-blue-50"
+                        onClick={() => {
+                          setTimingModal({
+                            isOpen: true,
+                            truckAssignmentId: truck.id,
+                            routeNo: truck.routeNo || truck.routeName || truck.zoneName || "Route",
+                            tripNumber: truck.tripNumber || 1,
+                            plateNumber: truck.plateNumber || "Truck",
+                            driverName: truck.driverName || "Driver",
+                            loadingStartTime: truck.loadingStartTime || "",
+                            loadingEndTime: truck.loadingEndTime || "",
+                            departTime: truck.departTime || "",
+                            loadingStatus: truck.loadingStatus || "pending",
+                            supervisorNotes: truck.supervisorNotes || "",
+                          });
+                        }}
+                      >
+                        <Clock className="h-3 w-3 text-blue-600" />
+                        Timings
+                      </Button>
+
+                      <div className="flex items-center gap-1.5">
+                        {!truck.isDeparted ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={cn(
+                              "h-7 text-xs gap-1",
+                              isTruckLoaded(truck)
+                                ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                : "border-slate-200 text-slate-400 bg-slate-50 opacity-60 cursor-not-allowed"
+                            )}
+                            onClick={() => handleQuickDepart(truck.id)}
+                            disabled={updateTruckTimingMutation.isPending || !isTruckLoaded(truck)}
+                            title={!isTruckLoaded(truck) ? "Loading must be started and completed before departure" : "Mark Departed"}
+                          >
+                            <Truck className="h-3 w-3 text-emerald-600" />
+                            Mark Departed
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-slate-400 hover:text-red-600 h-7 text-xs"
+                            onClick={() => handleRevertDepart(truck.id)}
+                          >
+                            <RotateCcw className="h-3 w-3 mr-1" />
+                            Revert
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1505,6 +1608,190 @@ export default function LoadingMonitorTab({
           </div>
         )}
       </div>
+
+      {/* Loading & Despatch Timings Modal (Trip 1 & Trip 2 support) */}
+      {timingModal?.isOpen && (
+        <Dialog open={timingModal.isOpen} onOpenChange={(open) => !open && setTimingModal(null)}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <Clock className="h-4 w-4 text-primary" />
+                Loading & Despatch Timings
+              </DialogTitle>
+              <DialogDescription>
+                Route: <strong className="text-foreground">{timingModal.routeNo}</strong> ·{" "}
+                <Badge variant="outline" className={`text-[10px] px-1.5 font-bold ${timingModal.tripNumber === 2 ? "bg-purple-50 text-purple-700 border-purple-200" : ""}`}>
+                  Trip {timingModal.tripNumber}
+                </Badge>
+                <span> · Truck: <strong className="text-foreground">{timingModal.plateNumber}</strong></span>
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3.5 py-2 text-xs">
+              {/* Trip Selection Toggle */}
+              <div className="flex items-center gap-2 p-1.5 bg-muted/60 rounded-lg">
+                <button
+                  type="button"
+                  className={`flex-1 h-8 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                    timingModal.tripNumber === 1
+                      ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm border"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  onClick={() => setTimingModal(prev => prev ? { ...prev, tripNumber: 1 } : null)}
+                >
+                  <Truck className="h-3.5 w-3.5" /> Trip 1
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 h-8 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
+                    timingModal.tripNumber === 2
+                      ? "bg-purple-600 text-white shadow-sm"
+                      : "text-purple-700 hover:text-purple-900"
+                  }`}
+                  onClick={() => setTimingModal(prev => prev ? { ...prev, tripNumber: 2 } : null)}
+                >
+                  <Truck className="h-3.5 w-3.5" /> Trip 2 (Second Trip)
+                </button>
+              </div>
+
+              {/* Status Selector */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Loading & Dispatch Status</Label>
+                <Select
+                  value={timingModal.loadingStatus || "pending"}
+                  onValueChange={(val) => setTimingModal(prev => prev ? { ...prev, loadingStatus: val } : null)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending / Not Started</SelectItem>
+                    <SelectItem value="loading">Loading in Progress</SelectItem>
+                    <SelectItem value="loaded">Loading Completed</SelectItem>
+                    <SelectItem value="dispatched">Dispatched / En Route</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Loading Start Time */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Loading Start Time</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={timingModal.loadingStartTime}
+                    onChange={(e) => setTimingModal(prev => prev ? { ...prev, loadingStartTime: e.target.value } : null)}
+                    placeholder="e.g. 08:30 AM"
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => {
+                      const now = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bahrain", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date());
+                      setTimingModal(prev => prev ? { ...prev, loadingStartTime: now, loadingStatus: prev.loadingStatus === "pending" ? "loading" : prev.loadingStatus } : null);
+                    }}
+                  >
+                    Set Now
+                  </Button>
+                </div>
+              </div>
+
+              {/* Loading End Time */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Loading Completed Time</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={timingModal.loadingEndTime}
+                    onChange={(e) => setTimingModal(prev => prev ? { ...prev, loadingEndTime: e.target.value } : null)}
+                    placeholder="e.g. 09:15 AM"
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => {
+                      const now = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bahrain", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date());
+                      setTimingModal(prev => prev ? { ...prev, loadingEndTime: now, loadingStatus: "loaded" } : null);
+                    }}
+                  >
+                    Set Now
+                  </Button>
+                </div>
+              </div>
+
+              {/* Dispatch (Departure) Time */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Despatch (Departure) Time</Label>
+                <div className="flex gap-2">
+                  <Input
+                    value={timingModal.departTime}
+                    onChange={(e) => setTimingModal(prev => prev ? { ...prev, departTime: e.target.value } : null)}
+                    placeholder="e.g. 09:30 AM"
+                    className="h-8 text-xs"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => {
+                      const now = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bahrain", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date());
+                      setTimingModal(prev => prev ? { ...prev, departTime: now, loadingStatus: "dispatched" } : null);
+                    }}
+                  >
+                    Set Now
+                  </Button>
+                </div>
+              </div>
+
+              {/* Supervisor Notes */}
+              <div className="space-y-1.5">
+                <Label className="text-xs">Supervisor Notes / Remarks</Label>
+                <Textarea
+                  value={timingModal.supervisorNotes}
+                  onChange={(e) => setTimingModal(prev => prev ? { ...prev, supervisorNotes: e.target.value } : null)}
+                  placeholder="Optional notes regarding trip loading, pallet checks, delay reason..."
+                  className="text-xs resize-none h-16"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setTimingModal(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-primary text-primary-foreground text-xs"
+                disabled={saveFullTimingMutation.isPending}
+                onClick={() => {
+                  if (!timingModal) return;
+                  saveFullTimingMutation.mutate({
+                    truckAssignmentId: timingModal.truckAssignmentId,
+                    loadingStartTime: timingModal.loadingStartTime,
+                    loadingEndTime: timingModal.loadingEndTime,
+                    departTime: timingModal.departTime,
+                    loadingStatus: timingModal.loadingStatus,
+                    supervisorNotes: timingModal.supervisorNotes,
+                  });
+                }}
+              >
+                {saveFullTimingMutation.isPending ? "Saving..." : "Save Timings"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

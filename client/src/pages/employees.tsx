@@ -69,6 +69,7 @@ const employeeSchema = z.object({
   allowances: z.string().default("0.000"),
   standardWorkingHours: z.string().default("8.00"),
   status: z.string().default("active"),
+  assignedClientIds: z.array(z.string()).optional().default([]),
 });
 
 type EmployeeFormData = z.infer<typeof employeeSchema>;
@@ -149,7 +150,12 @@ export default function Employees() {
       allowances: "0.000",
       standardWorkingHours: "8.00",
       status: "active",
+      assignedClientIds: [],
     },
+  });
+
+  const { data: clients = [] } = useQuery<any[]>({
+    queryKey: ["/api/clients"],
   });
 
   // Helper function to get valid payable months/years for an employee
@@ -380,12 +386,31 @@ export default function Employees() {
     setIsDialogOpen(false);
     setEditingEmployee(null);
     setEmployeePhotoUrl("");
-    form.reset();
+    form.reset({
+      employeeCode: "",
+      name: "",
+      password: "LogixD@123",
+      email: "",
+      phone: "",
+      address: "",
+      position: "",
+      department: "",
+      shopId: "",
+      branchId: "",
+      joiningDate: "",
+      basicSalary: "0.000",
+      allowances: "0.000",
+      standardWorkingHours: "8.00",
+      status: "active",
+      assignedClientIds: [],
+    });
   };
 
   const handleEdit = (employee: Employee) => {
     setEditingEmployee(employee);
     setEmployeePhotoUrl((employee as any).photoUrl || "");
+    const rawPos = (employee.position || "").trim();
+    const pos = rawPos.toLowerCase() === "supervisor" ? "Supervisor LMD" : rawPos;
     form.reset({
       employeeCode: employee.employeeCode,
       name: employee.name,
@@ -393,7 +418,7 @@ export default function Employees() {
       email: employee.email || "",
       phone: employee.phone || "",
       address: employee.address || "",
-      position: employee.position || "",
+      position: pos,
       department: employee.department || "",
       shopId: employee.shopId || "",
       branchId: employee.branchId || "",
@@ -402,6 +427,7 @@ export default function Employees() {
       allowances: employee.allowances || "0.000",
       standardWorkingHours: employee.standardWorkingHours || "8.00",
       status: employee.status,
+      assignedClientIds: (employee as any).assignedClientIds || [],
     });
     setIsDialogOpen(true);
   };
@@ -437,6 +463,7 @@ export default function Employees() {
       branchId: data.branchId || undefined,
       shopId: data.shopId || undefined,
       email: data.email || undefined,
+      assignedClientIds: data.assignedClientIds || [],
     };
     if (editingEmployee) {
       updateMutation.mutate({ ...payload, id: editingEmployee.id });
@@ -577,15 +604,41 @@ export default function Employees() {
       key: "position", 
       header: "Category", 
       render: (e: Employee) => {
-        const pos = e.position || "-";
+        let pos = e.position || "-";
         const pLower = pos.toLowerCase();
         let badgeClass = "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
         if (pLower === "admin") badgeClass = "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border-purple-200";
         else if (pLower === "driver") badgeClass = "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200";
         else if (pLower === "delivery assistant") badgeClass = "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200";
-        else if (pLower === "supervisor") badgeClass = "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200";
+        else if (pLower === "supervisor" || pLower.includes("supervisor lmd")) {
+          pos = "Supervisor LMD";
+          badgeClass = "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200";
+        }
+        else if (pLower.includes("operations") || pLower.includes("supervisor operations")) {
+          pos = "Supervisor Operations";
+          badgeClass = "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 border-cyan-200";
+        }
         else if (pLower === "manager") badgeClass = "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200";
-        return <Badge variant="outline" className={`font-medium ${badgeClass}`}>{pos}</Badge>;
+
+        const assignedIds = (e as any).assignedClientIds || [];
+        const isLmd = pos === "Supervisor LMD";
+
+        return (
+          <div className="space-y-1">
+            <Badge variant="outline" className={`font-medium ${badgeClass}`}>{pos}</Badge>
+            {isLmd && (
+              <div className="text-[10px] text-muted-foreground">
+                {assignedIds.length > 0 ? (
+                  <span className="font-semibold text-amber-700 dark:text-amber-400">
+                    {assignedIds.length} client{assignedIds.length > 1 ? "s" : ""} assigned
+                  </span>
+                ) : (
+                  <span className="italic text-slate-400">No clients assigned</span>
+                )}
+              </div>
+            )}
+          </div>
+        );
       } 
     },
     { key: "department", header: "Department", render: (e: Employee) => e.department || "-" },
@@ -738,8 +791,11 @@ export default function Employees() {
                     <SelectItem value="Admin">Admin</SelectItem>
                     <SelectItem value="Driver">Driver</SelectItem>
                     <SelectItem value="Delivery Assistant">Delivery Assistant</SelectItem>
-                    <SelectItem value="Supervisor">Supervisor</SelectItem>
+                    <SelectItem value="Supervisor LMD">Supervisor LMD</SelectItem>
+                    <SelectItem value="Supervisor Operations">Supervisor Operations</SelectItem>
                     <SelectItem value="Manager">Manager</SelectItem>
+                    <SelectItem value="Staff">Staff</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -763,7 +819,14 @@ export default function Employees() {
                   columns={employeeColumns} 
                   data={employees.filter(e => {
                     if (categoryFilter === "all") return true;
-                    return (e.position || "").trim().toLowerCase() === categoryFilter.toLowerCase();
+                    const p = (e.position || "").trim().toLowerCase();
+                    if (categoryFilter === "Supervisor LMD") {
+                      return p === "supervisor lmd" || p === "supervisor";
+                    }
+                    if (categoryFilter === "Supervisor Operations") {
+                      return p === "supervisor operations" || p.includes("supervisor operations");
+                    }
+                    return p === categoryFilter.toLowerCase();
                   })} 
                   getRowKey={(e) => e.id} 
                 />
@@ -881,7 +944,8 @@ export default function Employees() {
                         <SelectItem value="Admin">Admin</SelectItem>
                         <SelectItem value="Driver">Driver</SelectItem>
                         <SelectItem value="Delivery Assistant">Delivery Assistant</SelectItem>
-                        <SelectItem value="Supervisor">Supervisor</SelectItem>
+                        <SelectItem value="Supervisor LMD">Supervisor LMD</SelectItem>
+                        <SelectItem value="Supervisor Operations">Supervisor Operations</SelectItem>
                         <SelectItem value="Manager">Manager</SelectItem>
                         <SelectItem value="Staff">Staff</SelectItem>
                         <SelectItem value="Other">Other</SelectItem>
@@ -890,6 +954,83 @@ export default function Employees() {
                     <FormMessage />
                   </FormItem>
                 )} />
+                {form.watch("position") === "Supervisor LMD" && (
+                  <FormField
+                    control={form.control}
+                    name="assignedClientIds"
+                    render={({ field }) => {
+                      const selectedIds: string[] = field.value || [];
+                      const toggleClient = (clientId: string) => {
+                        if (selectedIds.includes(clientId)) {
+                          field.onChange(selectedIds.filter((id: string) => id !== clientId));
+                        } else {
+                          field.onChange([...selectedIds, clientId]);
+                        }
+                      };
+                      return (
+                        <FormItem className="col-span-full border rounded-lg p-3 bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <FormLabel className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                Assigned Clients (LMD Management Scope)
+                              </FormLabel>
+                              <p className="text-[11px] text-muted-foreground">
+                                Supervisor LMD can edit and manage ONLY these assigned clients. All other clients will be view-only.
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-[10px] px-2"
+                                onClick={() => field.onChange((clients || []).map((c: any) => c.id))}
+                              >
+                                Select All
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-[10px] px-2"
+                                onClick={() => field.onChange([])}
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 bg-background/80 rounded border">
+                            {(clients || []).map((c: any) => {
+                              const isSelected = selectedIds.includes(c.id);
+                              return (
+                                <label
+                                  key={c.id}
+                                  className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-xs border transition-colors ${
+                                    isSelected
+                                      ? "bg-amber-100/70 border-amber-300 dark:bg-amber-900/40 dark:border-amber-700 font-medium text-amber-900 dark:text-amber-100"
+                                      : "hover:bg-muted/50 border-transparent text-muted-foreground"
+                                  }`}
+                                  onClick={() => toggleClient(c.id)}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 h-3.5 w-3.5"
+                                    checked={isSelected}
+                                    onChange={() => {}}
+                                  />
+                                  <span className="truncate" title={c.companyName || c.name}>
+                                    {c.companyName || c.name}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
+                  />
+                )}
                 <FormField control={form.control} name="department" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Department</FormLabel>

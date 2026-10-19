@@ -23,6 +23,7 @@ export interface AuthUser {
   shopId: string | null;
   branchId: string | null;
   warehouseId: string | null;
+  assignedClientIds?: string[] | null;
 }
 
 export interface AuthRequest extends Request {
@@ -473,7 +474,7 @@ export const requireShopScope = (req: AuthRequest, res: Response, next: NextFunc
 export const registerAuthRoutes = (app: any) => {
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { username, password } = req.body;
+      const { username, password, latitude, longitude, accuracy, locationName, address, deviceType } = req.body || {};
 
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password are required" });
@@ -492,16 +493,30 @@ export const registerAuthRoutes = (app: any) => {
           return res.status(401).json({ error: "Incorrect password or username" });
         }
 
+        let assignedClientIds = (user as any).assignedClientIds || [];
+        let pos: string | null = null;
+        if (user.employeeId) {
+          const [linkedEmp] = await db.select().from(employees).where(eq(employees.id, user.employeeId)).limit(1);
+          if (linkedEmp) {
+            pos = linkedEmp.position || null;
+            if ((!assignedClientIds || assignedClientIds.length === 0) && (linkedEmp as any).assignedClientIds) {
+              assignedClientIds = (linkedEmp as any).assignedClientIds;
+            }
+          }
+        }
+
         const authUser: AuthUser = {
           id: user.id,
           username: user.username,
           name: user.name,
           role: user.role,
+          position: pos,
           employeeId: user.employeeId,
           companyId: user.companyId,
           shopId: user.shopId,
           branchId: user.branchId,
           warehouseId: user.warehouseId,
+          assignedClientIds,
         };
 
         const accessToken = generateAccessToken(authUser);
@@ -512,6 +527,36 @@ export const registerAuthRoutes = (app: any) => {
           .where(eq(users.id, user.id));
 
         setRefreshTokenCookie(res, refreshToken);
+
+        // Capture login location in user_activity_logs (Managers and all users have their login location captured with NO location restriction for Managers)
+        const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress || null;
+        const hasCoords = latitude !== undefined && latitude !== null && longitude !== undefined && longitude !== null && !isNaN(Number(latitude)) && !isNaN(Number(longitude));
+        let details = `User logged in [Role: ${authUser.role}]`;
+        if (deviceType) details += ` [${deviceType}]`;
+        if (hasCoords) {
+          const lat = parseFloat(String(latitude)).toFixed(6);
+          const lng = parseFloat(String(longitude)).toFixed(6);
+          details += ` at GPS: ${lat}, ${lng} (https://maps.google.com/?q=${lat},${lng})`;
+          if (accuracy) details += ` [±${Math.round(Number(accuracy))}m]`;
+        }
+        if (locationName || address) {
+          details += ` - ${locationName || address}`;
+        }
+
+        try {
+          await storage.createUserActivityLog({
+            userId: authUser.id,
+            username: authUser.username || authUser.name || "Unknown",
+            action: "LOGIN",
+            details,
+            ipAddress: ip ? String(ip) : null,
+            latitude: hasCoords ? String(latitude) : null,
+            longitude: hasCoords ? String(longitude) : null,
+            locationName: (locationName || address) ? String(locationName || address) : null,
+          });
+        } catch (logErr) {
+          console.warn("Failed to create login activity log:", logErr);
+        }
 
         return res.json({
           user: authUser,
@@ -553,8 +598,10 @@ export const registerAuthRoutes = (app: any) => {
       let empRole = "driver";
       if (pos === "admin") {
         empRole = "admin";
-      } else if (pos === "supervisor") {
-        empRole = "supervisor";
+      } else if (pos === "supervisor" || pos === "supervisor lmd" || pos === "supervisor_lmd") {
+        empRole = "supervisor_lmd";
+      } else if (pos === "supervisor operations" || pos === "supervisor_operations") {
+        empRole = "supervisor_operations";
       } else if (pos === "manager") {
         empRole = "manager";
       } else if (pos === "delivery assistant" || pos === "delivery_assistant") {
@@ -576,12 +623,43 @@ export const registerAuthRoutes = (app: any) => {
         shopId: emp.shopId,
         branchId: emp.branchId,
         warehouseId: null,
+        assignedClientIds: (emp as any).assignedClientIds || [],
       };
 
       const accessToken = generateAccessToken(authUser);
       const refreshToken = generateRefreshToken(authUser);
 
       setRefreshTokenCookie(res, refreshToken);
+
+      // Capture login location in user_activity_logs (Managers and all users have their login location captured with NO location restriction for Managers)
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress || null;
+      const hasCoords = latitude !== undefined && latitude !== null && longitude !== undefined && longitude !== null && !isNaN(Number(latitude)) && !isNaN(Number(longitude));
+      let details = `Employee logged in [Position: ${emp.position || empRole}]`;
+      if (deviceType) details += ` [${deviceType}]`;
+      if (hasCoords) {
+        const lat = parseFloat(String(latitude)).toFixed(6);
+        const lng = parseFloat(String(longitude)).toFixed(6);
+        details += ` at GPS: ${lat}, ${lng} (https://maps.google.com/?q=${lat},${lng})`;
+        if (accuracy) details += ` [±${Math.round(Number(accuracy))}m]`;
+      }
+      if (locationName || address) {
+        details += ` - ${locationName || address}`;
+      }
+
+      try {
+        await storage.createUserActivityLog({
+          userId: authUser.id,
+          username: authUser.username || authUser.name || "Unknown",
+          action: "LOGIN",
+          details,
+          ipAddress: ip ? String(ip) : null,
+          latitude: hasCoords ? String(latitude) : null,
+          longitude: hasCoords ? String(longitude) : null,
+          locationName: (locationName || address) ? String(locationName || address) : null,
+        });
+      } catch (logErr) {
+        console.warn("Failed to create login activity log:", logErr);
+      }
 
       return res.json({
         user: authUser,
@@ -644,16 +722,30 @@ export const registerAuthRoutes = (app: any) => {
         return res.status(401).json({ error: "Invalid refresh token" });
       }
 
+      let assignedClientIds = (user as any).assignedClientIds || [];
+      let pos: string | null = null;
+      if (user.employeeId) {
+        const [linkedEmp] = await db.select().from(employees).where(eq(employees.id, user.employeeId)).limit(1);
+        if (linkedEmp) {
+          pos = linkedEmp.position || null;
+          if ((!assignedClientIds || assignedClientIds.length === 0) && (linkedEmp as any).assignedClientIds) {
+            assignedClientIds = (linkedEmp as any).assignedClientIds;
+          }
+        }
+      }
+
       const authUser: AuthUser = {
         id: user.id,
         username: user.username,
         name: user.name,
         role: user.role,
+        position: pos,
         employeeId: user.employeeId,
         companyId: user.companyId,
         shopId: user.shopId,
         branchId: user.branchId,
         warehouseId: user.warehouseId,
+        assignedClientIds,
       };
 
       const newAccessToken = generateAccessToken(authUser);

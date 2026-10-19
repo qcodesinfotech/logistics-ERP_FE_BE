@@ -611,6 +611,7 @@ export const employees = pgTable("employees", {
   photoUrl: text("photo_url"),
   password: text("password").default("LogixD@123"),
   standardWorkingHours: decimal("standard_working_hours", { precision: 5, scale: 2 }).default("8.00"),
+  assignedClientIds: jsonb("assigned_client_ids").$type<string[]>().default([]),
   status: text("status").notNull().default("active"),
 });
 
@@ -952,6 +953,7 @@ export const users = pgTable("users", {
   warehouseId: varchar("warehouse_id"),
   refreshToken: text("refresh_token"),
   lastLogin: timestamp("last_login"),
+  assignedClientIds: jsonb("assigned_client_ids").$type<string[]>().default([]),
   status: text("status").notNull().default("active"),
 });
 
@@ -1505,7 +1507,9 @@ export const insertBankTransactionSchema = createInsertSchema(bankTransactions, 
 }).omit({ id: true });
 export const insertPettyCashSchema = createInsertSchema(pettyCash).omit({ id: true });
 export const insertCapitalSchema = createInsertSchema(capital).omit({ id: true });
-export const insertEmployeeSchema = createInsertSchema(employees).omit({ id: true });
+export const insertEmployeeSchema = createInsertSchema(employees, {
+  assignedClientIds: z.array(z.string()).optional().nullable(),
+}).omit({ id: true });
 export const insertPettyCashTransactionSchema = createInsertSchema(pettyCashTransactions).omit({ id: true });
 export const insertSalaryPaymentSchema = createInsertSchema(salaryPayments).omit({ id: true });
 export const insertSalaryAdvanceSchema = createInsertSchema(salaryAdvances).omit({ id: true });
@@ -1523,7 +1527,9 @@ export const insertStockTransferSchema = createInsertSchema(stockTransfers).exte
   })).optional(),
   bankAccountId: z.string().optional()
 }).omit({ id: true });
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, refreshToken: true, lastLogin: true });
+export const insertUserSchema = createInsertSchema(users, {
+  assignedClientIds: z.array(z.string()).optional().nullable(),
+}).omit({ id: true, refreshToken: true, lastLogin: true });
 export const insertChartOfAccountsSchema = createInsertSchema(chartOfAccounts).omit({ id: true });
 export const insertJournalEntrySchema = createInsertSchema(journalEntries).omit({ id: true });
 export const insertJournalLineSchema = createInsertSchema(journalLines).omit({ id: true });

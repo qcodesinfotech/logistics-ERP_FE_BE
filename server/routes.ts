@@ -8733,10 +8733,41 @@ export async function registerRoutes(
     }
   });
 
+  // Helper to enforce Supervisor LMD client scoping
+  async function checkSupervisorLmdClientAccess(req: AuthRequest, sheetId?: string, clientId?: string): Promise<{ allowed: boolean; reason?: string }> {
+    if (!req.user) return { allowed: false, reason: "Unauthorized" };
+    const role = (req.user.role || "").toLowerCase();
+    const pos = (req.user.position || "").toLowerCase();
+    const isLmd = (role === "supervisor_lmd" || role === "supervisor" || pos.includes("supervisor lmd")) &&
+                  !role.includes("operations") && !pos.includes("operations") &&
+                  role !== "admin" && role !== "super_admin" && role !== "manager";
+    if (!isLmd) return { allowed: true };
+
+    const assigned = (req.user as any).assignedClientIds || [];
+    let effectiveClientId = clientId;
+    if (!effectiveClientId && sheetId) {
+      const [sheet] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, sheetId)).limit(1);
+      effectiveClientId = sheet?.clientId || undefined;
+    }
+
+    if (effectiveClientId && assigned.includes(effectiveClientId)) {
+      return { allowed: true };
+    }
+
+    return { allowed: false, reason: "Access denied: Supervisor LMD can manage assigned clients only. Rest of the clients delivery is view-only." };
+  }
+
   // Supervisor override: move outlet to different zone for this sheet
   app.post("/api/dispatch/overrides", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { sheetId, outletId, outletCode, storageTypes, storageType, overrideZoneId, overrideTruckId, reason } = req.body;
+
+      if (sheetId) {
+        const access = await checkSupervisorLmdClientAccess(req, sheetId);
+        if (!access.allowed) {
+          return res.status(403).json({ error: access.reason });
+        }
+      }
 
       let resolvedOutletId = outletId;
       if ((!resolvedOutletId || resolvedOutletId === "null" || resolvedOutletId === "undefined") && outletCode) {
@@ -11740,6 +11771,12 @@ export async function registerRoutes(
       const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes } = req.body;
 
       const [existingTa] = await db.select().from(schema.dispatchTruckAssignments).where(eq(schema.dispatchTruckAssignments.id, req.params.id));
+      if (existingTa?.sheetId) {
+        const access = await checkSupervisorLmdClientAccess(req, existingTa.sheetId);
+        if (!access.allowed) {
+          return res.status(403).json({ error: access.reason });
+        }
+      }
 
       const updateData: any = {};
       if (loadingStartTime !== undefined) updateData.loadingStartTime = loadingStartTime;
@@ -11783,7 +11820,7 @@ export async function registerRoutes(
     }
   });
 
-  // Route-level loading and dispatch time endpoint (updates existing or assigns timing for route)
+  // Route-level loading and dispatch time endpoint (updates existing or assigns timing for route and trip)
   app.post("/api/dispatch/sheets/:sheetId/routes/:routeId/timing", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const userRole = String(req.user?.role || '').toLowerCase();
@@ -11791,10 +11828,22 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Only Supervisors or Admins can start and manage loading timing" });
       }
       const { sheetId, routeId } = req.params;
-      const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes, truckId, driverId } = req.body;
+      const { loadingStartTime, loadingEndTime, departTime, reportingTime, loadingStatus, supervisorNotes, truckId, driverId, tripNumber, truckAssignmentId } = req.body;
+
+      const access = await checkSupervisorLmdClientAccess(req, sheetId);
+      if (!access.allowed) {
+        return res.status(403).json({ error: access.reason });
+      }
 
       const existingTrucks = await storage.getDispatchTruckAssignments(sheetId);
-      const matched = existingTrucks.find((t: any) => t.zoneId === routeId);
+      const targetTrip = tripNumber ? parseInt(String(tripNumber)) : 1;
+      let matched = truckAssignmentId ? existingTrucks.find((t: any) => t.id === truckAssignmentId) : null;
+      if (!matched) {
+        matched = existingTrucks.find((t: any) => t.zoneId === routeId && (t.tripNumber || 1) === targetTrip);
+      }
+      if (!matched && targetTrip === 1) {
+        matched = existingTrucks.find((t: any) => t.zoneId === routeId);
+      }
 
       if (matched) {
         const updateData: any = {};
@@ -11847,8 +11896,9 @@ export async function registerRoutes(
         return res.json(updated);
       } else {
         const vehicles = await storage.getVehicles();
-        const fallbackTruckId = truckId || vehicles[0]?.id || "unassigned";
-        let defaultDriverId = driverId || null;
+        const trip1 = existingTrucks.find((t: any) => t.zoneId === routeId);
+        const fallbackTruckId = truckId || trip1?.truckId || vehicles[0]?.id || "unassigned";
+        let defaultDriverId = driverId || trip1?.driverId || null;
         if (!defaultDriverId && fallbackTruckId) {
           const veh = vehicles.find((v: any) => v.id === fallbackTruckId);
           if (veh?.assignedDriverId) {
@@ -11860,12 +11910,12 @@ export async function registerRoutes(
           zoneId: routeId,
           truckId: fallbackTruckId,
           driverId: defaultDriverId,
-          tripNumber: 1,
+          tripNumber: targetTrip,
           loadingStartTime: loadingStartTime || null,
           loadingEndTime: loadingEndTime || null,
           departTime: departTime || null,
           reportingTime: reportingTime || null,
-          loadingStatus: loadingStatus || "pending",
+          loadingStatus: loadingStatus || (loadingStartTime ? "loading" : "pending"),
           supervisorNotes: supervisorNotes || null,
         } as any);
         return res.json(newAssignment);
