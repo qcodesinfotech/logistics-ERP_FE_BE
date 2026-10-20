@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2, Truck } from "lucide-react";
+import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2, Truck, Search, X } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,6 +71,7 @@ export default function ZonesPage() {
 
   const [isManageTrucksDialogOpen, setIsManageTrucksDialogOpen] = useState(false);
   const [selectedZoneIdForTrucks, setSelectedZoneIdForTrucks] = useState<string>("");
+  const [truckSearchQuery, setTruckSearchQuery] = useState("");
   
   // Excel import simulation state
   const [simulatedData, setSimulatedData] = useState<ExcelSimRow[]>([]);
@@ -306,10 +307,19 @@ export default function ZonesPage() {
 
   const currentZoneForTrucks = zonesList?.find(z => z.id === selectedZoneIdForTrucks);
   const zoneTrucks = vehiclesList?.filter(v => v.currentZoneId === selectedZoneIdForTrucks) || [];
+  const filteredZoneTrucks = zoneTrucks.filter(t => 
+    t.name.toLowerCase().includes(truckSearchQuery.toLowerCase()) ||
+    (t.plateNumber && t.plateNumber.toLowerCase().includes(truckSearchQuery.toLowerCase()))
+  );
+
   const availableTrucks = vehiclesList?.filter(v => {
     const isAssignedToValidZone = zonesList?.some(z => z.id === v.currentZoneId);
     return !isAssignedToValidZone && v.status === "available";
   }) || [];
+  const filteredAvailableTrucks = availableTrucks.filter(t => 
+    t.name.toLowerCase().includes(truckSearchQuery.toLowerCase()) ||
+    (t.plateNumber && t.plateNumber.toLowerCase().includes(truckSearchQuery.toLowerCase()))
+  );
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -729,53 +739,71 @@ export default function ZonesPage() {
 
       {/* Manage Outlets Dialog */}
       <Dialog open={isAppendOutletsDialogOpen} onOpenChange={setIsAppendOutletsDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[640px] w-full max-h-[85vh] flex flex-col p-6 overflow-hidden">
+          <DialogHeader className="shrink-0 pb-2">
             <DialogTitle>Manage Outlets for {currentZoneForOutlets?.name || "Zone"}</DialogTitle>
             <DialogDescription>
               View currently appended outlets, remove them, or assign new available outlets to this zone.
             </DialogDescription>
           </DialogHeader>
           
-          <div className="py-2">
-            <Input
-              placeholder="Search outlets by name or address..."
-              value={outletSearchQuery}
-              onChange={(e) => setOutletSearchQuery(e.target.value)}
-              className="mb-4"
-            />
+          <div className="flex flex-col flex-1 min-h-0 min-w-0 space-y-4 py-1">
+            <div className="relative shrink-0 w-full">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Search outlets by name or address..."
+                value={outletSearchQuery}
+                onChange={(e) => setOutletSearchQuery(e.target.value)}
+                className="pl-9 pr-9 w-full"
+              />
+              {outletSearchQuery && (
+                <button
+                  type="button"
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => setOutletSearchQuery("")}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
 
-            <Tabs defaultValue="appended" className="w-full">
-              <TabsList className="grid grid-cols-2 mb-4">
-                <TabsTrigger value="appended" className="relative">
+            <Tabs defaultValue="appended" className="w-full flex-1 flex flex-col min-h-0 min-w-0">
+              <TabsList className="grid grid-cols-2 shrink-0 mb-3 w-full">
+                <TabsTrigger value="appended" className="relative flex items-center justify-center">
                   Appended Outlets
                   {zoneOutlets && zoneOutlets.length > 0 && (
-                    <span className="ml-2 bg-primary/25 text-primary font-bold rounded-full px-2.5 py-0.5 text-xs">
+                    <span className="ml-2 bg-primary/20 text-primary font-bold rounded-full px-2 py-0.5 text-xs">
                       {zoneOutlets.length}
                     </span>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="available">
+                <TabsTrigger value="available" className="relative flex items-center justify-center">
                   Add Outlets
                   {availableOutlets.length > 0 && (
-                    <span className="ml-2 bg-muted text-muted-foreground font-semibold rounded-full px-2.5 py-0.5 text-xs">
+                    <span className="ml-2 bg-muted text-muted-foreground font-semibold rounded-full px-2 py-0.5 text-xs">
                       {availableOutlets.length}
                     </span>
                   )}
                 </TabsTrigger>
               </TabsList>
               
-              <TabsContent value="appended" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+              <TabsContent value="appended" className="mt-0 flex-1 min-h-0 min-w-0 max-h-[380px] overflow-y-auto pr-1 space-y-2">
                 {filteredZoneOutlets.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
+                  <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
                     {outletSearchQuery ? "No matching appended outlets." : "No outlets appended to this zone yet."}
                   </div>
                 ) : (
                   filteredZoneOutlets.map(outlet => (
-                    <div key={outlet.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/40 hover:bg-accent/30 transition-colors">
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="text-sm font-semibold text-foreground truncate">{outlet.name}</span>
-                        {outlet.address && <span className="text-xs text-muted-foreground truncate">{outlet.address}</span>}
+                    <div key={outlet.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/60 hover:bg-accent/40 transition-colors gap-3 w-full">
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-sm font-semibold text-foreground truncate block" title={outlet.name}>
+                          {outlet.name}
+                        </span>
+                        {outlet.address && (
+                          <span className="text-xs text-muted-foreground truncate block mt-0.5" title={outlet.address}>
+                            {outlet.address}
+                          </span>
+                        )}
                       </div>
                       <Button 
                         variant="ghost" 
@@ -783,6 +811,7 @@ export default function ZonesPage() {
                         className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 shrink-0"
                         onClick={() => removeOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
                         disabled={removeOutletMutation.isPending}
+                        title="Remove outlet"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -791,17 +820,23 @@ export default function ZonesPage() {
                 )}
               </TabsContent>
 
-              <TabsContent value="available" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+              <TabsContent value="available" className="mt-0 flex-1 min-h-0 min-w-0 max-h-[380px] overflow-y-auto pr-1 space-y-2">
                 {availableOutlets.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
+                  <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
                     {outletSearchQuery ? "No matching unassigned outlets." : "All available outlets have been assigned to this zone."}
                   </div>
                 ) : (
                   availableOutlets.map(outlet => (
-                    <div key={outlet.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/30 transition-colors">
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="text-sm font-semibold text-foreground truncate">{outlet.name}</span>
-                        {outlet.address && <span className="text-xs text-muted-foreground truncate">{outlet.address}</span>}
+                    <div key={outlet.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/40 transition-colors gap-3 w-full">
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-sm font-semibold text-foreground truncate block" title={outlet.name}>
+                          {outlet.name}
+                        </span>
+                        {outlet.address && (
+                          <span className="text-xs text-muted-foreground truncate block mt-0.5" title={outlet.address}>
+                            {outlet.address}
+                          </span>
+                        )}
                       </div>
                       <Button 
                         variant="outline" 
@@ -818,7 +853,10 @@ export default function ZonesPage() {
               </TabsContent>
             </Tabs>
           </div>
-          <DialogFooter className="pt-2">
+          <DialogFooter className="shrink-0 pt-3 border-t mt-4 flex items-center justify-between sm:justify-between w-full">
+            <div className="text-xs text-muted-foreground">
+              {zoneOutlets?.length || 0} outlet{(zoneOutlets?.length || 0) === 1 ? "" : "s"} linked
+            </div>
             <Button type="button" onClick={() => setIsAppendOutletsDialogOpen(false)}>
               Done
             </Button>
@@ -828,46 +866,69 @@ export default function ZonesPage() {
 
       {/* Manage Trucks Dialog */}
       <Dialog open={isManageTrucksDialogOpen} onOpenChange={setIsManageTrucksDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[640px] w-full max-h-[85vh] flex flex-col p-6 overflow-hidden">
+          <DialogHeader className="shrink-0 pb-2">
             <DialogTitle>Manage Trucks for {currentZoneForTrucks?.name || "Zone"}</DialogTitle>
             <DialogDescription>
               Assign available trucks to this zone. They will be auto-allocated during daily dispatch.
             </DialogDescription>
           </DialogHeader>
           
-          <div className="py-2">
-            <Tabs defaultValue="appended" className="w-full">
-              <TabsList className="grid grid-cols-2 mb-4">
-                <TabsTrigger value="appended" className="relative">
+          <div className="flex flex-col flex-1 min-h-0 min-w-0 space-y-4 py-1">
+            <div className="relative shrink-0 w-full">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Search fleet by truck name or plate..."
+                value={truckSearchQuery}
+                onChange={(e) => setTruckSearchQuery(e.target.value)}
+                className="pl-9 pr-9 w-full"
+              />
+              {truckSearchQuery && (
+                <button
+                  type="button"
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => setTruckSearchQuery("")}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <Tabs defaultValue="appended" className="w-full flex-1 flex flex-col min-h-0 min-w-0">
+              <TabsList className="grid grid-cols-2 shrink-0 mb-3 w-full">
+                <TabsTrigger value="appended" className="relative flex items-center justify-center">
                   Zone Trucks
                   {zoneTrucks.length > 0 && (
-                    <span className="ml-2 bg-primary/25 text-primary font-bold rounded-full px-2.5 py-0.5 text-xs">
+                    <span className="ml-2 bg-primary/20 text-primary font-bold rounded-full px-2 py-0.5 text-xs">
                       {zoneTrucks.length}
                     </span>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="available">
+                <TabsTrigger value="available" className="relative flex items-center justify-center">
                   Available Fleet
                   {availableTrucks.length > 0 && (
-                    <span className="ml-2 bg-muted text-muted-foreground font-semibold rounded-full px-2.5 py-0.5 text-xs">
+                    <span className="ml-2 bg-muted text-muted-foreground font-semibold rounded-full px-2 py-0.5 text-xs">
                       {availableTrucks.length}
                     </span>
                   )}
                 </TabsTrigger>
               </TabsList>
               
-              <TabsContent value="appended" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
-                {zoneTrucks.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
-                    No trucks assigned to this zone yet.
+              <TabsContent value="appended" className="mt-0 flex-1 min-h-0 min-w-0 max-h-[380px] overflow-y-auto pr-1 space-y-2">
+                {filteredZoneTrucks.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
+                    {truckSearchQuery ? "No matching trucks assigned to this zone." : "No trucks assigned to this zone yet."}
                   </div>
                 ) : (
-                  zoneTrucks.map(truck => (
-                    <div key={truck.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/40 hover:bg-accent/30 transition-colors">
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="text-sm font-semibold text-foreground truncate">{truck.name}</span>
-                        <span className="text-xs text-muted-foreground truncate">{truck.plateNumber}</span>
+                  filteredZoneTrucks.map(truck => (
+                    <div key={truck.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/60 hover:bg-accent/40 transition-colors gap-3 w-full">
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-sm font-semibold text-foreground truncate block" title={truck.name}>
+                          {truck.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground truncate block mt-0.5" title={truck.plateNumber}>
+                          {truck.plateNumber}
+                        </span>
                       </div>
                       <Button 
                         variant="ghost" 
@@ -875,6 +936,7 @@ export default function ZonesPage() {
                         className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 shrink-0"
                         onClick={() => removeTruckMutation.mutate({ vehicleId: truck.id })}
                         disabled={removeTruckMutation.isPending}
+                        title="Remove truck"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -883,17 +945,21 @@ export default function ZonesPage() {
                 )}
               </TabsContent>
 
-              <TabsContent value="available" className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
-                {availableTrucks.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
-                    No available trucks found in the fleet.
+              <TabsContent value="available" className="mt-0 flex-1 min-h-0 min-w-0 max-h-[380px] overflow-y-auto pr-1 space-y-2">
+                {filteredAvailableTrucks.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground text-sm border border-dashed rounded-lg">
+                    {truckSearchQuery ? "No matching available fleet trucks." : "No available trucks found in the fleet."}
                   </div>
                 ) : (
-                  availableTrucks.map(truck => (
-                    <div key={truck.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/30 transition-colors">
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="text-sm font-semibold text-foreground truncate">{truck.name}</span>
-                        <span className="text-xs text-muted-foreground truncate">{truck.plateNumber}</span>
+                  filteredAvailableTrucks.map(truck => (
+                    <div key={truck.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-accent/40 transition-colors gap-3 w-full">
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-sm font-semibold text-foreground truncate block" title={truck.name}>
+                          {truck.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground truncate block mt-0.5" title={truck.plateNumber}>
+                          {truck.plateNumber}
+                        </span>
                       </div>
                       <Button 
                         variant="outline" 
@@ -910,7 +976,10 @@ export default function ZonesPage() {
               </TabsContent>
             </Tabs>
           </div>
-          <DialogFooter className="pt-2">
+          <DialogFooter className="shrink-0 pt-3 border-t mt-4 flex items-center justify-between sm:justify-between w-full">
+            <div className="text-xs text-muted-foreground">
+              {zoneTrucks.length} truck{zoneTrucks.length === 1 ? "" : "s"} assigned
+            </div>
             <Button type="button" onClick={() => setIsManageTrucksDialogOpen(false)}>
               Done
             </Button>
