@@ -3252,7 +3252,7 @@ export default function DailyDispatchPage() {
   const [outletDeliveryDialog, setOutletDeliveryDialog] = useState<OutletGroup | null>(null);
   const [overrideDialog, setOverrideDialog] = useState<OutletGroup | null>(null);
   const [itemOverrideDialog, setItemOverrideDialog] = useState<DispatchItem | null>(null);
-  const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "" });
+  const [driverZoneForm, setDriverZoneForm] = useState({ driverId: "", zoneId: "", truckId: "" });
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
 
   // Item Management Modals State
@@ -3920,11 +3920,16 @@ export default function DailyDispatchPage() {
 
   // Driver zone mutations
   const assignDriverZoneMutation = useMutation({
-    mutationFn: (data: { driverId: string; zoneId: string }) => apiRequest("POST", "/api/dispatch/driver-zones", data),
+    mutationFn: (data: { driverId: string; zoneId: string; truckId?: string }) => apiRequest("POST", "/api/dispatch/driver-zones", data),
     onSuccess: () => {
-      toast({ title: "Driver assigned to zone!" });
+      toast({ title: "Driver transferred to zone!", description: "Driver zone, vehicle, and today's active dispatch sheet synchronized." });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/driver-zones"] });
-      setDriverZoneForm({ driverId: "", zoneId: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch"] });
+      setDriverZoneForm({ driverId: "", zoneId: "", truckId: "" });
     },
     onError: err => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -5361,10 +5366,17 @@ export default function DailyDispatchPage() {
                 <CardDescription>Drivers assigned here will appear on the dispatch board under their zone.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label>Driver</Label>
-                    <Select value={driverZoneForm.driverId} onValueChange={v => setDriverZoneForm(f => ({ ...f, driverId: v }))}>
+                    <Select value={driverZoneForm.driverId} onValueChange={v => {
+                      const assignedTruck = (vehiclesList || []).find((veh: any) => veh.assignedDriverId === v);
+                      setDriverZoneForm(f => ({
+                        ...f,
+                        driverId: v,
+                        truckId: assignedTruck ? assignedTruck.id : f.truckId
+                      }));
+                    }}>
                       <SelectTrigger><SelectValue placeholder="Select driver..." /></SelectTrigger>
                       <SelectContent>
                         {drivers.filter(d => d.status === "active").map(d => (
@@ -5374,7 +5386,7 @@ export default function DailyDispatchPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Zone</Label>
+                    <Label>Target Zone</Label>
                     <Select value={driverZoneForm.zoneId} onValueChange={v => setDriverZoneForm(f => ({ ...f, zoneId: v }))}>
                       <SelectTrigger><SelectValue placeholder="Select zone..." /></SelectTrigger>
                       <SelectContent>
@@ -5382,11 +5394,23 @@ export default function DailyDispatchPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <div className="space-y-2">
+                    <Label>Truck / Vehicle (Optional)</Label>
+                    <Select value={driverZoneForm.truckId || "none"} onValueChange={v => setDriverZoneForm(f => ({ ...f, truckId: v === "none" ? "" : v }))}>
+                      <SelectTrigger><SelectValue placeholder="Auto / Driver's Existing Truck" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Auto / Driver's Existing Truck</SelectItem>
+                        {(vehiclesList || []).filter((v: any) => v.status !== "inactive").map((v: any) => (
+                          <SelectItem key={v.id} value={v.id}>{v.name} ({v.plateNumber})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <Button onClick={() => assignDriverZoneMutation.mutate(driverZoneForm)}
                   disabled={!driverZoneForm.driverId || !driverZoneForm.zoneId || assignDriverZoneMutation.isPending}
                   className="gap-2">
-                  <Plus className="h-4 w-4" />Assign
+                  <Plus className="h-4 w-4" />Transfer & Assign Driver
                 </Button>
               </CardContent>
             </Card>

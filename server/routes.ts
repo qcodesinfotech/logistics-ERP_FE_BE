@@ -7882,12 +7882,26 @@ export async function registerRoutes(
 
   app.post("/api/dispatch/driver-zones", authMiddleware, async (req: AuthRequest, res) => {
     try {
-      const { driverId, zoneId } = req.body;
-      const row = await storage.assignDriverZone(driverId, zoneId);
+      const { driverId, zoneId, truckId } = req.body;
+      const row = await storage.assignDriverZone(driverId, zoneId, truckId || null);
       res.status(201).json(row);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Assign driver zone error:", e);
-      res.status(500).json({ error: "Failed to assign driver zone" });
+      res.status(500).json({ error: e.message || "Failed to assign driver zone" });
+    }
+  });
+
+  app.post("/api/dispatch/transfer-driver", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { driverId, zoneId, truckId } = req.body;
+      if (!driverId || !zoneId) {
+        return res.status(400).json({ error: "driverId and zoneId are required" });
+      }
+      const result = await storage.transferDriverZone(driverId, zoneId, truckId || null);
+      res.json(result);
+    } catch (e: any) {
+      console.error("Transfer driver error:", e);
+      res.status(500).json({ error: e.message || "Failed to transfer driver" });
     }
   });
 
@@ -9664,6 +9678,18 @@ export async function registerRoutes(
     try {
       const vehicle = await storage.updateVehicle(req.params.id, req.body);
       if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+
+      // If assignedDriverId or currentZoneId changed, cascade the transfer to driver_zones and active dispatch sheets!
+      const driverId = req.body.assignedDriverId !== undefined ? req.body.assignedDriverId : vehicle.assignedDriverId;
+      const zoneId = req.body.currentZoneId !== undefined ? req.body.currentZoneId : vehicle.currentZoneId;
+      if (driverId && zoneId && zoneId !== "unassigned") {
+        try {
+          await storage.transferDriverZone(driverId, zoneId, vehicle.id);
+        } catch (syncErr) {
+          console.warn("Cascade transferDriverZone from updateVehicle error:", syncErr);
+        }
+      }
+
       res.json(vehicle);
     } catch (error) {
       console.error("Update vehicle error:", error);
@@ -9686,6 +9712,15 @@ export async function registerRoutes(
     try {
       const vehicle = await storage.updateVehicle(req.params.id, { currentZoneId: req.body.zoneId });
       if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+
+      if (vehicle.assignedDriverId && req.body.zoneId && req.body.zoneId !== "unassigned") {
+        try {
+          await storage.transferDriverZone(vehicle.assignedDriverId, req.body.zoneId, vehicle.id);
+        } catch (syncErr) {
+          console.warn("Cascade transferDriverZone from assign vehicle zone error:", syncErr);
+        }
+      }
+
       res.json(vehicle);
     } catch (error) {
       console.error("Assign vehicle zone error:", error);
@@ -11709,6 +11744,15 @@ export async function registerRoutes(
       }
       const truck = await storage.updateDispatchTruckAssignment(req.params.id, data);
       if (!truck) return res.status(404).json({ error: "Assignment not found" });
+
+      if (data.driverId && truck.zoneId) {
+        try {
+          await storage.transferDriverZone(data.driverId, truck.zoneId, truck.truckId);
+        } catch (syncErr) {
+          console.warn("Cascade transferDriverZone from updateDispatchTruckAssignment error:", syncErr);
+        }
+      }
+
       res.json(truck);
     } catch (error) {
       console.error("Update truck assignment error:", error);

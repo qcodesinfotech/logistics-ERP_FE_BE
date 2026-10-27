@@ -53,8 +53,11 @@ export default function DriverAllocation() {
       return apiRequest("PUT", `/api/vehicles/${vehicleId}`, { assignedDriverId: driverId });
     },
     onSuccess: () => {
-      toast({ title: "Driver assigned successfully" });
+      toast({ title: "Driver assigned successfully", description: "Zone mapping and active dispatch synced across all screens & mobile app." });
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/driver-zones"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch"] });
     },
     onError: (err) => {
       toast({ title: getErrorMessage(err), variant: "destructive" });
@@ -66,8 +69,11 @@ export default function DriverAllocation() {
       return apiRequest("PUT", `/api/vehicles/${vehicleId}`, { currentZoneId: zoneId });
     },
     onSuccess: () => {
-      toast({ title: "Default route/zone updated successfully" });
+      toast({ title: "Default route/zone updated successfully", description: "Driver zone and today's active dispatch sheet synced." });
       queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/driver-zones"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch"] });
     },
     onError: (err) => {
       toast({ title: getErrorMessage(err), variant: "destructive" });

@@ -3751,9 +3751,135 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(driverZones).where(eq(driverZones.zoneId, zoneId));
   }
 
-  async assignDriverZone(driverId: string, zoneId: string): Promise<any> {
-    const [row] = await db.insert(driverZones).values({ driverId, zoneId }).returning();
-    return row;
+  async transferDriverZone(driverId: string, newZoneId: string, truckId?: string | null): Promise<any> {
+    if (!driverId || !newZoneId) {
+      throw new Error("driverId and newZoneId are required for transferDriverZone");
+    }
+
+    // 1. Resolve all possible driver identifiers (users.id, users.employeeId, employees.id)
+    const allDriverIds = new Set<string>([driverId]);
+    try {
+      const matchedUsers = await db.select().from(users).where(
+        or(eq(users.id, driverId), eq(users.employeeId, driverId))
+      );
+      for (const u of matchedUsers) {
+        if (u.id) allDriverIds.add(u.id);
+        if (u.employeeId) allDriverIds.add(u.employeeId);
+      }
+      const matchedEmployees = await db.select().from(employees).where(
+        or(eq(employees.id, driverId), eq(employees.employeeCode, driverId))
+      );
+      for (const e of matchedEmployees) {
+        if (e.id) allDriverIds.add(e.id);
+      }
+    } catch (e) {
+      console.warn("Could not resolve alternate driver IDs:", e);
+    }
+    const driverIdList = Array.from(allDriverIds);
+
+    // 2. Clean up previous driver_zones entries for this driver so they aren't stuck in old zones
+    await db.delete(driverZones).where(inArray(driverZones.driverId, driverIdList));
+
+    // Insert new driver_zones record
+    const [dzRow] = await db.insert(driverZones).values({ driverId, zoneId: newZoneId }).returning();
+
+    // 3. Resolve vehicle / truck
+    let resolvedTruckId = truckId;
+    if (resolvedTruckId && resolvedTruckId !== "unassigned") {
+      // Clear any other vehicle that was assigned to this driver
+      await db.update(vehicles)
+        .set({ assignedDriverId: null })
+        .where(and(
+          inArray(vehicles.assignedDriverId, driverIdList),
+          ne(vehicles.id, resolvedTruckId)
+        ));
+      // Assign this vehicle to this driver and new zone
+      await db.update(vehicles)
+        .set({ assignedDriverId: driverId, currentZoneId: newZoneId })
+        .where(eq(vehicles.id, resolvedTruckId));
+    } else {
+      // Check if driver already has an assigned vehicle
+      const [assignedVeh] = await db.select().from(vehicles)
+        .where(inArray(vehicles.assignedDriverId, driverIdList));
+      if (assignedVeh) {
+        resolvedTruckId = assignedVeh.id;
+        await db.update(vehicles)
+          .set({ currentZoneId: newZoneId })
+          .where(eq(vehicles.id, assignedVeh.id));
+      }
+    }
+
+    // 4. Cascade to active/today's dispatch sheets
+    const todayStr = formatDateStr(new Date());
+    const activeSheets = await db.select().from(dispatchSheets).where(
+      or(
+        eq(dispatchSheets.status, "active"),
+        gte(dispatchSheets.date, sql`${todayStr}::date - interval '1 day'`)
+      )
+    );
+
+    for (const sheet of activeSheets) {
+      const sheetAssigns = await db.select().from(dispatchTruckAssignments)
+        .where(eq(dispatchTruckAssignments.sheetId, sheet.id));
+
+      const driverAssigns = sheetAssigns.filter(a => a.driverId && allDriverIds.has(a.driverId));
+
+      if (driverAssigns.length > 0) {
+        // Driver already had truck assignment(s) on this sheet:
+        // Update them to newZoneId and resolvedTruckId
+        for (const da of driverAssigns) {
+          const updateFields: any = { zoneId: newZoneId };
+          if (resolvedTruckId && resolvedTruckId !== "unassigned") {
+            updateFields.truckId = resolvedTruckId;
+          }
+          await db.update(dispatchTruckAssignments)
+            .set(updateFields)
+            .where(eq(dispatchTruckAssignments.id, da.id));
+        }
+      } else {
+        // Driver did not have an existing assignment on this sheet.
+        if (resolvedTruckId && resolvedTruckId !== "unassigned") {
+          // Check if there is an existing assignment in newZoneId for this truck
+          const matchingTruckInZone = sheetAssigns.find(a => a.zoneId === newZoneId && a.truckId === resolvedTruckId);
+          if (matchingTruckInZone) {
+            await db.update(dispatchTruckAssignments)
+              .set({ driverId })
+              .where(eq(dispatchTruckAssignments.id, matchingTruckInZone.id));
+          } else {
+            // Check if there is an unassigned truck in the new zone
+            const unassignedInZone = sheetAssigns.find(a => a.zoneId === newZoneId && (!a.driverId || a.driverId === ""));
+            if (unassignedInZone) {
+              await db.update(dispatchTruckAssignments)
+                .set({ driverId, truckId: resolvedTruckId })
+                .where(eq(dispatchTruckAssignments.id, unassignedInZone.id));
+            } else {
+              // Create a new truck assignment for this sheet in the new zone
+              await db.insert(dispatchTruckAssignments).values({
+                sheetId: sheet.id,
+                zoneId: newZoneId,
+                truckId: resolvedTruckId,
+                driverId: driverId,
+                tripNumber: 1,
+                usedCapacity: "0",
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      driverZone: dzRow,
+      driverId,
+      truckId: resolvedTruckId,
+      zoneId: newZoneId,
+      message: "Driver transferred to zone and active dispatch sheets synchronized successfully."
+    };
+  }
+
+  async assignDriverZone(driverId: string, zoneId: string, truckId?: string | null): Promise<any> {
+    return this.transferDriverZone(driverId, zoneId, truckId);
   }
 
   async removeDriverZone(id: string): Promise<void> {
