@@ -1701,11 +1701,16 @@ function ZoneColumn({
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const trip1Truck = zone.trucks?.find(t => (t.tripNumber || 1) === 1) || zone.trucks?.[0];
-  const trip2Truck = zone.trucks?.find(t => (t.tripNumber || 1) === 2);
+  const zoneTrucks = zone.trucks || [];
+  const [selectedTruckAssignmentId, setSelectedTruckAssignmentId] = useState<string | null>(null);
   const [selectedTrip, setSelectedTrip] = useState<1 | 2>(1);
 
-  const activeTruck = selectedTrip === 2 ? trip2Truck : trip1Truck;
+  const trip1Truck = zoneTrucks.find(t => (t.tripNumber || 1) === 1) || zoneTrucks[0];
+  const trip2Truck = zoneTrucks.find(t => (t.tripNumber || 1) === 2);
+
+  const activeTruck = (selectedTruckAssignmentId ? zoneTrucks.find(t => t.id === selectedTruckAssignmentId) : null)
+    || (selectedTrip === 2 ? trip2Truck : trip1Truck)
+    || zoneTrucks[0];
   const primaryTruck = activeTruck;
 
   const [timingForm, setTimingForm] = useState({
@@ -1718,30 +1723,35 @@ function ZoneColumn({
   });
 
   useEffect(() => {
-    const curTruck = selectedTrip === 2 ? trip2Truck : trip1Truck;
-    setTimingForm({
-      loadingStartTime: curTruck?.loadingStartTime || "",
-      loadingEndTime: curTruck?.loadingEndTime || "",
-      departTime: curTruck?.departTime || "",
-      reportingTime: curTruck?.reportingTime || "",
-      loadingStatus: curTruck?.loadingStatus || "pending",
-      supervisorNotes: curTruck?.supervisorNotes || "",
-    });
-  }, [selectedTrip, trip1Truck, trip2Truck]);
+    if (activeTruck) {
+      setTimingForm({
+        loadingStartTime: activeTruck.loadingStartTime || "",
+        loadingEndTime: activeTruck.loadingEndTime || "",
+        departTime: activeTruck.departTime || "",
+        reportingTime: activeTruck.reportingTime || "",
+        loadingStatus: activeTruck.loadingStatus || "pending",
+        supervisorNotes: activeTruck.supervisorNotes || "",
+      });
+      if (activeTruck.tripNumber) {
+        setSelectedTrip(activeTruck.tripNumber === 2 ? 2 : 1);
+      }
+    }
+  }, [activeTruck?.id, activeTruck?.loadingStatus, activeTruck?.loadingStartTime, activeTruck?.loadingEndTime, activeTruck?.departTime]);
 
   const updateTimingMutation = useMutation({
     mutationFn: async (payload: any) => {
       const res = await apiRequest("POST", `/api/dispatch/sheets/${sheetId}/routes/${zone.zoneId}/timing`, {
         ...payload,
-        tripNumber: selectedTrip,
-        truckAssignmentId: (selectedTrip === 2 ? trip2Truck?.id : trip1Truck?.id),
+        tripNumber: activeTruck?.tripNumber || selectedTrip,
+        truckAssignmentId: activeTruck?.id,
+        truckId: (activeTruck as any)?.truckId || activeTruck?.vehicle?.id,
       });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${sheetId}/trucks`] });
-      toast({ title: `Trip ${selectedTrip} timings updated successfully!` });
+      toast({ title: `${activeTruck?.vehicle?.plateNumber || 'Truck'} timings updated successfully!` });
       setIsTimingDialogOpen(false);
     },
     onError: (err: any) => {
@@ -2105,89 +2115,136 @@ function ZoneColumn({
             </div>
           </div>
 
-          {/* Timing Badges for Trip 1 and Trip 2 - Dedicated full-width row */}
+          {/* Timing Badges for All Trucks / Trips - Dedicated full-width row */}
           <div className="flex items-center gap-1.5 flex-wrap mt-2.5 pt-2 border-t border-border/40">
-            {/* Trip 1 Badge */}
-            {trip1Truck?.loadingStatus === "dispatched" ? (
-              <Badge 
-                className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
-                onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
-                title={trip1Truck.isAutoDeparted ? "Trip 1 auto-detected by GPS departure" : "Click to view/edit Trip 1 timings"}
-              >
-                <Truck className="h-2.5 w-2.5" /> T1 Dispatched {trip1Truck.departTime ? `@ ${formatDisplayTimeAST(trip1Truck.departTime)}` : ""}
-              </Badge>
-            ) : trip1Truck?.loadingStatus === "loaded" ? (
-              <Badge 
-                className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
-                onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
-                title="Click to view/edit Trip 1 timings"
-              >
-                <CheckCircle2 className="h-2.5 w-2.5" /> T1 Loaded {trip1Truck.loadingEndTime ? `@ ${trip1Truck.loadingEndTime}` : ""}
-              </Badge>
-            ) : trip1Truck?.loadingStatus === "loading" ? (
-              <Badge 
-                className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 animate-pulse"
-                onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
-                title="Click to view/edit Trip 1 timings"
-              >
-                <RefreshCw className="h-2.5 w-2.5 animate-spin" /> T1 Loading {trip1Truck.loadingStartTime ? `@ ${trip1Truck.loadingStartTime}` : ""}
-              </Badge>
-            ) : (
-              <Badge 
-                variant="outline"
-                className="text-muted-foreground hover:bg-muted/80 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-dashed"
-                onClick={(e) => { e.stopPropagation(); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
-                title="Click to record Trip 1 loading/dispatch timing"
-              >
-                <Clock className="h-2.5 w-2.5" /> T1 Timings
-              </Badge>
-            )}
+            {zoneTrucks.length > 2 ? (
+              // Multi-truck rendering (e.g. 3 or 4 trucks in route)
+              zoneTrucks.map((t) => {
+                const plate = t.vehicle?.plateNumber || t.vehicle?.name || "Truck";
+                const isDisp = t.loadingStatus === "dispatched" || (t.departTime && t.departTime.trim() !== "");
+                const isLoaded = t.loadingStatus === "loaded";
+                const isLoading = t.loadingStatus === "loading";
+                const tripLabel = t.tripNumber ? `T${t.tripNumber}` : "T1";
 
-            {/* Trip 2 Badge or Option */}
-            {trip2Truck ? (
-              trip2Truck.loadingStatus === "dispatched" ? (
-                <Badge 
-                  className="bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-300 hover:bg-purple-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
-                  onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
-                  title="Click to view/edit Trip 2 timings"
-                >
-                  <Truck className="h-2.5 w-2.5" /> T2 Dispatched {trip2Truck.departTime ? `@ ${formatDisplayTimeAST(trip2Truck.departTime)}` : ""}
-                </Badge>
-              ) : trip2Truck.loadingStatus === "loaded" ? (
-                <Badge 
-                  className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-300 hover:bg-indigo-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
-                  onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
-                  title="Click to view/edit Trip 2 timings"
-                >
-                  <CheckCircle2 className="h-2.5 w-2.5" /> T2 Loaded {trip2Truck.loadingEndTime ? `@ ${trip2Truck.loadingEndTime}` : ""}
-                </Badge>
-              ) : trip2Truck.loadingStatus === "loading" ? (
-                <Badge 
-                  className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 animate-pulse"
-                  onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
-                  title="Click to view/edit Trip 2 timings"
-                >
-                  <RefreshCw className="h-2.5 w-2.5 animate-spin" /> T2 Loading {trip2Truck.loadingStartTime ? `@ ${trip2Truck.loadingStartTime}` : ""}
-                </Badge>
-              ) : (
-                <Badge 
-                  variant="outline"
-                  className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-purple-200"
-                  onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
-                  title="Click to record Trip 2 loading/dispatch timing"
-                >
-                  <Clock className="h-2.5 w-2.5" /> T2 Timings
-                </Badge>
-              )
+                return (
+                  <Badge
+                    key={`top-badge-${t.id}`}
+                    className={`flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 transition-all ${
+                      isDisp
+                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25"
+                        : isLoaded
+                        ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-500/25"
+                        : isLoading
+                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 animate-pulse"
+                        : "text-muted-foreground hover:bg-muted/80 border-dashed"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTruckAssignmentId(t.id);
+                      setSelectedTrip(t.tripNumber === 2 ? 2 : 1);
+                      setIsTimingDialogOpen(true);
+                    }}
+                    title={`Click to mark commencement / timings for truck ${plate}`}
+                  >
+                    <Truck className="h-2.5 w-2.5" />
+                    <span>{plate} ({tripLabel})</span>
+                    {isDisp ? (
+                      <span className="font-semibold text-emerald-700 dark:text-emerald-300">{t.departTime ? `@ ${formatDisplayTimeAST(t.departTime)}` : "Dispatched"}</span>
+                    ) : isLoaded ? (
+                      <span className="font-semibold text-blue-700 dark:text-blue-300">Loaded</span>
+                    ) : isLoading ? (
+                      <span className="font-semibold text-amber-700 dark:text-amber-300">Loading {t.loadingStartTime ? `@ ${t.loadingStartTime}` : ""}</span>
+                    ) : (
+                      <span>Timings</span>
+                    )}
+                  </Badge>
+                );
+              })
             ) : (
-              <Badge 
-                variant="outline"
-                className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-0.5 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-dotted"
-                onClick={(e) => { e.stopPropagation(); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
-                title="Click to prepare and record second trip loading & dispatch"
-              >
-                <Plus className="h-2.5 w-2.5" /> Trip 2
-              </Badge>
+              <>
+                {/* Trip 1 Badge */}
+                {trip1Truck?.loadingStatus === "dispatched" ? (
+                  <Badge 
+                    className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 hover:bg-emerald-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                    onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip1Truck?.id || null); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                    title={trip1Truck.isAutoDeparted ? "Trip 1 auto-detected by GPS departure" : "Click to view/edit Trip 1 timings"}
+                  >
+                    <Truck className="h-2.5 w-2.5" /> T1 Dispatched {trip1Truck.departTime ? `@ ${formatDisplayTimeAST(trip1Truck.departTime)}` : ""}
+                  </Badge>
+                ) : trip1Truck?.loadingStatus === "loaded" ? (
+                  <Badge 
+                    className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 hover:bg-blue-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                    onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip1Truck?.id || null); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                    title="Click to view/edit Trip 1 timings"
+                  >
+                    <CheckCircle2 className="h-2.5 w-2.5" /> T1 Loaded {trip1Truck.loadingEndTime ? `@ ${trip1Truck.loadingEndTime}` : ""}
+                  </Badge>
+                ) : trip1Truck?.loadingStatus === "loading" ? (
+                  <Badge 
+                    className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 animate-pulse"
+                    onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip1Truck?.id || null); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                    title="Click to view/edit Trip 1 timings"
+                  >
+                    <RefreshCw className="h-2.5 w-2.5 animate-spin" /> T1 Loading {trip1Truck.loadingStartTime ? `@ ${trip1Truck.loadingStartTime}` : ""}
+                  </Badge>
+                ) : (
+                  <Badge 
+                    variant="outline"
+                    className="text-muted-foreground hover:bg-muted/80 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-dashed"
+                    onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip1Truck?.id || null); setSelectedTrip(1); setIsTimingDialogOpen(true); }}
+                    title="Click to record Trip 1 loading/dispatch timing"
+                  >
+                    <Clock className="h-2.5 w-2.5" /> T1 Timings
+                  </Badge>
+                )}
+
+                {/* Trip 2 Badge or Option */}
+                {trip2Truck ? (
+                  trip2Truck.loadingStatus === "dispatched" ? (
+                    <Badge 
+                      className="bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-300 hover:bg-purple-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip2Truck?.id || null); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit Trip 2 timings"
+                    >
+                      <Truck className="h-2.5 w-2.5" /> T2 Dispatched {trip2Truck.departTime ? `@ ${formatDisplayTimeAST(trip2Truck.departTime)}` : ""}
+                    </Badge>
+                  ) : trip2Truck.loadingStatus === "loaded" ? (
+                    <Badge 
+                      className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-300 hover:bg-indigo-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip2Truck?.id || null); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit Trip 2 timings"
+                    >
+                      <CheckCircle2 className="h-2.5 w-2.5" /> T2 Loaded {trip2Truck.loadingEndTime ? `@ ${trip2Truck.loadingEndTime}` : ""}
+                    </Badge>
+                  ) : trip2Truck.loadingStatus === "loading" ? (
+                    <Badge 
+                      className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 hover:bg-amber-500/25 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 animate-pulse"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip2Truck?.id || null); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                      title="Click to view/edit Trip 2 timings"
+                    >
+                      <RefreshCw className="h-2.5 w-2.5 animate-spin" /> T2 Loading {trip2Truck.loadingStartTime ? `@ ${trip2Truck.loadingStartTime}` : ""}
+                    </Badge>
+                  ) : (
+                    <Badge 
+                      variant="outline"
+                      className="text-purple-700 dark:text-purple-300 hover:bg-purple-50 flex items-center gap-1 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-purple-200"
+                      onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(trip2Truck?.id || null); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                      title="Click to record Trip 2 loading/dispatch timing"
+                    >
+                      <Clock className="h-2.5 w-2.5" /> T2 Timings
+                    </Badge>
+                  )
+                ) : (
+                  <Badge 
+                    variant="outline"
+                    className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-0.5 cursor-pointer text-[10px] py-0 px-1.5 h-5 border-dotted"
+                    onClick={(e) => { e.stopPropagation(); setSelectedTruckAssignmentId(null); setSelectedTrip(2); setIsTimingDialogOpen(true); }}
+                    title="Click to prepare and record second trip loading & dispatch"
+                  >
+                    <Plus className="h-2.5 w-2.5" /> Trip 2
+                  </Badge>
+                )}
+              </>
             )}
           </div>
 
@@ -2281,26 +2338,78 @@ function ZoneColumn({
                     const capacity = parseFloat(t.vehicle?.capacity || "0");
                     const used = parseFloat(t.usedCapacity || "0");
                     const isOver = used > capacity && capacity > 0;
+                    const isSelected = activeTruck?.id === t.id;
+                    const plate = t.vehicle?.plateNumber || t.vehicle?.name || 'Unknown Truck';
+                    const tripLabel = `Trip ${t.tripNumber || 1}`;
+                    const isDisp = t.loadingStatus === "dispatched" || (t.departTime && t.departTime.trim() !== "");
+                    const isLoaded = t.loadingStatus === "loaded";
+                    const isLoading = t.loadingStatus === "loading";
+
                     return (
-                      <div key={`truck-${t.id}`} className="bg-background rounded-md p-2 text-xs border flex flex-col gap-1.5 shadow-sm">
+                      <div 
+                        key={`truck-${t.id}`} 
+                        className={`bg-background rounded-md p-2.5 text-xs border flex flex-col gap-1.5 shadow-sm transition-all ${
+                          isSelected ? "border-primary/60 ring-1 ring-primary/40 bg-primary/5" : "hover:border-primary/40"
+                        }`}
+                      >
                         <div className="flex items-center justify-between font-medium">
                           <div className="flex items-center gap-1.5">
-                            <Truck className="h-3.5 w-3.5 text-primary" />
-                            <span className="truncate max-w-[100px]" title={t.vehicle?.plateNumber || t.vehicle?.name}>{t.vehicle?.plateNumber || t.vehicle?.name || 'Unknown Truck'}</span>
+                            <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
+                            <span className="truncate max-w-[120px] font-bold" title={plate}>{plate}</span>
+                            <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 font-semibold">{tripLabel}</Badge>
                           </div>
                           {capacity > 0 && (
-                            <span className={isOver ? "text-red-600 font-bold flex items-center gap-1" : "text-emerald-600"}>
+                            <span className={isOver ? "text-red-600 font-bold flex items-center gap-1" : "text-emerald-600 font-medium"}>
                               {isOver && <AlertTriangle className="h-3.5 w-3.5" />}
                               {used.toFixed(1)} / {capacity.toFixed(0)} kg
                             </span>
                           )}
                         </div>
                         {t.driver && (
-                          <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1 mt-1">
-                            <User className="h-3 w-3" />
+                          <div className="flex items-center gap-1.5 text-muted-foreground border-t pt-1">
+                            <User className="h-3 w-3 shrink-0" />
                             <span className="truncate">{t.driver.name}</span>
                           </div>
                         )}
+
+                        {/* Truck Timing Status & Action Button */}
+                        <div className="flex items-center justify-between pt-1 border-t border-border/40 text-[11px] gap-2">
+                          <div className="flex items-center gap-1 min-w-0">
+                            {isDisp ? (
+                              <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-300 text-[10px] py-0 px-1.5 h-5 truncate">
+                                <Truck className="h-2.5 w-2.5 mr-0.5 shrink-0" /> Dispatched {t.departTime ? `@ ${formatDisplayTimeAST(t.departTime)}` : ""}
+                              </Badge>
+                            ) : isLoaded ? (
+                              <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 text-[10px] py-0 px-1.5 h-5 truncate">
+                                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5 shrink-0" /> Loaded {t.loadingEndTime ? `@ ${t.loadingEndTime}` : ""}
+                              </Badge>
+                            ) : isLoading ? (
+                              <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 text-[10px] py-0 px-1.5 h-5 animate-pulse truncate">
+                                <RefreshCw className="h-2.5 w-2.5 animate-spin mr-0.5 shrink-0" /> Loading {t.loadingStartTime ? `@ ${t.loadingStartTime}` : ""}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground text-[10px] py-0 px-1.5 h-5 border-dashed">
+                                <Clock className="h-2.5 w-2.5 mr-0.5 shrink-0" /> Pending
+                              </Badge>
+                            )}
+                          </div>
+
+                          <Button
+                            size="sm"
+                            variant={isSelected ? "default" : "outline"}
+                            className="h-6 text-[10px] px-2 gap-1 shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTruckAssignmentId(t.id);
+                              setSelectedTrip(t.tripNumber === 2 ? 2 : 1);
+                              setIsTimingDialogOpen(true);
+                            }}
+                            title={`Mark commencement or timings for truck ${plate}`}
+                          >
+                            <Clock className="h-2.5 w-2.5" />
+                            Commence / Timings
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
@@ -2319,54 +2428,89 @@ function ZoneColumn({
                     className="h-6 text-[10px] px-2 gap-1"
                     onClick={(e) => { e.stopPropagation(); setIsTimingDialogOpen(true); }}
                   >
-                    <Edit2 className="h-2.5 w-2.5" /> Edit
+                    <Edit2 className="h-2.5 w-2.5" /> Edit Timings
                   </Button>
                 </div>
+
+                {/* Truck Tabs if multiple trucks */}
+                {zoneTrucks.length > 1 && (
+                  <div className="flex items-center gap-1 overflow-x-auto pb-1 pt-0.5">
+                    <span className="text-[10px] text-muted-foreground mr-1 shrink-0 font-medium">Selected:</span>
+                    {zoneTrucks.map(t => {
+                      const plate = t.vehicle?.plateNumber || t.vehicle?.name || "Truck";
+                      const isSel = activeTruck?.id === t.id;
+                      return (
+                        <button
+                          key={`tab-${t.id}`}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTruckAssignmentId(t.id);
+                            setSelectedTrip(t.tripNumber === 2 ? 2 : 1);
+                          }}
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-all shrink-0 ${
+                            isSel 
+                              ? "bg-primary text-primary-foreground border-primary shadow-xs" 
+                              : "bg-muted/60 text-muted-foreground hover:bg-muted border-border"
+                          }`}
+                        >
+                          {plate} {t.driver?.name ? `(${t.driver.name.split(' ')[0]})` : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-3 gap-2 text-[11px] text-muted-foreground bg-muted/40 p-2 rounded">
                   <div>
                     <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Start</span>
-                    <span className="font-medium text-foreground">{formatDisplayTimeAST(primaryTruck?.loadingStartTime) || "—"}</span>
+                    <span className="font-medium text-foreground">{formatDisplayTimeAST(activeTruck?.loadingStartTime) || "—"}</span>
                   </div>
                   <div>
                     <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Completed</span>
-                    <span className="font-medium text-foreground">{formatDisplayTimeAST(primaryTruck?.loadingEndTime) || "—"}</span>
+                    <span className="font-medium text-foreground">{formatDisplayTimeAST(activeTruck?.loadingEndTime) || "—"}</span>
                   </div>
                   <div>
                     <span className="block text-[9px] uppercase tracking-wider text-muted-foreground/80 font-bold">Dispatched</span>
-                    <span className="font-medium text-foreground">{formatDisplayTimeAST(primaryTruck?.departTime) || "—"}</span>
+                    <span className="font-medium text-foreground">{formatDisplayTimeAST(activeTruck?.departTime) || "—"}</span>
                   </div>
                 </div>
                 {/* Quick Action Buttons for Warehouse Supervisor */}
                 <div className="flex items-center gap-1.5 pt-1">
-                  {(!primaryTruck?.loadingStatus || primaryTruck?.loadingStatus === "pending") && (
+                  {(!activeTruck?.loadingStatus || activeTruck?.loadingStatus === "pending") && (
                     <Button
                       size="sm"
                       variant="default"
                       className="h-6 text-[10px] flex-1 bg-amber-600 hover:bg-amber-700 text-white gap-1"
                       onClick={(e) => { e.stopPropagation(); handleQuickAction("start_loading"); }}
                     >
-                      <Clock className="h-3 w-3" /> Start Loading Now
+                      <Clock className="h-3 w-3" /> Start Loading ({activeTruck?.vehicle?.plateNumber || 'Truck'})
                     </Button>
                   )}
-                  {primaryTruck?.loadingStatus === "loading" && (
+                  {activeTruck?.loadingStatus === "loading" && (
                     <Button
                       size="sm"
                       variant="default"
                       className="h-6 text-[10px] flex-1 bg-blue-600 hover:bg-blue-700 text-white gap-1"
                       onClick={(e) => { e.stopPropagation(); handleQuickAction("finish_loading"); }}
                     >
-                      <CheckCircle2 className="h-3 w-3" /> Complete Loading
+                      <CheckCircle2 className="h-3 w-3" /> Complete Loading ({activeTruck?.vehicle?.plateNumber || 'Truck'})
                     </Button>
                   )}
-                  {primaryTruck?.loadingStatus === "loaded" && (
+                  {activeTruck?.loadingStatus === "loaded" && (
                     <Button
                       size="sm"
                       variant="default"
                       className="h-6 text-[10px] flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
                       onClick={(e) => { e.stopPropagation(); handleQuickAction("dispatch"); }}
                     >
-                      <Truck className="h-3 w-3" /> Dispatch Route
+                      <Truck className="h-3 w-3" /> Dispatch ({activeTruck?.vehicle?.plateNumber || 'Truck'})
                     </Button>
+                  )}
+                  {activeTruck?.loadingStatus === "dispatched" && (
+                    <div className="w-full text-center py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-center gap-1">
+                      <Truck className="h-3 w-3" /> Truck {activeTruck?.vehicle?.plateNumber || ''} Dispatched
+                    </div>
                   )}
                 </div>
               </div>
@@ -2681,15 +2825,60 @@ function ZoneColumn({
               <DialogDescription>
                 Route: <strong className="text-foreground">{zone.zoneName}</strong> ·{" "}
                 <Badge variant="outline" className="text-[10px] px-1.5 font-bold">
-                  Trip {selectedTrip}
+                  Trip {activeTruck?.tripNumber || selectedTrip}
                 </Badge>
                 {activeTruck?.vehicle && (
                   <span> · Truck: <strong className="text-foreground">{activeTruck.vehicle.plateNumber || activeTruck.vehicle.name}</strong></span>
+                )}
+                {activeTruck?.driver && (
+                  <span className="text-muted-foreground"> ({activeTruck.driver.name})</span>
                 )}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-3.5 py-2">
+              {/* Multi-Truck Selector when multiple trucks are assigned to this route */}
+              {zoneTrucks.length > 1 && (
+                <div className="space-y-1.5 p-2 bg-muted/70 rounded-lg border border-border/80">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                      <Truck className="h-3.5 w-3.5 text-primary" /> Select Truck ({zoneTrucks.length} assigned)
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground font-medium">Pick truck for commencement</span>
+                  </div>
+                  <Select
+                    value={activeTruck?.id || ""}
+                    onValueChange={(val) => {
+                      setSelectedTruckAssignmentId(val);
+                      const t = zoneTrucks.find(x => x.id === val);
+                      if (t) {
+                        setSelectedTrip(t.tripNumber === 2 ? 2 : 1);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs bg-background font-medium">
+                      <SelectValue placeholder="Choose truck to mark timings..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {zoneTrucks.map((t) => {
+                        const plate = t.vehicle?.plateNumber || t.vehicle?.name || "Unknown Truck";
+                        const driver = t.driver?.name || "No Driver";
+                        const trip = `Trip ${t.tripNumber || 1}`;
+                        const status = t.loadingStatus === "dispatched" ? "Dispatched" : t.loadingStatus === "loaded" ? "Loaded" : t.loadingStatus === "loading" ? "Loading" : "Pending";
+                        return (
+                          <SelectItem key={t.id} value={t.id} className="text-xs">
+                            <span className="font-bold text-foreground mr-1.5">{plate}</span>
+                            <span className="text-muted-foreground mr-2">({driver})</span>
+                            <span className="text-[10px] px-1 rounded bg-muted text-muted-foreground font-semibold mr-2">{trip}</span>
+                            <span className="text-[10px] font-semibold text-primary">[{status}]</span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {/* Trip Selector */}
               <div className="flex items-center gap-2 p-1.5 bg-muted/60 rounded-lg">
                 <Button
@@ -2700,7 +2889,7 @@ function ZoneColumn({
                   onClick={() => setSelectedTrip(1)}
                 >
                   <Truck className="h-3.5 w-3.5" />
-                  Trip 1 {trip1Truck?.vehicle ? `(${trip1Truck.vehicle.plateNumber || trip1Truck.vehicle.name})` : ""}
+                  Trip 1 {activeTruck?.tripNumber === 1 && activeTruck?.vehicle ? `(${activeTruck.vehicle.plateNumber || activeTruck.vehicle.name})` : trip1Truck?.vehicle ? `(${trip1Truck.vehicle.plateNumber || trip1Truck.vehicle.name})` : ""}
                 </Button>
                 <Button
                   type="button"
@@ -2786,7 +2975,7 @@ function ZoneColumn({
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs">Dispatching (Departure) Time</Label>
-                  {(primaryTruck?.isAutoDeparted || (primaryTruck?.departTime && primaryTruck?.loadingStatus === "dispatched")) && (
+                  {(activeTruck?.isAutoDeparted || (activeTruck?.departTime && activeTruck?.loadingStatus === "dispatched")) && (
                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                       Auto-detected via Driver GPS
@@ -2839,8 +3028,8 @@ function ZoneColumn({
                   size="sm"
                   onClick={() => {
                     // Only validate dispatch completion if user is explicitly setting dispatched status or a new depart time
-                    const isExplicitDispatch = (timingForm.loadingStatus === "dispatched" && primaryTruck?.loadingStatus !== "dispatched") ||
-                                               (timingForm.departTime && !primaryTruck?.departTime);
+                    const isExplicitDispatch = (timingForm.loadingStatus === "dispatched" && activeTruck?.loadingStatus !== "dispatched") ||
+                                               (timingForm.departTime && !activeTruck?.departTime);
                     if (isExplicitDispatch) {
                       const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
                       const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded";
