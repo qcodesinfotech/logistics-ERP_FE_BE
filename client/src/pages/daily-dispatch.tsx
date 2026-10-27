@@ -7697,7 +7697,10 @@ function TruckPlanningTab({ boardSheetId, zones, drivers, selectedDate, onSelect
     mutationFn: (id: string) => apiRequest("DELETE", `/api/dispatch/trucks/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
-      toast({ title: "Truck removed" });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+      toast({ title: "Truck removed from zone" });
     },
   });
 

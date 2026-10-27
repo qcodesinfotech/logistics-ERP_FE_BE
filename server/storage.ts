@@ -10256,6 +10256,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteDispatchTruckAssignment(id: string): Promise<void> {
+    const [target] = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.id, id));
+    if (target && target.truckId && target.zoneId) {
+      // If the vehicle's currentZoneId matches this assignment's zoneId, clear currentZoneId
+      // so autoAssignZoneTrucksToSheet won't immediately auto-resurrect it back into this zone!
+      const [veh] = await db.select().from(vehicles).where(eq(vehicles.id, target.truckId));
+      if (veh && veh.currentZoneId === target.zoneId) {
+        await db.update(vehicles).set({ currentZoneId: null }).where(eq(vehicles.id, target.truckId));
+      }
+    }
     await db.delete(dispatchOutletTruckAssignments).where(eq(dispatchOutletTruckAssignments.truckAssignmentId, id));
     await db.delete(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.id, id));
   }
@@ -10323,9 +10332,26 @@ export class DatabaseStorage implements IStorage {
         .where(eq(dispatchTruckAssignments.sheetId, sheetId));
       const existingTruckIds = new Set(existingAssigns.map(a => a.truckId));
 
-      // 5. Insert missing vehicles
+      const existingTrucksInDb = existingTruckIds.size > 0
+        ? await db.select().from(vehicles).where(inArray(vehicles.id, Array.from(existingTruckIds)))
+        : [];
+      const existingPlates = new Set(
+        existingTrucksInDb.map(v => (v.plateNumber || "").trim().toLowerCase()).filter(Boolean)
+      );
+
+      // 5. Insert missing vehicles (never auto-insert if vehicle ID OR plate number is already assigned in this sheet)
+      const seenNewPlates = new Set<string>();
       const assignmentsToInsert = zoneVehicles
-        .filter(v => !existingTruckIds.has(v.id) && !!v.currentZoneId)
+        .filter(v => {
+          if (!v.currentZoneId) return false;
+          if (existingTruckIds.has(v.id)) return false;
+          const plate = (v.plateNumber || "").trim().toLowerCase();
+          if (plate) {
+            if (existingPlates.has(plate) || seenNewPlates.has(plate)) return false;
+            seenNewPlates.add(plate);
+          }
+          return true;
+        })
         .map(v => ({
           sheetId,
           truckId: v.id,
