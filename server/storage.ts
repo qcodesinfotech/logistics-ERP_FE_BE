@@ -3356,10 +3356,21 @@ export class DatabaseStorage implements IStorage {
 
   // Clients
   async getNextCustomerCode(): Promise<string> {
-    const result = await db.select({ count: sql<number>`count(*)` }).from(clients);
-    const count = Number(result[0]?.count || 0);
-    const num = (count + 1).toString().padStart(6, "0");
-    return `CUST-${num}`;
+    const allClients = await db.select({ code: clients.customerCode }).from(clients);
+    let maxNum = 4; // Default starting threshold based on C-000004
+    for (const c of allClients) {
+      if (c.code) {
+        const match = c.code.match(/^C-(\d+)$/i);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (!isNaN(val) && val > maxNum) {
+            maxNum = val;
+          }
+        }
+      }
+    }
+    const nextNum = (maxNum + 1).toString().padStart(6, "0");
+    return `C-${nextNum}`;
   }
 
   async calculateClientOutstanding(clientId: string): Promise<number> {

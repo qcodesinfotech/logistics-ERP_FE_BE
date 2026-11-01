@@ -3410,6 +3410,16 @@ export async function registerRoutes(
   });
 
   // Clients - RBAC protected
+  app.get("/api/clients/next-code", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const nextCode = await storage.getNextCustomerCode();
+      res.json({ nextCode });
+    } catch (error: any) {
+      console.error("Get next client code error:", error);
+      res.status(500).json({ error: error?.message || "Failed to generate next client code" });
+    }
+  });
+
   app.get("/api/clients", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const clients = await storage.getClients();
@@ -6666,8 +6676,10 @@ export async function registerRoutes(
 
       let isDriver = false;
       let userPosition = "";
+      let userDepartment = "";
       if (isEmployeeLogin) {
         userPosition = employeeObj.position || "";
+        userDepartment = employeeObj.department || "";
         if (employeeObj.position?.toLowerCase() === "driver") {
           isDriver = true;
         }
@@ -6675,12 +6687,14 @@ export async function registerRoutes(
         if (user!.role?.toLowerCase() === "driver") {
           isDriver = true;
           userPosition = "driver";
-        } else if (user!.employeeId) {
+        }
+        if (user!.employeeId) {
           const [emp] = await db.select().from(schema.employees)
             .where(eq(schema.employees.id, user!.employeeId))
             .limit(1);
           if (emp) {
-            userPosition = emp.position || "";
+            userPosition = emp.position || userPosition || "";
+            userDepartment = emp.department || "";
             if (emp.position?.toLowerCase() === "driver") {
               isDriver = true;
             }
@@ -6696,6 +6710,7 @@ export async function registerRoutes(
         username: employeeObj.employeeCode,
         role: isDriver ? "driver" : (employeeObj.position?.toLowerCase() || "employee"),
         position: employeeObj.position || "",
+        department: userDepartment,
         isDriver,
         name: employeeObj.name,
         employeeId: employeeObj.id,
@@ -6707,6 +6722,7 @@ export async function registerRoutes(
         username: user!.username,
         role: isDriver ? "driver" : (user!.role || "employee"),
         position: userPosition || "",
+        department: userDepartment,
         isDriver,
         name: user!.name,
         employeeId: user!.employeeId,
@@ -10820,10 +10836,30 @@ export async function registerRoutes(
         }
       }
 
+      // Check employee department - Only employees of Operations department have login/geofence restrictions of warehouse locations
+      let isOperationsDept = true;
+      try {
+        const [emp] = await db.select().from(schema.employees)
+          .where(or(
+            eq(schema.employees.id, effectiveDriverId),
+            eq(schema.employees.employeeCode, effectiveDriverId)
+          ))
+          .limit(1);
+        if (emp && emp.department) {
+          const dept = emp.department.trim().toLowerCase();
+          // If department is set and NOT operations / operational, bypass warehouse geofence restriction
+          if (dept !== "operations" && dept !== "operational") {
+            isOperationsDept = false;
+          }
+        }
+      } catch (deptErr) {
+        console.warn("Could not check employee department for warehouse login restriction:", deptErr);
+      }
+
       // First login of the day is restricted to within 100 meters of the authorized warehouse location
-      // UNLESS authorized by supervisor/admin or executed directly by supervisor/admin in ERP.
+      // ONLY for employees of Operations department, UNLESS authorized by supervisor/admin or executed directly by supervisor/admin in ERP.
       // Second/subsequent logins on the same day are permitted from ANY location.
-      if (!isSecondLogin && !isPrivilegedCaller && !supervisorApproved) {
+      if (!isSecondLogin && !isPrivilegedCaller && !supervisorApproved && isOperationsDept) {
         if (authorizedPlaces.some(p => p.latitude && p.longitude) && minDistance > 100) {
           return res.status(403).json({
             error: `First check-in for the day is restricted to the authorized warehouse/depot location (within 100 meters). You are currently ${(minDistance / 1000).toFixed(1)} km away from ${nearestLoc?.name || 'the authorized location'}.`,
@@ -11122,9 +11158,13 @@ export async function registerRoutes(
         console.warn("Error checking previous closing KM:", err);
       }
 
-      if (previousClosingKm > 0 && kmVal < previousClosingKm) {
+      const role = (req.user?.role || "").toLowerCase();
+      const isAdminOrSupervisor = role === "admin" || role === "super_admin" || role.includes("supervisor") || role === "manager" || req.user?.username === "GLL-115";
+      const allowOverride = Boolean(req.body.allowReset || req.body.supervisorOverride || req.body.confirmed);
+
+      if (previousClosingKm > 0 && kmVal < previousClosingKm && !isAdminOrSupervisor && !allowOverride) {
         return res.status(400).json({
-          error: `Opening KM (${kmVal.toLocaleString()} KM) cannot be less than previous day closing KM (${previousClosingKm.toLocaleString()} KM). Please enter a value above or equal to ${previousClosingKm.toLocaleString()} KM.`,
+          error: `Opening KM (${kmVal.toLocaleString()} KM) cannot be less than previous day closing KM (${previousClosingKm.toLocaleString()} KM). Please enter a value above or equal to ${previousClosingKm.toLocaleString()} KM, or request supervisor verification.`,
           previousClosingKm
         });
       }
@@ -12318,893 +12358,5 @@ export async function registerRoutes(
       const customerId = req.query.customerId as string | undefined;
       const invoices = await storage.getContractInvoices(contractId, customerId);
       res.json(invoices);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch contract invoices" });
-    }
-  });
-
-  app.get("/api/contract-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const invoice = await storage.getContractInvoice(req.params.id);
-      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-      res.json(invoice);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch invoice" });
-    }
-  });
-
-  app.post("/api/contract-invoices/generate", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const { contractId, periodStart, periodEnd } = req.body;
-      if (!contractId || !periodStart || !periodEnd) {
-        return res.status(400).json({ error: "contractId, periodStart, and periodEnd are required" });
-      }
-
-      const contract = await storage.getContract(contractId);
-      if (!contract) {
-        return res.status(404).json({ error: "Contract not found" });
-      }
-
-      let generatedInvoices = [];
-
-      if (contract.invoiceGenerationType === "outlet" && contract.linkedOutlets && Array.isArray(contract.linkedOutlets) && contract.linkedOutlets.length > 0) {
-        for (const outletId of contract.linkedOutlets as string[]) {
-          await storage.calculateContractUsage(contract.id, periodStart, periodEnd, outletId);
-          const inv = await storage.generateContractInvoice(contract.id, periodStart, periodEnd, outletId, req.body);
-          generatedInvoices.push(inv);
-        }
-      } else {
-        await storage.calculateContractUsage(contract.id, periodStart, periodEnd);
-        const inv = await storage.generateContractInvoice(contractId, periodStart, periodEnd, undefined, req.body);
-        generatedInvoices.push(inv);
-      }
-      
-      res.status(201).json(generatedInvoices.length === 1 ? generatedInvoices[0] : generatedInvoices);
-    } catch (error) {
-      console.error("Generate invoice error:", error);
-      res.status(500).json({ error: "Failed to generate invoice: " + (error instanceof Error ? error.message : String(error)) });
-    }
-  });
-
-  app.put("/api/contract-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const invoice = await storage.updateContractInvoice(req.params.id, req.body);
-      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-      res.json(invoice);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update invoice" });
-    }
-  });
-
-  app.patch("/api/contract-invoices/:id/status", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const { status } = req.body;
-      const invoice = await storage.updateContractInvoice(req.params.id, { status });
-      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-      res.json(invoice);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update invoice status" });
-    }
-  });
-
-  app.post("/api/contract-invoices/:id/pay", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const invoice = await storage.payContractInvoice(req.params.id, req.body);
-      res.json(invoice);
-    } catch (error: any) {
-      console.error("Pay contract invoice error:", error);
-      res.status(500).json({ error: "Failed to process payment: " + error.message });
-    }
-  });
-
-  app.get("/api/contract-invoices/:id/deliveries", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const deliveries = await storage.getContractInvoiceDeliveries(req.params.id);
-      res.json(deliveries);
-    } catch (error: any) {
-      console.error("Get contract invoice deliveries error:", error);
-      res.status(500).json({ error: "Failed to fetch deliveries: " + error.message });
-    }
-  });
-
-  // ==================== BRAND/OUTLET INVOICE ROUTES ====================
-  app.get("/api/brand-invoices", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const brandId = req.query.brandId as string | undefined;
-      const outletId = req.query.outletId as string | undefined;
-      const invoices = await storage.getBrandInvoices(brandId, outletId);
-      res.json(invoices);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch brand invoices" });
-    }
-  });
-
-  app.get("/api/brand-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const invoice = await storage.getBrandInvoice(req.params.id);
-      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-      res.json(invoice);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch invoice" });
-    }
-  });
-
-  app.post("/api/brand-invoices/generate", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const { brandId, periodStart, periodEnd, generationLevel } = req.body;
-      if (!brandId || !periodStart || !periodEnd || !generationLevel) {
-        return res.status(400).json({ error: "brandId, periodStart, periodEnd, and generationLevel are required" });
-      }
-
-      const generatedInvoices = await storage.generateBrandInvoices(brandId, periodStart, periodEnd, generationLevel);
-      res.status(201).json(generatedInvoices.length === 1 ? generatedInvoices[0] : generatedInvoices);
-    } catch (error) {
-      console.error("Generate brand invoice error:", error);
-      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
-    }
-  });
-
-  app.put("/api/brand-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const invoice = await storage.updateBrandInvoice(req.params.id, req.body);
-      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-      res.json(invoice);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update invoice" });
-    }
-  });
-
-  app.patch("/api/brand-invoices/:id/status", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const { status } = req.body;
-      const invoice = await storage.updateBrandInvoice(req.params.id, { status });
-      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-      res.json(invoice);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update invoice status" });
-    }
-  });
-
-  // Monthly usage for a contract
-  app.get("/api/contracts/:id/usage", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const month = req.query.month as string | undefined;
-      const usage = await storage.getContractMonthlyUsage(req.params.id, month);
-      res.json(usage);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch usage data" });
-    }
-  });
-
-  app.put("/api/contracts/:id/usage", authMiddleware, async (req: AuthRequest, res) => {
-    try {
-      const { month, ...data } = req.body;
-      if (!month) return res.status(400).json({ error: "month is required" });
-      const usage = await storage.upsertContractMonthlyUsage(req.params.id, month, data);
-      res.json(usage);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to update usage data" });
-    }
-  });
-
-  const formatToDDMMYYYY = (dateVal: any): string => {
-    if (!dateVal) return "Today";
-    const d = new Date(dateVal);
-    if (isNaN(d.getTime())) return String(dateVal);
-    return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Riyadh", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
-  };
-
-  app.get("/api/reports/route-pod-pdf", async (req: Request, res) => {
-    try {
-      const sheetId = req.query.sheetId as string;
-      const routeId = req.query.routeId as string;
-
-      if (!sheetId || !routeId) {
-        return res.status(400).json({ error: "sheetId and routeId are required" });
-      }
-
-      // 1. Fetch route info
-      const [routeRow] = await db.select().from(schema.routes).where(eq(schema.routes.id, routeId));
-      const routeName = routeRow?.name || `Route ${routeId}`;
-
-      // 2. Fetch sheet info
-      const [sheetRow] = await db.select().from(schema.dispatchSheets).where(eq(schema.dispatchSheets.id, sheetId));
-      const sheetDate = sheetRow?.date ? formatToDDMMYYYY(sheetRow.date) : "Today";
-
-      // 3. Fetch deliveries matching this sheet and route
-      const allItemsQuery = await db.select({
-        id: schema.dispatchDeliveries.id,
-        dispatchItemId: schema.dispatchItems.id,
-        driverId: schema.dispatchDeliveries.driverId,
-        outletId: schema.dispatchItems.outletId,
-        deliveredQty: schema.dispatchDeliveries.deliveredQty,
-        remainingQty: schema.dispatchDeliveries.remainingQty,
-        remark: schema.dispatchDeliveries.remark,
-        podUrl: schema.dispatchDeliveries.podUrl,
-        status: schema.dispatchDeliveries.status,
-        deliveredAt: schema.dispatchDeliveries.deliveredAt,
-        deliveryTime: schema.dispatchDeliveries.deliveryTime,
-        deliveryStartTime: schema.dispatchDeliveries.deliveryStartTime,
-        deliveryEndTime: schema.dispatchDeliveries.deliveryEndTime,
-        itemCode: schema.dispatchItems.itemCode,
-        description: schema.dispatchItems.description,
-        requestedQty: schema.dispatchItems.requestedQty,
-        weight: schema.dispatchItems.weight,
-        storageType: schema.dispatchItems.storageType,
-        uom: schema.dispatchItems.uom,
-        toNo: schema.dispatchItems.toNo,
-      })
-      .from(schema.dispatchItems)
-      .leftJoin(schema.dispatchDeliveries, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
-      .where(
-        and(
-          eq(schema.dispatchItems.sheetId, sheetId),
-          or(
-            eq(schema.dispatchItems.routeId, routeId),
-            eq(schema.dispatchItems.overrideRouteId, routeId)
-          )
-        )
-      );
-
-      // Find items that have delivery activity
-      const deliveredItems = allItemsQuery.filter(r => r.id && r.status !== "pending" && (parseFloat(r.deliveredQty || "0") > 0 || !!r.podUrl || r.status === "delivered" || r.status === "partial"));
-      if (deliveredItems.length === 0) {
-        return res.status(404).json({ error: "No completed or partial deliveries found for this route." });
-      }
-
-      const activeOutletIds = new Set(deliveredItems.map(r => r.outletId).filter(Boolean) as string[]);
-      const activeToNos = new Set(deliveredItems.map(r => r.toNo || "N/A"));
-
-      // Include all items belonging to active TOs / outlets
-      const deliveriesQuery = allItemsQuery.filter(r => r.outletId && activeOutletIds.has(r.outletId) && activeToNos.has(r.toNo || "N/A"));
-
-      // Group deliveries by Outlet + Storage Type
-      const grouped: Record<string, any> = {};
-      const outletIds = new Set<string>();
-
-      for (const row of deliveriesQuery) {
-        const outletId = row.outletId || "unknown";
-        if (row.outletId) {
-          outletIds.add(row.outletId);
-        }
-        
-        const storageType = row.storageType || "Dry";
-        const groupKey = `${outletId}_${storageType}`;
-
-        if (!grouped[groupKey]) {
-          grouped[groupKey] = {
-            outletId,
-            storageType,
-            deliveredAt: row.deliveredAt,
-            deliveryTime: row.deliveryTime,
-            deliveryStartTime: row.deliveryStartTime,
-            deliveryEndTime: row.deliveryEndTime,
-            remark: row.remark,
-            podUrls: row.podUrl ? row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean) : [],
-            items: [],
-          };
-        }
-        if (row.deliveryStartTime && !grouped[groupKey].deliveryStartTime) {
-          grouped[groupKey].deliveryStartTime = row.deliveryStartTime;
-        }
-        if (row.deliveryEndTime && !grouped[groupKey].deliveryEndTime) {
-          grouped[groupKey].deliveryEndTime = row.deliveryEndTime;
-        }
-        if (row.deliveredAt && !grouped[groupKey].deliveredAt) {
-          grouped[groupKey].deliveredAt = row.deliveredAt;
-          grouped[groupKey].deliveryTime = row.deliveryTime;
-        }
-        if (row.remark && !grouped[groupKey].remark) {
-          grouped[groupKey].remark = row.remark;
-        }
-        if (row.podUrl) {
-          row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach((url: string) => {
-            if (!grouped[groupKey].podUrls.includes(url)) {
-              grouped[groupKey].podUrls.push(url);
-            }
-          });
-        }
-        grouped[groupKey].items.push(row);
-      }
-
-      // Filter out groups that have no visited items
-      for (const key of Object.keys(grouped)) {
-        if (!outletIds.has(grouped[key].outletId)) {
-          delete grouped[key];
-        }
-      }
-
-      // Resolve Outlet Names & Codes
-      const allOutlets = outletIds.size > 0 ? await db.select().from(schema.outlets).where(inArray(schema.outlets.id, Array.from(outletIds))) : [];
-      const outletMap = new Map(allOutlets.map(o => [o.id, o]));
-
-      for (const key of Object.keys(grouped)) {
-        const outlet = outletMap.get(grouped[key].outletId);
-        grouped[key].outletName = outlet?.name || `Outlet ${grouped[key].outletId}`;
-        grouped[key].outletCode = outlet?.code || "N/A";
-      }
-
-      const deliveriesList = Object.values(grouped);
-
-      if (deliveriesList.length === 0) {
-        return res.status(404).json({ error: "No completed deliveries found for this route." });
-      }
-
-      // Create PDF Kit Document
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
-
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${routeName.replace(/\s+/g, '_')}_POD.pdf"`);
-      doc.pipe(res);
-
-      // Add Document Header
-      doc.fillColor("#1E3A8A").fontSize(22).text("LOGIX LOGISTICS HUB", { align: "center" });
-      doc.fillColor("#4B5563").fontSize(12).text("Route Proof of Delivery (POD) Report", { align: "center" });
-      doc.moveDown(1.5);
-
-      // Metadata Info Box
-      doc.fillColor("#1F2937").fontSize(10);
-      doc.text(`Route Name: ${routeName}`, 40, doc.y);
-      doc.text(`Sheet Date: ${sheetDate}`, 300, doc.y - 12);
-      const genTimeStr = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(new Date());
-      doc.text(`Generated At: ${formatToDDMMYYYY(new Date())} ${genTimeStr} (AST)`, 40, doc.y + 6);
-      doc.moveDown(2);
-
-      // Horizontal separator line
-      doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-      doc.moveDown(1.5);
-
-      // Deliveries Summary Table Title
-      doc.fillColor("#1E3A8A").fontSize(14).text("Deliveries Summary", { underline: true });
-      doc.moveDown(0.8);
-
-      // Draw table headers
-      let y = doc.y;
-      doc.font("Helvetica-Bold").fillColor("#374151").fontSize(8.5).text("Outlet", 40, y);
-      doc.font("Helvetica").text("Storage", 175, y);
-      doc.text("Check In", 240, y);
-      doc.text("Check Out", 310, y);
-      doc.text("Completion", 380, y);
-      doc.text("Status", 470, y);
-      doc.moveDown(0.5);
-
-      doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-      doc.moveDown(0.5);
-
-      // Draw table rows
-      for (const del of deliveriesList) {
-        const outletText = `${del.outletName} (${del.outletCode})`;
-        doc.font("Helvetica").fontSize(8.5);
-        const outletHeight = doc.heightOfString(outletText, { width: 130 });
-        const rowHeight = Math.max(outletHeight, 14);
-
-        y = doc.y;
-        if (y + rowHeight > 730) {
-          doc.addPage();
-          y = doc.y;
-          doc.fillColor("#374151").fontSize(8.5).text("Outlet", 40, y);
-          doc.text("Storage", 175, y);
-          doc.text("Check In", 240, y);
-          doc.text("Check Out", 310, y);
-          doc.text("Completion", 380, y);
-          doc.text("Status", 470, y);
-          y += 14;
-          doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-          y += 6;
-        }
-
-        const startTimeStr = del.deliveryStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveryStartTime)) : "-";
-        const endTimeStr = del.deliveryEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveryEndTime)) : (del.deliveredAt ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveredAt)) : "-");
-
-        doc.fillColor("#1F2937").fontSize(8).text(outletText, 40, y, { width: 130 });
-        doc.text(del.storageType, 175, y, { width: 60 });
-        doc.text(startTimeStr, 240, y, { width: 65 });
-        doc.text(endTimeStr, 310, y, { width: 65 });
-        doc.text(`${del.deliveryTime || "Recorded"}`, 380, y, { width: 85 });
-        
-        const allCompleted = del.items.length > 0 && del.items.every((it: any) => it.status === "delivered" && parseFloat(it.deliveredQty || "0") >= parseFloat(it.requestedQty || it.weight || "0") && parseFloat(it.remainingQty || "0") === 0);
-        const statusLabel = allCompleted ? "COMPLETED" : "FAILED / PARTIAL";
-        doc.fillColor(allCompleted ? "#10B981" : "#EF4444").text(statusLabel, 470, y, { width: 80 });
-
-        y += rowHeight + 6;
-        doc.y = y;
-      }
-
-      // Process details and images on new pages
-      for (const del of deliveriesList) {
-        doc.addPage();
-
-        doc.fillColor("#1E3A8A").fontSize(18).text(`${del.outletName} (${del.outletCode})`, { align: "left" });
-        doc.fillColor("#4B5563").fontSize(11).text(`Storage Type: ${del.storageType} | Route: ${routeName}`);
-        doc.moveDown(1);
-
-        const rawStartTime = del.deliveryStartTime;
-        const rawEndTime = del.deliveryEndTime;
-        const startTimeStr = rawStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawStartTime)) : "N/A";
-        const endTimeStr = rawEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawEndTime)) : (del.deliveredAt ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(del.deliveredAt)) : "N/A");
-
-        doc.fillColor("#1F2937").fontSize(10);
-        let detailY = doc.y;
-        doc.text(`Check-In Time: ${startTimeStr}`, 40, detailY);
-        doc.text(`Check-Out Time: ${endTimeStr}`, 300, detailY);
-        detailY += 15;
-        doc.text(`Completion Time: ${del.deliveryTime || "N/A"}`, 40, detailY);
-        doc.text(`Remarks: ${del.remark || "None"}`, 300, detailY);
-        doc.y = detailY + 15;
-        doc.moveDown(1.5);
-
-        // Group items by TO Number
-        const groupedByTo: Record<string, any[]> = {};
-        for (const it of del.items) {
-          const toNo = it.toNo || "N/A";
-          if (!groupedByTo[toNo]) {
-            groupedByTo[toNo] = [];
-          }
-          groupedByTo[toNo].push(it);
-        }
-
-        doc.fillColor("#1E3A8A").fontSize(12).text("Delivered Items List", { underline: true });
-        doc.moveDown(0.5);
-
-        for (const [toNo, items] of Object.entries(groupedByTo)) {
-          doc.font("Helvetica-Bold").fillColor("#1E3A8A").fontSize(10).text(`TO Number: ${toNo}`);
-          doc.font("Helvetica").moveDown(0.3);
-
-          y = doc.y;
-          doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
-          doc.text("Description", 120, y);
-          doc.text("Ordered Qty", 350, y);
-          doc.text("Delivered Qty", 450, y);
-          doc.moveDown(0.3);
-
-          doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-          doc.moveDown(0.4);
-
-          let totalOrdered = 0;
-          let totalDelivered = 0;
-          for (const it of items) {
-            const reqQty = parseFloat(it.requestedQty || it.weight || "0");
-            const delQty = parseFloat(it.deliveredQty || "0");
-            totalOrdered += reqQty;
-            totalDelivered += delQty;
-
-            const desc = it.description || "N/A";
-            doc.font("Helvetica").fontSize(9);
-            const descHeight = doc.heightOfString(desc, { width: 220 });
-            const rowHeight = Math.max(descHeight, 14);
-
-            y = doc.y;
-            if (y + rowHeight > 730) {
-              doc.addPage();
-              y = doc.y;
-              doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
-              doc.text("Description", 120, y);
-              doc.text("Ordered Qty", 350, y);
-              doc.text("Delivered Qty", 450, y);
-              y += 14;
-              doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-              y += 6;
-            }
-
-            doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y, { width: 75 });
-            doc.text(desc, 120, y, { width: 220 });
-            doc.text(reqQty.toFixed(1), 350, y, { width: 80 });
-            doc.text(delQty.toFixed(1), 450, y, { width: 80 });
-
-            y += rowHeight + 6;
-            doc.y = y;
-          }
-          
-          y = doc.y;
-          if (y + 25 > 750) {
-            doc.addPage();
-            y = doc.y;
-          }
-          doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-          y += 6;
-          doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F2937").text("Total", 120, y);
-          doc.text(totalOrdered.toFixed(1), 350, y, { width: 80 });
-          doc.text(totalDelivered.toFixed(1), 450, y, { width: 80 });
-          doc.font("Helvetica");
-          y += 16;
-          doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-          doc.y = y + 10;
-          doc.moveDown(1.5);
-        }
-
-        doc.moveDown(2);
-
-        // Render POD Images
-        if (del.podUrls.length > 0) {
-          doc.fillColor("#1E3A8A").fontSize(12).text("Proof of Delivery (POD) Images", { underline: true });
-          doc.moveDown(1);
-
-          let imgX = 40;
-          let imgY = doc.y;
-
-          for (const url of del.podUrls) {
-            try {
-              // Local images path
-              if (url.startsWith("/uploads/")) {
-                const localPath = path.join(process.cwd(), url);
-                if (fs.existsSync(localPath)) {
-                  doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
-                  imgX += 200;
-                  if (imgX > 450) {
-                    imgX = 40;
-                    imgY += 200;
-                  }
-                } else {
-                  doc.fillColor("#EF4444").text(`[Image missing on disk: ${url}]`, imgX, imgY);
-                  imgX += 200;
-                }
-              } else if (url.startsWith("http")) {
-                // Download remote images
-                const response = await fetch(url);
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-                doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
-                imgX += 200;
-                if (imgX > 450) {
-                  imgX = 40;
-                  imgY += 200;
-                }
-              }
-            } catch (err: any) {
-              doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load POD Image: ${err.message}]`, imgX, imgY);
-              imgX += 200;
-              if (imgX > 450) {
-                imgX = 40;
-                imgY += 200;
-              }
-            }
-          }
-        } else {
-          doc.fillColor("#6B7280").fontSize(10).text("No POD images attached for this delivery.");
-        }
-      }
-
-      doc.end();
-    } catch (e: any) {
-      console.error("Generate PDF report error:", e);
-      res.status(500).json({ error: "Failed to generate Route POD PDF report", details: e?.message });
-    }
-  });
-
-  app.get("/api/reports/delivery-pod-pdf", async (req: Request, res) => {
-    try {
-      const sheetId = req.query.sheetId as string;
-      const outletId = req.query.outletId as string;
-      const storageType = req.query.storageType as string;
-
-      if (!sheetId || !outletId || !storageType) {
-        return res.status(400).json({ error: "sheetId, outletId, and storageType are required" });
-      }
-
-      // Fetch outlet details
-      const [outletRow] = await db.select().from(schema.outlets).where(eq(schema.outlets.id, outletId));
-      const outletName = outletRow?.name || `Outlet ${outletId}`;
-      const outletCode = outletRow?.code || "N/A";
-
-      const conditions = [
-        eq(schema.dispatchItems.sheetId, sheetId),
-        eq(schema.dispatchItems.outletId, outletId)
-      ];
-
-      if (storageType !== "all" && storageType !== "All") {
-        const types = storageType.split(",").map(t => t.trim()).filter(Boolean);
-        if (types.length === 1) {
-          conditions.push(eq(schema.dispatchItems.storageType, types[0]));
-        } else if (types.length > 1) {
-          conditions.push(inArray(schema.dispatchItems.storageType, types));
-        }
-      }
-
-      // Fetch all items matching this outlet and storageType, left joined with deliveries
-      const allItemsQuery = await db.select({
-        id: schema.dispatchDeliveries.id,
-        dispatchItemId: schema.dispatchItems.id,
-        driverId: schema.dispatchDeliveries.driverId,
-        outletId: schema.dispatchItems.outletId,
-        deliveredQty: schema.dispatchDeliveries.deliveredQty,
-        remainingQty: schema.dispatchDeliveries.remainingQty,
-        remark: schema.dispatchDeliveries.remark,
-        podUrl: schema.dispatchDeliveries.podUrl,
-        temperature: schema.dispatchDeliveries.temperature,
-        potUrl: schema.dispatchDeliveries.potUrl,
-        deliveryStartTime: schema.dispatchDeliveries.deliveryStartTime,
-        deliveryEndTime: schema.dispatchDeliveries.deliveryEndTime,
-        status: schema.dispatchDeliveries.status,
-        deliveredAt: schema.dispatchDeliveries.deliveredAt,
-        deliveryTime: schema.dispatchDeliveries.deliveryTime,
-        itemCode: schema.dispatchItems.itemCode,
-        description: schema.dispatchItems.description,
-        requestedQty: schema.dispatchItems.requestedQty,
-        weight: schema.dispatchItems.weight,
-        storageType: schema.dispatchItems.storageType,
-        uom: schema.dispatchItems.uom,
-        sheetId: schema.dispatchItems.sheetId,
-        routeId: schema.dispatchItems.routeId,
-        overrideRouteId: schema.dispatchItems.overrideRouteId,
-        toNo: schema.dispatchItems.toNo,
-      })
-      .from(schema.dispatchItems)
-      .leftJoin(schema.dispatchDeliveries, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
-      .where(and(...conditions));
-
-      const deliveredItems = allItemsQuery.filter(it => it.id && it.status !== "pending" && (parseFloat(it.deliveredQty || "0") > 0 || !!it.podUrl || it.status === "delivered" || it.status === "partial"));
-
-      if (deliveredItems.length === 0 && allItemsQuery.every(it => !it.id || it.status === "pending")) {
-        return res.status(404).json({ error: "No completed or partial delivery items found." });
-      }
-
-      // Group by TO Number. Include TOs that have delivery activity (or all items for the outlet if any delivery exists)
-      const activeToNos = new Set(deliveredItems.map(it => it.toNo || "N/A"));
-      const itemsToReport = activeToNos.size > 0 
-        ? allItemsQuery.filter(it => activeToNos.has(it.toNo || "N/A"))
-        : allItemsQuery;
-
-      const firstRow = deliveredItems[0] || itemsToReport[0];
-      const activeRouteId = firstRow.overrideRouteId || firstRow.routeId;
-      let routeName = "N/A";
-      if (activeRouteId) {
-        const [routeRow] = await db.select().from(schema.routes).where(eq(schema.routes.id, activeRouteId));
-        routeName = routeRow?.name || "Route Assignment";
-      }
-      
-      // Fetch all completed deliveries matching this outlet and sheet (regardless of storageType) to get ALL attachments
-      const allDeliveriesQuery = await db.select({
-        podUrl: schema.dispatchDeliveries.podUrl,
-        potUrl: schema.dispatchDeliveries.potUrl,
-      })
-      .from(schema.dispatchDeliveries)
-      .innerJoin(schema.dispatchItems, eq(schema.dispatchDeliveries.dispatchItemId, schema.dispatchItems.id))
-      .where(and(
-        eq(schema.dispatchItems.sheetId, sheetId),
-        eq(schema.dispatchItems.outletId, outletId)
-      ));
-
-      const podUrlsSet = new Set<string>();
-      const potUrlsSet = new Set<string>();
-      for (const row of allDeliveriesQuery) {
-        if (row.podUrl) {
-          row.podUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach(url => podUrlsSet.add(url));
-        }
-        if (row.potUrl) {
-          row.potUrl.split(",").map((u: string) => u.trim()).filter(Boolean).forEach(url => potUrlsSet.add(url));
-        }
-      }
-      const podUrls = Array.from(podUrlsSet);
-      const potUrls = Array.from(potUrlsSet);
-
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
-
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${outletName.replace(/\s+/g, '_')}_POD.pdf"`);
-      doc.pipe(res);
-
-      const includeAttachments = req.query.includeAttachments !== 'false';
-
-      // Group items by TO Number
-      const groupedByTo: Record<string, typeof itemsToReport> = {};
-      for (const it of itemsToReport) {
-        const toNo = it.toNo || "N/A";
-        if (!groupedByTo[toNo]) {
-          groupedByTo[toNo] = [];
-        }
-        groupedByTo[toNo].push(it);
-      }
-
-      let isFirstPage = true;
-
-      for (const [toNo, items] of Object.entries(groupedByTo)) {
-        if (!isFirstPage) {
-          doc.addPage();
-        }
-        isFirstPage = false;
-
-        doc.fillColor("#1E3A8A").fontSize(22).text("LOGIX LOGISTICS HUB", { align: "center" });
-        doc.fillColor("#4B5563").fontSize(12).text("Proof of Delivery (POD) Receipt", { align: "center" });
-        doc.moveDown(1.5);
-
-        const requiresTemp = storageType.split(",").some(st => 
-          ["frozen", "chilled", "assorted"].includes(st.trim().toLowerCase())
-        );
-
-        let toTotalOrdered = 0;
-        let toTotalDelivered = 0;
-        for (const it of items) {
-          toTotalOrdered += parseFloat(it.requestedQty || it.weight || "0");
-          toTotalDelivered += parseFloat(it.deliveredQty || "0");
-        }
-
-        const toDeliveredRows = items.filter((it: any) => it.deliveredAt);
-        const toFirstRow = toDeliveredRows[0] || firstRow;
-
-        doc.fillColor("#1F2937").fontSize(10);
-        let currentY = doc.y;
-        doc.text(`Outlet Name: ${outletName} (${outletCode})`, 40, currentY);
-        doc.text(`Storage Type: ${storageType}`, 300, currentY);
-        
-        currentY += 15;
-        doc.text(`Route: ${routeName}`, 40, currentY);
-        doc.text(`Delivery Date: ${toFirstRow?.deliveredAt ? formatToDDMMYYYY(toFirstRow.deliveredAt) : (firstRow?.deliveredAt ? formatToDDMMYYYY(firstRow.deliveredAt) : "Today")}`, 300, currentY);
-        
-        currentY += 15;
-        const rawStartTime = toFirstRow?.deliveryStartTime || firstRow?.deliveryStartTime;
-        const rawEndTime = toFirstRow?.deliveryEndTime || firstRow?.deliveryEndTime;
-        const startTimeStr = rawStartTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawStartTime)) : "N/A";
-        const endTimeStr = rawEndTime ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(rawEndTime)) : (toFirstRow?.deliveredAt ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Riyadh", hour: '2-digit', minute: '2-digit', hour12: true }).format(new Date(toFirstRow.deliveredAt)) : "N/A");
-
-        doc.text(`Check-In Time: ${startTimeStr}`, 40, currentY);
-        doc.text(`Check-Out Time: ${endTimeStr}`, 300, currentY);
-
-        currentY += 15;
-        doc.text(`Completion Time: ${toFirstRow?.deliveryTime || firstRow?.deliveryTime || "N/A"}`, 40, currentY);
-        const tempVal = toFirstRow?.temperature || firstRow?.temperature;
-        if (tempVal) {
-          doc.text(`Temperature: ${tempVal}°C`, 300, currentY);
-        } else {
-          doc.text(`Temperature: N/A`, 300, currentY);
-        }
-        
-        currentY += 15;
-        const defaultRemark = toTotalDelivered < toTotalOrdered ? "Partially Delivered" : "Delivered successfully";
-        const remarkText = toFirstRow?.remark || firstRow?.remark || defaultRemark;
-        doc.text(`Remarks: ${remarkText}`, 40, currentY);
-        
-        doc.y = currentY + 15;
-        doc.moveDown(1);
-
-        doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-        doc.moveDown(1.5);
-
-        doc.fillColor("#1E3A8A").fontSize(14).text("Delivered Items List", { underline: true });
-        doc.moveDown(0.8);
-
-        doc.font("Helvetica-Bold").fillColor("#1E3A8A").fontSize(11).text(`TO Number: ${toNo}`);
-        doc.font("Helvetica").moveDown(0.4);
-
-        let y = doc.y;
-        doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
-        doc.text("Description", 120, y);
-        doc.text("Ordered Qty", 350, y);
-        doc.text("Delivered Qty", 450, y);
-        doc.moveDown(0.3);
-
-        doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, doc.y).lineTo(550, doc.y).stroke();
-        doc.moveDown(0.4);
-
-        let totalOrdered = 0;
-        let totalDelivered = 0;
-        for (const it of items) {
-          const reqQty = parseFloat(it.requestedQty || it.weight || "0");
-          const delQty = parseFloat(it.deliveredQty || "0");
-          totalOrdered += reqQty;
-          totalDelivered += delQty;
-
-          const desc = it.description || "N/A";
-          doc.font("Helvetica").fontSize(9);
-          const descHeight = doc.heightOfString(desc, { width: 220 });
-          const rowHeight = Math.max(descHeight, 14);
-
-          y = doc.y;
-          if (y + rowHeight > 730) {
-            doc.addPage();
-            y = doc.y;
-            // Redraw table header on new page
-            doc.fillColor("#374151").fontSize(9).text("Item Code", 40, y);
-            doc.text("Description", 120, y);
-            doc.text("Ordered Qty", 350, y);
-            doc.text("Delivered Qty", 450, y);
-            y += 14;
-            doc.strokeColor("#E5E7EB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-            y += 6;
-          }
-
-          doc.fillColor("#1F2937").fontSize(9).text(it.itemCode, 40, y, { width: 75 });
-          doc.text(desc, 120, y, { width: 220 });
-          doc.text(reqQty.toFixed(1), 350, y, { width: 80 });
-          doc.text(delQty.toFixed(1), 450, y, { width: 80 });
-
-          y += rowHeight + 6;
-          doc.y = y;
-        }
-
-        y = doc.y;
-        if (y + 25 > 750) {
-          doc.addPage();
-          y = doc.y;
-        }
-        doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-        y += 6;
-        doc.font("Helvetica-Bold").fontSize(9).fillColor("#1F2937").text("Total", 120, y);
-        doc.text(totalOrdered.toFixed(1), 350, y, { width: 80 });
-        doc.text(totalDelivered.toFixed(1), 450, y, { width: 80 });
-        doc.font("Helvetica");
-        y += 16;
-        doc.strokeColor("#D1D5DB").lineWidth(1).moveTo(40, y).lineTo(550, y).stroke();
-        doc.y = y + 10;
-        doc.moveDown(1.5);
-      }
-
-      const allAttachments = [
-        ...podUrls.map(url => ({ type: "POD", url })),
-        ...potUrls.map(url => ({ type: "POT", url }))
-      ];
-
-      if (includeAttachments && allAttachments.length > 0) {
-        doc.addPage();
-        doc.fillColor("#1E3A8A").fontSize(12).text("Delivery Attachments (POD & POT)", { underline: true });
-        doc.moveDown(1.5);
-
-        let imgX = 40;
-        let imgY = doc.y;
-
-        for (const att of allAttachments) {
-          const { type, url } = att;
-          try {
-            if (imgY > 650) {
-              doc.addPage();
-              imgY = 40;
-              imgX = 40;
-            }
-            if (url.startsWith("/uploads/")) {
-              const localPath = path.join(process.cwd(), decodeURIComponent(url));
-              if (fs.existsSync(localPath)) {
-                doc.fillColor("#4B5563").fontSize(10).text(`${type} Image`, imgX, imgY - 15);
-                doc.image(localPath, imgX, imgY, { width: 180, height: 180 });
-                imgX += 200;
-                if (imgX > 450) { imgX = 40; imgY += 220; }
-              } else {
-                doc.fillColor("#EF4444").fontSize(9).text(`[Missing on disk: ${url}]`, imgX, imgY);
-                imgX += 200;
-                if (imgX > 450) { imgX = 40; imgY += 220; }
-              }
-            } else if (url.startsWith("http")) {
-              const response = await fetch(url);
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-              doc.fillColor("#4B5563").fontSize(10).text(`${type} Image`, imgX, imgY - 15);
-              doc.image(buffer, imgX, imgY, { width: 180, height: 180 });
-              imgX += 200;
-              if (imgX > 450) { imgX = 40; imgY += 220; }
-            }
-          } catch (err: any) {
-            doc.fillColor("#EF4444").fontSize(9).text(`[Failed to load ${type}: ${err.message}]`, imgX, imgY);
-            imgX += 200;
-            if (imgX > 450) { imgX = 40; imgY += 220; }
-          }
-        }
-      }
-
-      doc.end();
-    } catch (e: any) {
-      console.error("Generate Delivery PDF report error:", e);
-      res.status(500).json({ error: "Failed to generate Delivery POD PDF receipt", details: e?.message });
-    }
-  });
-
-  // Initialize 3D Live Vehicle Telemetry WebSocket Gateway
-  initTelemetryWebSocket(httpServer);
-
-  // 3D Telemetry REST Fallback Endpoints
-  app.get("/api/telemetry/live", (_req: Request, res: Response) => {
-    res.json(getLiveFleetTelemetry());
-  });
-
-  app.get("/api/telemetry/history/:tripId", (req: Request, res: Response) => {
-    res.json(getTripTelemetryHistory(req.params.tripId));
-  });
-
-  app.post("/api/telemetry/update", (req: Request, res: Response) => {
-    try {
-      updateVehicleTelemetry(req.body);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  return httpServer;
-}
+    } catch (error) 
+... [truncated for diff preview]

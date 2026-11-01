@@ -566,6 +566,18 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
     name: "contacts"
   });
 
+  // Auto-fetch next customer code in create mode
+  const { data: nextCodeData } = useQuery<{ nextCode: string }>({
+    queryKey: ["/api/clients/next-code"],
+    enabled: mode === "create",
+  });
+
+  React.useEffect(() => {
+    if (mode === "create" && nextCodeData?.nextCode && !form.getValues("customerCode")) {
+      form.setValue("customerCode", nextCodeData.nextCode);
+    }
+  }, [mode, nextCodeData, form]);
+
   // Prefill details on edit
   React.useEffect(() => {
     if (customer && mode === "edit") {
@@ -862,7 +874,7 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
                         <FormControl>
                           <Input 
                             {...field} 
-                            placeholder="e.g. 007147110" 
+                            placeholder="Auto-generated e.g. C-000005" 
                             disabled={mode === "edit"} 
                             className={mode === "edit" ? "font-mono bg-muted/40" : "font-mono"} 
                             data-testid="input-customer-code"

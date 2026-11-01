@@ -1040,7 +1040,7 @@ export default function Employees() {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="Sales">Sales</SelectItem>
-                        <SelectItem value="Operational">Operational</SelectItem>
+                        <SelectItem value="Operations">Operations</SelectItem>
                         <SelectItem value="Management">Management</SelectItem>
                         <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
