@@ -12358,5 +12358,77 @@ export async function registerRoutes(
       const customerId = req.query.customerId as string | undefined;
       const invoices = await storage.getContractInvoices(contractId, customerId);
       res.json(invoices);
-    } catch (error) 
-... [truncated for diff preview]
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch contract invoices" });
+    }
+  });
+
+  app.get("/api/contract-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.getContractInvoice(req.params.id);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invoice" });
+    }
+  });
+
+  app.post("/api/contract-invoices/generate", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { contractId, periodStart, periodEnd } = req.body;
+      if (!contractId || !periodStart || !periodEnd) {
+        return res.status(400).json({ error: "contractId, periodStart, and periodEnd are required" });
+      }
+      const invoice = await storage.generateContractInvoice(contractId, periodStart, periodEnd);
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error("Generate invoice error:", error);
+      res.status(500).json({ error: "Failed to generate invoice" });
+    }
+  });
+
+  app.put("/api/contract-invoices/:id", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const invoice = await storage.updateContractInvoice(req.params.id, req.body);
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice" });
+    }
+  });
+
+  app.patch("/api/contract-invoices/:id/status", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { status } = req.body;
+      const invoice = await storage.updateContractInvoice(req.params.id, { status });
+      if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+      res.json(invoice);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update invoice status" });
+    }
+  });
+
+  // Monthly usage for a contract
+  app.get("/api/contracts/:id/usage", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const month = req.query.month as string | undefined;
+      const usage = await storage.getContractMonthlyUsage(req.params.id, month);
+      res.json(usage);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch usage data" });
+    }
+  });
+
+  app.put("/api/contracts/:id/usage", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { month, ...data } = req.body;
+      if (!month) return res.status(400).json({ error: "month is required" });
+      const usage = await storage.upsertContractMonthlyUsage(req.params.id, month, data);
+      res.json(usage);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update usage data" });
+    }
+  });
+
+  return httpServer;
+}

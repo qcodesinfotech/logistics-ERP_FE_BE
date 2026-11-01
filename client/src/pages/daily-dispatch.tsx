@@ -1221,6 +1221,11 @@ function MoveOverrideDialog({
   const hasMultipleTypes = availableTypes.length > 1;
   const [selectedTypes, setSelectedTypes] = useState<string[]>(availableTypes);
 
+  // Keep selectedTypes in sync with availableTypes when items change
+  useEffect(() => {
+    setSelectedTypes(availableTypes);
+  }, [availableTypes]);
+
   const selectedZoneData = boardZones?.find(z => z.zoneId === zoneId);
   const availableTrucks = selectedZoneData?.trucks || [];
 
@@ -1228,10 +1233,14 @@ function MoveOverrideDialog({
     if (!zoneId) return;
     if (hasMultipleTypes && selectedTypes.length === 0) return;
 
-    // If multiple types were present and user selected a subset, pass selectedTypes.
-    // If all types were selected or only 1 type was present, pass undefined to move all types.
-    const isSubset = hasMultipleTypes && selectedTypes.length < availableTypes.length;
-    onSave(zoneId, truckId || null, reason, isSubset ? selectedTypes : undefined);
+    // If items have specific storage types, always pass selectedTypes so ONLY the selected categories move.
+    // This ensures that moving an outlet card that has a specific category (e.g., Frozen) from Truck B to Truck C
+    // moves ONLY that category and does not pull other categories (Dry, Chilled) from Truck A.
+    const typesToMove = availableTypes.length > 0 && selectedTypes.length > 0
+      ? selectedTypes
+      : undefined;
+
+    onSave(zoneId, truckId || null, reason, typesToMove);
   };
 
   return (
@@ -1246,12 +1255,22 @@ function MoveOverrideDialog({
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">Temporarily reassign this to a different route for this dispatch sheet.</p>
 
+          {/* Single Storage Type: Display clear indicator so the user sees what is being moved */}
+          {availableTypes.length === 1 && (
+            <div className="flex items-center justify-between p-3 rounded-lg border bg-amber-50/50 dark:bg-amber-950/20 text-xs">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">Category to Move:</span>
+              <Badge variant="outline" className="font-semibold bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/50 dark:text-amber-200 px-2.5 py-0.5">
+                {availableTypes[0]} ({items.length} {items.length === 1 ? "item" : "items"})
+              </Badge>
+            </div>
+          )}
+
           {/* Storage Types Selection (only shown if multiple types exist) */}
           {hasMultipleTypes && (
             <div className="space-y-2 border rounded-lg p-3 bg-slate-50/70 dark:bg-slate-900/50">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Select Type to Move <span className="text-destructive">*</span>
+                  Select Category to Move <span className="text-destructive">*</span>
                 </Label>
                 <button
                   type="button"

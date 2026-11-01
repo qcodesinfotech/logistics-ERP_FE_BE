@@ -4429,8 +4429,21 @@ export class DatabaseStorage implements IStorage {
     const outletTruckAssigns = truckAssignIds.length > 0 ? await db.select().from(dispatchOutletTruckAssignments).where(inArray(dispatchOutletTruckAssignments.truckAssignmentId, truckAssignIds)) : [];
     const outletToTruck = new Map<string, string>();
     for (const ota of outletTruckAssigns) {
-      if (ota.outletId) outletToTruck.set(ota.outletId, ota.truckAssignmentId);
-      else outletToTruck.set(ota.outletCode, ota.truckAssignmentId);
+      const st = ota.storageType ? ota.storageType.trim().toLowerCase() : null;
+      if (ota.outletId) {
+        if (st) outletToTruck.set(`${ota.outletId}_${st}`, ota.truckAssignmentId);
+        else outletToTruck.set(ota.outletId, ota.truckAssignmentId);
+      }
+      if (ota.outletCode) {
+        const normCode = normalizeCode(ota.outletCode);
+        if (st) {
+          outletToTruck.set(`${ota.outletCode}_${st}`, ota.truckAssignmentId);
+          if (normCode) outletToTruck.set(`${normCode}_${st}`, ota.truckAssignmentId);
+        } else {
+          outletToTruck.set(ota.outletCode, ota.truckAssignmentId);
+          if (normCode) outletToTruck.set(normCode, ota.truckAssignmentId);
+        }
+      }
     }
 
     // Get delivery statuses for all items
@@ -4479,7 +4492,16 @@ export class DatabaseStorage implements IStorage {
     for (const item of items) {
       const effectiveOutletId = item.outletId || outletCodeMap.get(normalizeCode(item.outletCode))?.id;
       const ov = getOverrideForItem(effectiveOutletId, item.storageType, item.outletCode);
-      let tAssignId = (item.outletId ? outletToTruck.get(item.outletId) : null) || outletToTruck.get(item.outletCode) || null;
+      const itemSt = item.storageType ? item.storageType.trim().toLowerCase() : null;
+      const itemCodeNorm = item.outletCode ? normalizeCode(item.outletCode) : null;
+      let tAssignId: string | null = null;
+      if (effectiveOutletId && itemSt) tAssignId = outletToTruck.get(`${effectiveOutletId}_${itemSt}`) || null;
+      if (!tAssignId && item.outletCode && itemSt) tAssignId = outletToTruck.get(`${item.outletCode}_${itemSt}`) || null;
+      if (!tAssignId && itemCodeNorm && itemSt) tAssignId = outletToTruck.get(`${itemCodeNorm}_${itemSt}`) || null;
+      if (!tAssignId && effectiveOutletId) tAssignId = outletToTruck.get(effectiveOutletId) || null;
+      if (!tAssignId && item.outletCode) tAssignId = outletToTruck.get(item.outletCode) || null;
+      if (!tAssignId && itemCodeNorm) tAssignId = outletToTruck.get(itemCodeNorm) || null;
+
       if (ov?.overrideTruckId) {
         tAssignId = ov.overrideTruckId;
       }
@@ -9429,8 +9451,22 @@ export class DatabaseStorage implements IStorage {
         if (!sheetOutletTruckMap.has(sId)) {
           sheetOutletTruckMap.set(sId, new Map());
         }
-        const key = ota.outletId || ota.outletCode;
-        sheetOutletTruckMap.get(sId)!.set(key, ota.truckAssignmentId);
+        const map = sheetOutletTruckMap.get(sId)!;
+        const st = ota.storageType ? ota.storageType.trim().toLowerCase() : null;
+        if (ota.outletId) {
+          if (st) map.set(`${ota.outletId}_${st}`, ota.truckAssignmentId);
+          else map.set(ota.outletId, ota.truckAssignmentId);
+        }
+        if (ota.outletCode) {
+          const normCode = normalizeOutletCode(ota.outletCode);
+          if (st) {
+            map.set(`${ota.outletCode}_${st}`, ota.truckAssignmentId);
+            if (normCode) map.set(`${normCode}_${st}`, ota.truckAssignmentId);
+          } else {
+            map.set(ota.outletCode, ota.truckAssignmentId);
+            if (normCode) map.set(normCode, ota.truckAssignmentId);
+          }
+        }
       }
     }
 
@@ -9484,7 +9520,14 @@ export class DatabaseStorage implements IStorage {
            overrideMap.get(normCode))
         : (outletId ? (overrideMap.get(outletId) || overrideMap.get(normCode)) : overrideMap.get(normCode));
 
-      let tAssignId = (outletId ? outletToTruck.get(outletId) : null) || outletToTruck.get(outletCode) || null;
+      const st = item.storageType ? item.storageType.trim().toLowerCase() : null;
+      let tAssignId: string | null = null;
+      if (outletId && st) tAssignId = outletToTruck.get(`${outletId}_${st}`) || null;
+      if (!tAssignId && outletCode && st) tAssignId = outletToTruck.get(`${outletCode}_${st}`) || null;
+      if (!tAssignId && normCode && st) tAssignId = outletToTruck.get(`${normCode}_${st}`) || null;
+      if (!tAssignId && outletId) tAssignId = outletToTruck.get(outletId) || null;
+      if (!tAssignId && outletCode) tAssignId = outletToTruck.get(outletCode) || null;
+      if (!tAssignId && normCode) tAssignId = outletToTruck.get(normCode) || null;
       if (ov?.overrideTruckId) {
         tAssignId = ov.overrideTruckId;
       }
@@ -9701,8 +9744,22 @@ export class DatabaseStorage implements IStorage {
         if (!sheetOutletTruckMap.has(sId)) {
           sheetOutletTruckMap.set(sId, new Map());
         }
-        const key = ota.outletId || ota.outletCode;
-        sheetOutletTruckMap.get(sId)!.set(key, ota.truckAssignmentId);
+        const map = sheetOutletTruckMap.get(sId)!;
+        const st = ota.storageType ? ota.storageType.trim().toLowerCase() : null;
+        if (ota.outletId) {
+          if (st) map.set(`${ota.outletId}_${st}`, ota.truckAssignmentId);
+          else map.set(ota.outletId, ota.truckAssignmentId);
+        }
+        if (ota.outletCode) {
+          const normCode = normalizeOutletCode(ota.outletCode);
+          if (st) {
+            map.set(`${ota.outletCode}_${st}`, ota.truckAssignmentId);
+            if (normCode) map.set(`${normCode}_${st}`, ota.truckAssignmentId);
+          } else {
+            map.set(ota.outletCode, ota.truckAssignmentId);
+            if (normCode) map.set(normCode, ota.truckAssignmentId);
+          }
+        }
       }
     }
 
@@ -9724,7 +9781,14 @@ export class DatabaseStorage implements IStorage {
            overrideMap.get(normCode))
         : (outletId ? (overrideMap.get(outletId) || overrideMap.get(normCode)) : overrideMap.get(normCode));
 
-      let tAssignId = (outletId ? outletToTruck.get(outletId) : null) || outletToTruck.get(outletCode) || null;
+      const st = item.storageType ? item.storageType.trim().toLowerCase() : null;
+      let tAssignId: string | null = null;
+      if (outletId && st) tAssignId = outletToTruck.get(`${outletId}_${st}`) || null;
+      if (!tAssignId && outletCode && st) tAssignId = outletToTruck.get(`${outletCode}_${st}`) || null;
+      if (!tAssignId && normCode && st) tAssignId = outletToTruck.get(`${normCode}_${st}`) || null;
+      if (!tAssignId && outletId) tAssignId = outletToTruck.get(outletId) || null;
+      if (!tAssignId && outletCode) tAssignId = outletToTruck.get(outletCode) || null;
+      if (!tAssignId && normCode) tAssignId = outletToTruck.get(normCode) || null;
       if (ov?.overrideTruckId) {
         tAssignId = ov.overrideTruckId;
       }
