@@ -1267,8 +1267,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateSupplier(id: string, data: Partial<InsertSupplier>): Promise<Supplier | undefined> {
-    const [supplier] = await db.update(suppliers).set(data).where(eq(suppliers.id, id)).returning();
-    return supplier || undefined;
+    const updateData: any = { ...data };
+    if (data.openingBalance !== undefined && data.currentBalance === undefined) {
+      updateData.currentBalance = data.openingBalance;
+    }
+    const [supplier] = await db.update(suppliers).set(updateData).where(eq(suppliers.id, id)).returning();
+    if (!supplier) return undefined;
+
+    try {
+      await db.update(clients).set({
+        name: supplier.name,
+        companyName: supplier.companyName || "",
+        email: supplier.email || "",
+        phone: supplier.phone || "",
+        address: supplier.address || "",
+        openingBalance: supplier.openingBalance || "0.000",
+        currentOutstanding: supplier.currentBalance || supplier.openingBalance || "0.000",
+      }).where(eq(clients.id, supplier.id));
+    } catch (e) {
+      // client might not exist with same id
+    }
+
+    return supplier;
   }
 
   async deleteSupplier(id: string): Promise<void> {
@@ -3519,6 +3539,8 @@ export class DatabaseStorage implements IStorage {
           phone: client.phone || "",
           vatNumber: (client as any).vatNumber || "",
           address: (client as any).billingAddress || (client as any).deliveryAddress || "",
+          openingBalance: client.openingBalance || "0.000",
+          currentBalance: client.openingBalance || "0.000",
           status: client.status || "active",
           shopId: client.shopId,
           branchId: client.branchId,
@@ -3544,6 +3566,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const outstanding = await this.calculateClientOutstanding(client.id);
+    await db.update(clients).set({ currentOutstanding: outstanding.toFixed(3) }).where(eq(clients.id, client.id));
     return {
       ...client,
       currentOutstanding: outstanding.toFixed(3),

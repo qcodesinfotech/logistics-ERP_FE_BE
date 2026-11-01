@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useLocation, useParams } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Users, Plus, Pencil, Eye, Power, PowerOff, ChevronRight, ChevronLeft, 
-  MapPin, Loader2, Download, Trash, FileText, Landmark, Phone, Trash2
+  MapPin, Loader2, Download, Trash, FileText, Landmark, Phone, Trash2, Coins
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -12,6 +12,9 @@ import { Label } from "@/components/ui/label";
 import { 
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from "@/components/ui/dialog";
 import { 
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle 
@@ -91,6 +94,111 @@ const customerFormSchema = z.object({
 
 type CustomerFormData = z.infer<typeof customerFormSchema>;
 
+// Quick Opening Balance Dialog for fast adjustment of customer receivables / vendor payables
+function QuickOpeningBalanceDialog({
+  isOpen,
+  onClose,
+  client,
+  isVendor = false,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  client: Client | null;
+  isVendor?: boolean;
+}) {
+  const [balance, setBalance] = useState("");
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (client) {
+      setBalance(client.openingBalance || "0.000");
+    }
+  }, [client]);
+
+  const mutation = useMutation({
+    mutationFn: async (newBalance: string) => {
+      const res = await apiRequest("PATCH", `/api/clients/${client?.id}`, {
+        openingBalance: newBalance,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/clients/${client?.id}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      toast({
+        title: isVendor ? "Opening payable balance updated" : "Opening receivable balance updated",
+        description: `${client?.name} balance recorded as ${parseFloat(balance || "0").toFixed(3)} BD`,
+      });
+      onClose();
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to update opening balance",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (!client) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Coins className="h-5 w-5 text-amber-500" />
+            {isVendor ? "Set Opening Payable Balance" : "Set Opening Receivable Balance"}
+          </DialogTitle>
+          <DialogDescription>
+            {isVendor
+              ? `Update initial payable amount owed to ${client.name} (${client.customerCode || "N/A"}).`
+              : `Update initial receivable amount owed by ${client.name} (${client.customerCode || "N/A"}).`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="opening-balance-input">
+              {isVendor ? "Opening Payable Balance (BD)" : "Opening Receivable Balance (BD)"}
+            </Label>
+            <div className="relative">
+              <Input
+                id="opening-balance-input"
+                type="number"
+                step="0.001"
+                placeholder="0.000"
+                value={balance}
+                onChange={e => setBalance(e.target.value)}
+                className="font-mono text-base pr-12"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
+                BD
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Recorded as of the starting period to calculate accurate statements and bank transactions.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => mutation.mutate(balance)}
+            disabled={mutation.isPending}
+          >
+            {mutation.isPending ? "Saving..." : "Save Balance"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function CustomersPage() {
   const [location, setLocation] = useLocation();
   const { id } = useParams<{ id?: string }>();
@@ -99,6 +207,7 @@ export default function CustomersPage() {
 
   const [deactivatingCustomer, setDeactivatingCustomer] = useState<Client | null>(null);
   const [activatingCustomer, setActivatingCustomer] = useState<Client | null>(null);
+  const [editingOpeningBalanceClient, setEditingOpeningBalanceClient] = useState<Client | null>(null);
 
   // Lists state / Pagination & Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -313,6 +422,7 @@ export default function CustomersPage() {
                       <th className="p-4">Category</th>
                       <th className="p-4">Country & City</th>
                       <th className="p-4">Contact Mob / Email</th>
+                      <th className="p-4">Opening Balance</th>
                       <th className="p-4">Outstanding</th>
                       <th className="p-4">Status</th>
                       <th className="p-4 text-right">Actions</th>
@@ -345,6 +455,25 @@ export default function CustomersPage() {
                         <td className="p-4">
                           <div className="font-medium">{client.phone}</div>
                           <div className="text-xs text-muted-foreground">{client.email}</div>
+                        </td>
+                        <td className="p-4 font-mono font-medium text-slate-700">
+                          <div className="flex items-center gap-1.5">
+                            <span>{parseFloat((client as any).openingBalance || "0.000").toFixed(3)} BD</span>
+                            {(hasWritePermission("customers") || isSuperAdmin) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-slate-400 hover:text-amber-600"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingOpeningBalanceClient(client);
+                                }}
+                                title="Set Opening Receivable Balance"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
                         </td>
                         <td className="p-4 font-mono font-semibold text-amber-700">
                           {parseFloat(client.currentOutstanding || "0.000").toFixed(3)} BD
@@ -477,6 +606,15 @@ export default function CustomersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Quick Opening Balance Modal */}
+      {editingOpeningBalanceClient && (
+        <QuickOpeningBalanceDialog
+          isOpen={!!editingOpeningBalanceClient}
+          onClose={() => setEditingOpeningBalanceClient(null)}
+          client={editingOpeningBalanceClient}
+          isVendor={false}
+        />
+      )}
     </div>
   );
 }
@@ -822,9 +960,14 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
             const isActive = activeStep === stepNum;
             const isDone = activeStep > stepNum;
             return (
-              <div key={title} className="flex flex-col items-center gap-2 w-16 md:w-24">
+              <div 
+                key={title} 
+                className="flex flex-col items-center gap-2 w-16 md:w-24 cursor-pointer group"
+                onClick={() => setActiveStep(stepNum)}
+                title={`Go to Step ${stepNum}: ${title}`}
+              >
                 <div 
-                  className={`h-9 w-9 rounded-full flex items-center justify-center font-semibold text-sm border-2 transition-all duration-300 ${
+                  className={`h-9 w-9 rounded-full flex items-center justify-center font-semibold text-sm border-2 transition-all duration-300 group-hover:border-primary ${
                     isActive 
                       ? "bg-primary border-primary text-primary-foreground shadow-md scale-110" 
                       : isDone
@@ -834,7 +977,9 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
                 >
                   {stepNum}
                 </div>
-                <span className="text-[10px] md:text-xs font-medium text-center hidden md:inline text-muted-foreground leading-tight">
+                <span className={`text-[10px] md:text-xs font-medium text-center hidden md:inline leading-tight transition-colors ${
+                  isActive ? "text-primary font-bold" : "text-muted-foreground group-hover:text-primary"
+                }`}>
                   {title}
                 </span>
               </div>
@@ -1532,10 +1677,17 @@ function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
                     name="openingBalance"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Opening Balance (BD)</FormLabel>
+                        <FormLabel>
+                          {isVendorContext ? "Opening Payable Balance (BD)" : "Opening Receivable Balance (BD)"}
+                        </FormLabel>
                         <FormControl>
-                          <Input {...field} type="number" placeholder="0.000" disabled={mode === "edit"} className={mode === "edit" ? "bg-muted/40" : ""} />
+                          <Input {...field} type="number" step="0.001" placeholder="0.000" />
                         </FormControl>
+                        <p className="text-[11px] text-muted-foreground">
+                          {isVendorContext
+                            ? "Initial payable balance owed to this vendor as of the starting period."
+                            : "Initial receivable balance owed by this customer as of the starting period."}
+                        </p>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -1754,6 +1906,7 @@ function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewP
   const isVendorContext = window.location.pathname.startsWith("/logistics/vendors");
   const listPath = isVendorContext ? "/logistics/vendors" : "/logistics/customers";
   const entityLabel = isVendorContext ? "Vendor" : "Customer";
+  const [isEditingOpeningBalance, setIsEditingOpeningBalance] = useState(false);
 
   const { data: customer, isLoading } = useQuery<Client>({
     queryKey: [`/api/clients/${id}`],
@@ -1982,11 +2135,26 @@ function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewP
                       {(customer as any).creditLimit ? `${parseFloat((customer as any).creditLimit).toFixed(3)} BD` : "No Limit"}
                     </span>
                   </div>
-                  <div className="flex justify-between border-b pb-2">
-                    <span className="text-sm font-medium text-muted-foreground">Opening Balance</span>
-                    <span className="font-semibold font-mono">
-                      {parseFloat((customer as any).openingBalance || "0").toFixed(3)} BD
+                  <div className="flex justify-between items-center border-b pb-2">
+                    <span className="text-sm font-medium text-muted-foreground">
+                      {isVendorContext ? "Opening Payable Balance" : "Opening Receivable Balance"}
                     </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold font-mono">
+                        {parseFloat((customer as any).openingBalance || "0").toFixed(3)} BD
+                      </span>
+                      {hasWrite && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setIsEditingOpeningBalance(true)}
+                          title="Set Opening Balance"
+                        >
+                          <Pencil className="h-3 w-3 mr-1" /> Edit
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   <div className="flex justify-between border-b pb-2">
                     <span className="text-sm font-medium text-muted-foreground">Current Outstanding</span>
@@ -2080,6 +2248,15 @@ function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewP
           <CustomerTransactionsLedger id={id} />
         </TabsContent>
       </Tabs>
+      {/* Quick Opening Balance Modal */}
+      {isEditingOpeningBalance && customer && (
+        <QuickOpeningBalanceDialog
+          isOpen={isEditingOpeningBalance}
+          onClose={() => setIsEditingOpeningBalance(false)}
+          client={customer}
+          isVendor={isVendorContext}
+        />
+      )}
     </div>
   );
 }

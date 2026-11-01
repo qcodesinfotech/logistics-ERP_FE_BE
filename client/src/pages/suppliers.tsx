@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import {
-  Building2, Plus, Edit, Trash2, Eye, Landmark, Phone, FileText, Download, Trash, Globe, ShieldAlert, Loader2, CheckCircle, CreditCard, Upload
+  Building2, Plus, Edit, Trash2, Eye, Landmark, Phone, FileText, Download, Trash, Globe, ShieldAlert, Loader2, CheckCircle, CreditCard, Upload, Coins
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -50,6 +50,106 @@ const supplierFormSchema = z.object({
 
 type SupplierFormData = z.infer<typeof supplierFormSchema>;
 
+function QuickOpeningPayableDialog({
+  isOpen,
+  onClose,
+  supplier,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  supplier: Supplier | null;
+}) {
+  const [balance, setBalance] = useState("0.000");
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (supplier) {
+      setBalance(supplier.openingBalance || "0.000");
+    }
+  }, [supplier]);
+
+  const mutation = useMutation({
+    mutationFn: async (newBalance: string) => {
+      const res = await apiRequest("PATCH", `/api/suppliers/${supplier?.id}`, {
+        openingBalance: newBalance,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/suppliers/${supplier?.id}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
+      toast({
+        title: "Opening payable balance updated",
+        description: `${supplier?.name} balance recorded as ${parseFloat(balance || "0").toFixed(3)} BD`,
+      });
+      onClose();
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to update opening balance",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (!supplier) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Coins className="h-5 w-5 text-amber-500" />
+            Set Opening Payable Balance
+          </DialogTitle>
+          <DialogDescription>
+            Update initial opening payable amount owed to {supplier.name} ({supplier.companyName || "Vendor"}).
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="vendor-opening-balance-input">
+              Opening Payable Balance (BD)
+            </Label>
+            <div className="relative">
+              <Input
+                id="vendor-opening-balance-input"
+                type="number"
+                step="0.001"
+                placeholder="0.000"
+                value={balance}
+                onChange={(e) => setBalance(e.target.value)}
+                className="font-mono text-base pr-12"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">
+                BD
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Recorded as of the starting period to calculate accurate payables, vendor statements, and bank entries.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => mutation.mutate(balance)}
+            disabled={mutation.isPending}
+          >
+            {mutation.isPending ? "Saving..." : "Save Balance"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function SuppliersPage() {
   const [location, setLocation] = useLocation();
   const { id } = useParams<{ id?: string }>();
@@ -59,6 +159,7 @@ export default function SuppliersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [deletingSupplier, setDeletingSupplier] = useState<Supplier | null>(null);
+  const [editingOpeningBalanceSupplier, setEditingOpeningBalanceSupplier] = useState<Supplier | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   const hasRead = hasReadPermission("suppliers") || isSuperAdmin;
@@ -243,7 +344,22 @@ export default function SuppliersPage() {
                       <div className="text-sm">{supplier.phone || "—"}</div>
                       {supplier.email && <div className="text-xs text-muted-foreground">{supplier.email}</div>}
                     </TableCell>
-                    <TableCell className="text-right font-mono">{parseFloat(supplier.openingBalance || "0").toFixed(3)} BD</TableCell>
+                    <TableCell className="text-right font-mono" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span>{parseFloat(supplier.openingBalance || "0").toFixed(3)} BD</span>
+                        {hasWrite && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-amber-600"
+                            title="Edit Opening Payable Balance"
+                            onClick={() => setEditingOpeningBalanceSupplier(supplier)}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right font-mono font-semibold text-amber-700">{parseFloat(supplier.currentBalance || "0").toFixed(3)} BD</TableCell>
                     <TableCell><StatusBadge status={supplier.status} /></TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -290,6 +406,13 @@ export default function SuppliersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Quick Opening Payable Balance Dialog */}
+      <QuickOpeningPayableDialog
+        isOpen={!!editingOpeningBalanceSupplier}
+        onClose={() => setEditingOpeningBalanceSupplier(null)}
+        supplier={editingOpeningBalanceSupplier}
+      />
     </div>
   );
 }
@@ -305,6 +428,7 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
   const { data: supplier, isLoading } = useQuery<Supplier>({
     queryKey: [`/api/suppliers/${id}`],
   });
+  const [isEditingOpeningBalance, setIsEditingOpeningBalance] = useState(false);
 
   if (isLoading) {
     return (
@@ -403,9 +527,22 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
                   <CardTitle className="text-base flex items-center gap-2"><Landmark className="h-5 w-5 text-primary" /> Financial Profile</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-4 space-y-4">
-                  <div className="flex justify-between border-b pb-2">
+                  <div className="flex justify-between items-center border-b pb-2">
                     <span className="text-sm font-medium text-muted-foreground">Opening Balance</span>
-                    <span className="font-semibold font-mono">{parseFloat(supplier.openingBalance || "0").toFixed(3)} BD</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold font-mono">{parseFloat(supplier.openingBalance || "0").toFixed(3)} BD</span>
+                      {hasWrite && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs gap-1 border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-amber-700"
+                          onClick={() => setIsEditingOpeningBalance(true)}
+                        >
+                          <Edit className="h-3 w-3" />
+                          Edit
+                        </Button>
+                      )}
+                    </div>
                   </div>
                   <div className="flex justify-between border-b pb-2">
                     <span className="text-sm font-medium text-muted-foreground">Current Balance</span>
@@ -425,6 +562,13 @@ function SupplierDetailsView({ id, setLocation, hasWrite }: SupplierDetailsViewP
           <SupplierTransactionsLedger id={id} />
         </TabsContent>
       </Tabs>
+
+      {/* Quick Opening Payable Balance Dialog */}
+      <QuickOpeningPayableDialog
+        isOpen={isEditingOpeningBalance}
+        onClose={() => setIsEditingOpeningBalance(false)}
+        supplier={supplier}
+      />
     </div>
   );
 }
