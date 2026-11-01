@@ -493,7 +493,7 @@ interface CustomerFormViewProps {
 function CustomerFormView({ id, mode, hasWrite }: CustomerFormViewProps) {
   const [location, setLocation] = useLocation();
   const isVendorContext = location.startsWith("/logistics/vendors");
-  const listPath = isVendorContext ? "/logistics/vendors" : "/logistics/outlets";
+  const listPath = isVendorContext ? "/logistics/vendors" : "/logistics/customers";
   const entityLabel = isVendorContext ? "Vendor" : "Customer";
 
   const { toast } = useToast();
@@ -1752,7 +1752,7 @@ interface CustomerDetailsViewProps {
 
 function CustomerDetailsView({ id, setLocation, hasWrite }: CustomerDetailsViewProps) {
   const isVendorContext = window.location.pathname.startsWith("/logistics/vendors");
-  const listPath = isVendorContext ? "/logistics/vendors" : "/logistics/outlets";
+  const listPath = isVendorContext ? "/logistics/vendors" : "/logistics/customers";
   const entityLabel = isVendorContext ? "Vendor" : "Customer";
 
   const { data: customer, isLoading } = useQuery<Client>({

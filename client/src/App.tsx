@@ -95,6 +95,8 @@ function PrivateRouter() {
       <Route path="/logistics/routes" component={RoutesPage} />
       <Route path="/logistics/brands" component={RoutesPage} />
       <Route path="/logistics/outlets" component={RoutesPage} />
+      <Route path="/logistics/outlets/:id" component={CustomersPage} />
+      <Route path="/logistics/outlets/:id/edit" component={CustomersPage} />
       <Route path="/logistics/suppliers" component={SuppliersPage} />
       <Route path="/logistics/suppliers/:id" component={SuppliersPage} />
       <Route path="/logistics/transactions" component={TransactionsPage} />
