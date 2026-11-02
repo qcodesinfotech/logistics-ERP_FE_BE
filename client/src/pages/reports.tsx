@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,8 @@ export default function Reports() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>("all");
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>("all");
   const [selectedDriverId, setSelectedDriverId] = useState<string>("all");
+  const [selectedDeliveryClientId, setSelectedDeliveryClientId] = useState<string>("all");
+  const [selectedDeliverySubClientId, setSelectedDeliverySubClientId] = useState<string>("all");
   const [selectedAttendanceEmployeeId, setSelectedAttendanceEmployeeId] = useState<string>("all");
   const [selectedAttendanceCategory, setSelectedAttendanceCategory] = useState<string>("all");
 
@@ -175,9 +177,41 @@ export default function Reports() {
     enabled: activeReport === "driver-attendance",
   });
 
+  const { data: clientsList = [] } = useQuery<any[]>({
+    queryKey: ["/api/clients"],
+    enabled: activeReport === "driver-delivery",
+  });
+
+  const parentCustomerMap = useMemo(() => {
+    const map = new Map<string, string>();
+    clientsList.forEach((c: any) => map.set(c.id, c.name));
+    return map;
+  }, [clientsList]);
+
+  const mainCustomerOptions = useMemo(() => {
+    return clientsList
+      .filter((c: any) => !c.parentClientId)
+      .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+  }, [clientsList]);
+
+  const subCustomerOptions = useMemo(() => {
+    if (selectedDeliveryClientId !== "all") {
+      return clientsList
+        .filter((c: any) => c.parentClientId === selectedDeliveryClientId)
+        .sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+    }
+    return clientsList
+      .filter((c: any) => Boolean(c.parentClientId))
+      .map((c: any) => ({
+        ...c,
+        displayName: `${parentCustomerMap.get(c.parentClientId) || "Parent"} - ${c.name}`
+      }))
+      .sort((a: any, b: any) => (a.displayName || a.name || "").localeCompare(b.displayName || b.name || ""));
+  }, [clientsList, selectedDeliveryClientId, parentCustomerMap]);
+
   const { data: driverDeliveriesReport = [] } = useQuery<any[]>({
     queryKey: [
-      `/api/reports/driver-deliveries?driverId=${selectedDriverId === "all" ? "" : selectedDriverId}&startDate=${currentDates.start.toISOString().split('T')[0]}&endDate=${currentDates.end.toISOString().split('T')[0]}`
+      `/api/reports/driver-deliveries?driverId=${selectedDriverId === "all" ? "" : selectedDriverId}&clientId=${selectedDeliveryClientId === "all" ? "" : selectedDeliveryClientId}&subClientId=${selectedDeliverySubClientId === "all" ? "" : selectedDeliverySubClientId}&startDate=${currentDates.start.toISOString().split('T')[0]}&endDate=${currentDates.end.toISOString().split('T')[0]}`
     ],
     enabled: activeReport === "driver-delivery",
   });
@@ -1895,6 +1929,9 @@ export default function Reports() {
       "Completion Time": item.deliveredAt ? format(new Date(item.deliveredAt), "yyyy-MM-dd hh:mm a") : (item.deliveryTime || "-"),
       Driver: item.driverName,
       "Delivery Assistant": item.deliveryAssistantName || item.crewMemberName || "-",
+      "Customer": item.customerName || "-",
+      "Sub-customer": item.subCustomerName || "-",
+      "Customer / Account": item.customerDisplay || item.clientName || "-",
       Zone: item.zoneName || "-",
       Outlet: `${item.outletName} (${item.outletCode})`,
       Product: `${item.description} (${item.itemCode})`,
@@ -1919,6 +1956,9 @@ export default function Reports() {
         "Completion Time": "TOTALS",
         Driver: "",
         "Delivery Assistant": "",
+        "Customer": "",
+        "Sub-customer": "",
+        "Customer / Account": "",
         Zone: "",
         Outlet: "",
         Product: "",
@@ -1935,20 +1975,68 @@ export default function Reports() {
     return (
       <div className="space-y-4">
         <div className="flex gap-4 items-end justify-between flex-wrap no-print">
-          <div className="space-y-1">
-            <Label>Driver</Label>
-            <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="All Drivers" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Drivers</SelectItem>
-                {drivers.map((drv: any) => (
-                  <SelectItem key={drv.id} value={drv.id}>{drv.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="flex gap-4 items-end flex-wrap">
+            <div className="space-y-1">
+              <Label>Customer</Label>
+              <Select value={selectedDeliveryClientId} onValueChange={(val) => {
+                setSelectedDeliveryClientId(val);
+                setSelectedDeliverySubClientId("all");
+              }}>
+                <SelectTrigger className="w-[190px]">
+                  <SelectValue placeholder="All Customers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Customers</SelectItem>
+                  {mainCustomerOptions.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Sub-customer</Label>
+              <Select value={selectedDeliverySubClientId} onValueChange={(val) => {
+                setSelectedDeliverySubClientId(val);
+                if (val !== "all") {
+                  const subObj = clientsList.find((c: any) => c.id === val);
+                  if (subObj?.parentClientId && selectedDeliveryClientId === "all") {
+                    setSelectedDeliveryClientId(subObj.parentClientId);
+                  }
+                }
+              }}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="All Sub-customers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    {selectedDeliveryClientId === "all" ? "All Sub-customers" : `All ${parentCustomerMap.get(selectedDeliveryClientId) || "Customer"} Accounts`}
+                  </SelectItem>
+                  {subCustomerOptions.map((sub: any) => (
+                    <SelectItem key={sub.id} value={sub.id}>
+                      {sub.displayName || sub.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>Driver</Label>
+              <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="All Drivers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Drivers</SelectItem>
+                  {drivers.map((drv: any) => (
+                    <SelectItem key={drv.id} value={drv.id}>{drv.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
+
           <Button onClick={() => exportToCSV("daily-delivery-report", csvData)} variant="outline">
             <Printer className="mr-2 h-4 w-4" />
             Export CSV
@@ -2009,15 +2097,16 @@ export default function Reports() {
         <Card className="overflow-hidden">
           <CardContent className="p-0">
             <div className="overflow-x-auto w-full">
-              <Table className="min-w-[1600px] w-full">
+              <Table className="min-w-[1750px] w-full">
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Check-In</TableHead>
                     <TableHead className="whitespace-nowrap px-3 py-3 w-[100px]">Check-Out</TableHead>
                     <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Completion</TableHead>
-                    <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Driver Name</TableHead>
-                    <TableHead className="whitespace-nowrap px-3 py-3 w-[150px]">Delivery Assistant</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[140px]">Driver Name</TableHead>
+                    <TableHead className="whitespace-nowrap px-3 py-3 w-[140px]">Delivery Assistant</TableHead>
                     <TableHead className="whitespace-nowrap px-3 py-3 w-[110px]">Zone/Route</TableHead>
+                    <TableHead className="px-3 py-3 min-w-[170px]">Customer / Account</TableHead>
                     <TableHead className="px-3 py-3 min-w-[200px]">Outlet</TableHead>
                     <TableHead className="px-3 py-3 min-w-[240px]">Product / Item</TableHead>
                     <TableHead className="whitespace-nowrap text-right px-3 py-3 w-[95px]">Req. Qty</TableHead>
@@ -2054,6 +2143,16 @@ export default function Reports() {
                         </TableCell>
                         <TableCell className="text-xs whitespace-nowrap px-3 py-2.5">{row.zoneName || "-"}</TableCell>
                         <TableCell className="px-3 py-2.5">
+                          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            {row.customerDisplay || row.clientName || "-"}
+                          </div>
+                          {row.subCustomerName && (
+                            <div className="text-[11px] text-muted-foreground font-normal">
+                              {row.subCustomerName}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="px-3 py-2.5">
                           <div className="text-sm font-semibold">{row.outletName}</div>
                           <div className="text-xs text-muted-foreground whitespace-nowrap">Code: {row.outletCode}</div>
                         </TableCell>
@@ -2085,7 +2184,7 @@ export default function Reports() {
                   })}
                   {driverDeliveriesReport.length > 0 && (
                     <TableRow className="bg-slate-100 font-bold hover:bg-slate-100 dark:bg-slate-800">
-                      <TableCell colSpan={8} className="text-right px-3 py-2.5">Totals:</TableCell>
+                      <TableCell colSpan={9} className="text-right px-3 py-2.5">Totals:</TableCell>
                       <TableCell className="text-right font-mono px-3 py-2.5">
                         {driverDeliveriesReport.reduce((sum: number, row: any) => sum + parseFloat(row.requestedQty || row.weight || "0"), 0).toFixed(3)}
                       </TableCell>
@@ -2103,7 +2202,7 @@ export default function Reports() {
                   )}
                   {driverDeliveriesReport.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={16} className="text-center py-8 text-muted-foreground">
                         No delivery logs found.
                       </TableCell>
                     </TableRow>

@@ -4642,8 +4642,8 @@ export async function registerRoutes(
 
   const handleDeliveriesReport = async (req: AuthRequest, res: Response) => {
     try {
-      const { driverId, startDate, endDate } = req.query as any;
-      const report = await storage.getDriverDeliveriesReport(driverId, startDate, endDate);
+      const { driverId, startDate, endDate, clientId, subClientId } = req.query as any;
+      const report = await storage.getDriverDeliveriesReport(driverId, startDate, endDate, clientId, subClientId);
       res.json(report);
     } catch (error: any) {
       console.error("Error in deliveries report:", error);

@@ -9346,7 +9346,7 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string): Promise<any[]> {
+  async getDriverDeliveriesReport(driverId?: string, startDate?: string, endDate?: string, clientId?: string, subClientId?: string): Promise<any[]> {
     await ensureDriverTablesSchema();
     const conditions = [];
     if (driverId) {
@@ -9362,6 +9362,13 @@ export class DatabaseStorage implements IStorage {
     }
     if (endDate) {
       conditions.push(sql`dispatch_sheets.date <= ${endDate}`);
+    }
+
+    const effectiveClientSql = sql`COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}, ${routes.clientId})`;
+    if (subClientId && subClientId !== 'all') {
+      conditions.push(sql`${effectiveClientSql} = ${subClientId}`);
+    } else if (clientId && clientId !== 'all') {
+      conditions.push(sql`(${effectiveClientSql} = ${clientId} OR ${effectiveClientSql} IN (SELECT id FROM clients WHERE parent_client_id = ${clientId}))`);
     }
 
     const query = db.select({
@@ -9393,6 +9400,9 @@ export class DatabaseStorage implements IStorage {
       
       sheetId: dispatchItems.sheetId,
       sheetDate: dispatchSheets.date,
+      clientId: sql<string>`COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}, ${routes.clientId})`,
+      clientName: clients.name,
+      parentClientId: clients.parentClientId,
       
       outletName: outlets.name,
       outletCode: outlets.code,
@@ -9403,7 +9413,8 @@ export class DatabaseStorage implements IStorage {
     .innerJoin(dispatchItems, eq(dispatchDeliveries.dispatchItemId, dispatchItems.id))
     .innerJoin(dispatchSheets, eq(dispatchItems.sheetId, dispatchSheets.id))
     .leftJoin(outlets, eq(dispatchItems.outletId, outlets.id))
-    .leftJoin(routes, eq(dispatchItems.routeId, routes.id));
+    .leftJoin(routes, eq(dispatchItems.routeId, routes.id))
+    .leftJoin(clients, eq(clients.id, sql`COALESCE(${dispatchSheets.clientId}, ${outlets.clientId}, ${routes.clientId})`));
 
     if (conditions.length > 0) {
       query.where(and(...conditions));
@@ -9529,6 +9540,9 @@ export class DatabaseStorage implements IStorage {
     const allEmployeesList = await this.getEmployees();
     const employeeNameMap = new Map(allEmployeesList.map(e => [e.id, e.name]));
 
+    const allClients = await this.getClients();
+    const clientMap = new Map(allClients.map(c => [c.id, c]));
+
     return list.map(item => {
       const sId = item.sheetId;
       const outletId = item.outletId;
@@ -9600,6 +9614,13 @@ export class DatabaseStorage implements IStorage {
 
       const deliveryAssistantName = assignedCrewId ? (employeeNameMap.get(assignedCrewId) || "Unknown Assistant") : null;
 
+      const directClient = item.clientId ? clientMap.get(item.clientId) : null;
+      const parentClient = directClient?.parentClientId ? clientMap.get(directClient.parentClientId) : null;
+
+      const customerName = parentClient?.name || directClient?.name || (item.clientName || "Unassigned");
+      const subCustomerName = parentClient ? directClient?.name : null;
+      const customerDisplay = parentClient ? `${parentClient.name} - ${directClient?.name}` : (directClient?.name || item.clientName || "Unassigned");
+
       return {
         ...item,
         routeId: effectiveZoneId || item.routeId,
@@ -9608,6 +9629,12 @@ export class DatabaseStorage implements IStorage {
         deliveryAssistantId: assignedCrewId,
         deliveryAssistantName: deliveryAssistantName,
         crewMemberName: deliveryAssistantName,
+        customerName,
+        subCustomerName,
+        customerDisplay,
+        parentClientId: parentClient?.id || null,
+        parentClientName: parentClient?.name || null,
+        clientName: directClient?.name || item.clientName || null,
       };
     });
   }
