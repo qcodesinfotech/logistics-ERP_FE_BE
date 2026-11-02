@@ -1193,19 +1193,25 @@ function OutletDeliveryDialog({
 
 // ===== Zone Override Dialog =====
 function MoveOverrideDialog({
-  title, targetName, zones, boardZones, items = [], onClose, onSave,
+  title, targetName, zones, boardZones, items = [], currentSheetDate, onClose, onSave,
 }: {
   title: string;
   targetName: string;
   zones: Zone[];
   boardZones?: ZoneGroup[];
   items?: DispatchItem[];
+  currentSheetDate?: string;
   onClose: () => void;
-  onSave: (zoneId: string, truckId: string | null, reason: string, storageTypes?: string[]) => void;
+  onSave: (zoneId: string, truckId: string | null, reason: string, storageTypes?: string[], targetDate?: string) => void;
 }) {
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const defaultDate = currentSheetDate && currentSheetDate < todayStr ? todayStr : (currentSheetDate || todayStr);
+  const [deliveryDate, setDeliveryDate] = useState<string>(defaultDate);
   const [zoneId, setZoneId] = useState("");
   const [truckId, setTruckId] = useState("");
   const [reason, setReason] = useState("");
+
+  const isCrossDateTransfer = Boolean(currentSheetDate && deliveryDate && deliveryDate !== currentSheetDate);
 
   // Extract distinct storage types present in these items
   const availableTypes = useMemo(() => {
@@ -1231,6 +1237,7 @@ function MoveOverrideDialog({
 
   const handleConfirm = () => {
     if (!zoneId) return;
+    if (!deliveryDate) return;
     if (hasMultipleTypes && selectedTypes.length === 0) return;
 
     // If items have specific storage types, always pass selectedTypes so ONLY the selected categories move.
@@ -1240,7 +1247,7 @@ function MoveOverrideDialog({
       ? selectedTypes
       : undefined;
 
-    onSave(zoneId, truckId || null, reason, typesToMove);
+    onSave(zoneId, isCrossDateTransfer ? null : (truckId || null), reason, typesToMove, deliveryDate);
   };
 
   return (
@@ -1253,7 +1260,34 @@ function MoveOverrideDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">Temporarily reassign this to a different route for this dispatch sheet.</p>
+          <p className="text-sm text-muted-foreground">
+            {isCrossDateTransfer
+              ? `Transfer this delivery to ${deliveryDate}'s dispatch sheet.`
+              : "Temporarily reassign this to a different route for this dispatch sheet."}
+          </p>
+
+          {/* Delivery Date Selection */}
+          <div className="space-y-1.5 border rounded-lg p-3 bg-slate-50/70 dark:bg-slate-900/50">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+              <Calendar className="h-3.5 w-3.5 text-amber-600" />
+              Delivery Date <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              type="date"
+              className="h-8 text-xs font-medium bg-white dark:bg-slate-800"
+              value={deliveryDate}
+              onChange={(e) => setDeliveryDate(e.target.value)}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {isCrossDateTransfer ? (
+                <span className="text-amber-600 font-medium">
+                  Delivery date differs from current sheet ({currentSheetDate}). Items will be transferred to <strong>{deliveryDate}</strong>'s dispatch sheet.
+                </span>
+              ) : (
+                <span>Delivering on <strong>{deliveryDate || currentSheetDate}</strong> (this sheet).</span>
+              )}
+            </p>
+          </div>
 
           {/* Single Storage Type: Display clear indicator so the user sees what is being moved */}
           {availableTypes.length === 1 && (
@@ -1337,7 +1371,7 @@ function MoveOverrideDialog({
               </SelectContent>
             </Select>
           </div>
-          {zoneId && (
+          {zoneId && !isCrossDateTransfer && (
             <div className="space-y-2">
               <Label>Target Truck / Trip (optional)</Label>
               <Select value={truckId || "any"} onValueChange={(v) => setTruckId(v === "any" ? "" : v)}>
@@ -1362,19 +1396,24 @@ function MoveOverrideDialog({
               </Select>
             </div>
           )}
+          {zoneId && isCrossDateTransfer && (
+            <div className="p-2.5 rounded-md bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-800 dark:text-amber-300">
+              ℹ️ Items will be transferred to <strong>{deliveryDate}</strong>'s dispatch sheet under the selected route. Truck and trip assignment will be managed on that day's board.
+            </div>
+          )}
           <div className="space-y-2">
             <Label>Reason (optional)</Label>
-            <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Truck at max capacity" />
+            <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Moved pending from previous dispatch" />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button
-            disabled={!zoneId || (hasMultipleTypes && selectedTypes.length === 0)}
+            disabled={!zoneId || !deliveryDate || (hasMultipleTypes && selectedTypes.length === 0)}
             onClick={handleConfirm}
             className="bg-amber-500 hover:bg-amber-600 text-white"
           >
-            Confirm Move
+            {isCrossDateTransfer ? "Transfer to Date" : "Confirm Move"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -5796,30 +5835,96 @@ export default function DailyDispatchPage() {
           zones={zones}
           boardZones={boardData?.zones || []}
           items={overrideDialog.items}
+          currentSheetDate={selectedDate}
           onClose={() => setOverrideDialog(null)}
-          onSave={(zoneId, truckId, reason, storageTypes) => overrideMutation.mutate({
-            sheetId: boardSheetId,
-            outletId: overrideDialog.outletId,
-            outletCode: overrideDialog.outletCode,
-            storageTypes: storageTypes && storageTypes.length > 0 ? storageTypes : undefined,
-            overrideZoneId: zoneId,
-            overrideTruckId: truckId,
-            reason,
-          })}
+          onSave={async (zoneId, truckId, reason, storageTypes, targetDate) => {
+            const finalDate = targetDate || selectedDate;
+            if (finalDate && selectedDate && finalDate !== selectedDate) {
+              const itemsToMove = (overrideDialog.items || []).filter(item => {
+                if (!storageTypes || storageTypes.length === 0) return true;
+                return storageTypes.some(st => (item.storageType || "").trim().toLowerCase() === st.toLowerCase());
+              });
+              const itemIds = itemsToMove.map(i => i.id);
+              if (itemIds.length === 0) {
+                toast({ title: "No items match selected categories", variant: "destructive" });
+                return;
+              }
+              try {
+                const res = await apiRequest("POST", "/api/dispatch/transfer-pending", {
+                  itemIds,
+                  targetDate: finalDate,
+                  targetRouteId: zoneId || undefined,
+                  remark: reason || `Transferred from ${selectedDate}`,
+                });
+                const data = await res.json();
+                toast({
+                  title: "Transferred Successfully",
+                  description: `Transferred ${data.transferredCount || itemIds.length} item(s) to ${finalDate} route.`
+                });
+                queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+                queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+                queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+                queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith("/api/dispatch/") });
+                setOverrideDialog(null);
+              } catch (err: any) {
+                toast({ title: getErrorMessage(err), variant: "destructive" });
+              }
+            } else {
+              overrideMutation.mutate({
+                sheetId: boardSheetId,
+                outletId: overrideDialog.outletId,
+                outletCode: overrideDialog.outletCode,
+                storageTypes: storageTypes && storageTypes.length > 0 ? storageTypes : undefined,
+                overrideZoneId: zoneId,
+                overrideTruckId: truckId,
+                reason,
+              });
+            }
+          }}
         />
       )}
 
       {itemOverrideDialog && (
         <MoveOverrideDialog
           title="Move Item"
-          targetName={itemOverrideDialog.itemCode}
+          targetName={`${itemOverrideDialog.itemCode} - ${itemOverrideDialog.description || ''}`}
           zones={zones}
           boardZones={boardData?.zones || []}
           items={[itemOverrideDialog]}
+          currentSheetDate={selectedDate}
           onClose={() => setItemOverrideDialog(null)}
-          onSave={(zoneId, truckId) => itemOverrideMutation.mutate({
-            itemId: itemOverrideDialog.id, overrideRouteId: zoneId // Item level override Truck might need its own API field if needed, but not requested here
-          })}
+          onSave={async (zoneId, truckId, reason, storageTypes, targetDate) => {
+            const finalDate = targetDate || selectedDate;
+            if (finalDate && selectedDate && finalDate !== selectedDate) {
+              try {
+                const res = await apiRequest("POST", "/api/dispatch/transfer-pending", {
+                  itemIds: [itemOverrideDialog.id],
+                  targetDate: finalDate,
+                  targetRouteId: zoneId || undefined,
+                  remark: reason || `Transferred from ${selectedDate}`,
+                });
+                const data = await res.json();
+                toast({
+                  title: "Item Transferred Successfully",
+                  description: `Transferred ${itemOverrideDialog.itemCode} to ${finalDate}.`
+                });
+                queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+                queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+                queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/dispatch/sheets"] });
+                queryClient.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith("/api/dispatch/") });
+                setItemOverrideDialog(null);
+              } catch (err: any) {
+                toast({ title: getErrorMessage(err), variant: "destructive" });
+              }
+            } else {
+              itemOverrideMutation.mutate({
+                itemId: itemOverrideDialog.id,
+                overrideRouteId: zoneId
+              });
+            }
+          }}
         />
       )}
 
@@ -9460,6 +9565,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
   const { user } = useAuth();
   const isAdmin = user?.role?.toLowerCase().includes("admin");
   const isSupervisor = true; // TODO: link to user role
+  const canManageDeliveries = isAdmin || isSupervisor;
 
   const revertMutation = useMutation({
     mutationFn: async (dispatchItemIds: string | string[]) => {
@@ -9479,6 +9585,8 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
     onSuccess: () => {
       toast({ title: "Reverted to pending successfully" });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/completed-deliveries"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+      queryClient.invalidateQueries({ predicate: (query) => typeof query.queryKey[0] === 'string' && query.queryKey[0].startsWith("/api/dispatch/") });
     },
     onError: (err: any) => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
@@ -9784,7 +9892,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                     <th className="py-2 px-3 font-semibold text-slate-700 text-right w-24">Delivered</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 w-28 border-r">Status</th>
                     <th className="py-2 px-3 font-semibold text-slate-700 w-40">Driver</th>
-                    {isAdmin && <th className="py-2 px-3 font-semibold text-slate-700 w-20 text-right">Actions</th>}
+                    {canManageDeliveries && <th className="py-2 px-3 font-semibold text-slate-700 w-24 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -9793,7 +9901,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                     return (
                       <React.Fragment key={zone.zoneId}>
                         <tr className="bg-slate-100/60 hover:bg-slate-100 cursor-pointer font-semibold text-slate-800" onClick={() => toggleRoute(zone.zoneId)}>
-                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={isAdmin ? 8 : 7}>
+                          <td className="py-2 px-3 border-r flex items-center gap-1.5" colSpan={canManageDeliveries ? 8 : 7}>
                             {isRouteExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                             <MapPin className="h-3.5 w-3.5 text-primary" />
                             {zone.zoneName}
@@ -9819,7 +9927,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                           return (
                             <React.Fragment key={outletId}>
                               <tr className="hover:bg-slate-50 text-slate-700 group">
-                                <td className="py-1.5 px-3 border-r bg-slate-50/50" colSpan={isAdmin ? 8 : 7}>
+                                <td className="py-1.5 px-3 border-r bg-slate-50/50" colSpan={canManageDeliveries ? 8 : 7}>
                                   <div className="flex items-center gap-2 flex-nowrap w-full cursor-pointer" onClick={() => toggleOutlet(outletId)}>
                                     {isOutletExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
                                     <span className="font-medium text-sm whitespace-nowrap">{outlet.outletName}</span>
@@ -9931,7 +10039,7 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                                         >
                                           <Share2 className="h-3 w-3 mr-1" /> Share PDF
                                         </Button>
-                                        {(isSupervisor || isAdmin) && (
+                                        {canManageDeliveries && (
                                           <Button
                                             variant="outline"
                                             size="sm"
@@ -9944,8 +10052,9 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                                               }
                                             }}
                                             disabled={revertMutation.isPending}
+                                            title={`Revert all ${outlet.items.length} items in this outlet to pending`}
                                           >
-                                            <RefreshCw className="h-3 w-3 mr-1" /> Revert
+                                            <RefreshCw className="h-3 w-3 mr-1" /> Revert All ({outlet.items.length})
                                           </Button>
                                         )}
                                       </>
@@ -9974,8 +10083,24 @@ function CompletedDeliveriesTab({ selectedDate, initialClientId = "all", onManag
                                     <td className="py-1.5 px-3 text-xs max-w-[150px] truncate" title={p.driverName}>
                                       {p.driverName}
                                     </td>
-                                    {isAdmin && (
-                                      <td className="py-1.5 px-3 text-right"></td>
+                                    {canManageDeliveries && (
+                                      <td className="py-1.5 px-3 text-right whitespace-nowrap">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-[10px] px-2 print:hidden bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200 font-medium inline-flex items-center gap-1"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (confirm(`Revert item ${p.itemCode} (${p.description || ""}) to pending?`)) {
+                                              revertMutation.mutate(p.dispatchItemId || p.id);
+                                            }
+                                          }}
+                                          disabled={revertMutation.isPending}
+                                          title="Revert this single item to pending"
+                                        >
+                                          <RefreshCw className="h-2.5 w-2.5" /> Revert
+                                        </Button>
+                                      </td>
                                     )}
                                   </tr>
                                 );
