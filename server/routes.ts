@@ -6668,7 +6668,21 @@ export async function registerRoutes(
         }
 
         const bcryptLib = await import("bcrypt");
-        const isValid = await bcryptLib.default.compare(password, user.password);
+        let isValid = await bcryptLib.default.compare(password, user.password);
+        if (!isValid && user.employeeId) {
+          const [emp] = await db.select().from(schema.employees)
+            .where(eq(schema.employees.id, user.employeeId))
+            .limit(1);
+          if (emp && emp.password === password) {
+            isValid = true;
+            try {
+              const newHashed = await bcryptLib.default.hash(password, 10);
+              await db.update(schema.users).set({ password: newHashed }).where(eq(schema.users.id, user.id));
+            } catch (syncErr) {
+              console.warn("Failed to update user password hash:", syncErr);
+            }
+          }
+        }
         if (!isValid) {
           return res.status(401).json({ message: "Invalid username or password" });
         }
@@ -6680,11 +6694,11 @@ export async function registerRoutes(
       if (isEmployeeLogin) {
         userPosition = employeeObj.position || "";
         userDepartment = employeeObj.department || "";
-        if (employeeObj.position?.toLowerCase() === "driver") {
+        if (employeeObj.position?.toLowerCase() === "driver" || employeeObj.position?.toLowerCase().includes("driver")) {
           isDriver = true;
         }
       } else {
-        if (user!.role?.toLowerCase() === "driver") {
+        if (user!.role?.toLowerCase() === "driver" || user!.role?.toLowerCase().includes("driver")) {
           isDriver = true;
           userPosition = "driver";
         }
@@ -6695,7 +6709,7 @@ export async function registerRoutes(
           if (emp) {
             userPosition = emp.position || userPosition || "";
             userDepartment = emp.department || "";
-            if (emp.position?.toLowerCase() === "driver") {
+            if (emp.position?.toLowerCase() === "driver" || emp.position?.toLowerCase().includes("driver")) {
               isDriver = true;
             }
           }
