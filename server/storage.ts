@@ -4429,10 +4429,12 @@ export class DatabaseStorage implements IStorage {
       console.error("Error reconciling driver attendance in getDispatchBoard:", attSyncErr);
     }
 
-    // Get all driver names (from both users and employees table)
+    // Get all driver & crew names (from both users and employees table)
     const allDriverIds = Array.from(new Set([
       ...allDriverZones.map(dz => dz.driverId),
       ...truckAssigns.map(t => t.driverId).filter(Boolean) as string[],
+      ...truckAssigns.map(t => t.crewMemberId).filter(Boolean) as string[],
+      ...truckAssigns.map(t => t.secondCrewMemberId).filter(Boolean) as string[],
       ...allTrucks.map(t => t.assignedDriverId).filter(Boolean) as string[],
       ...sheetAttendances.map(a => a.driverId).filter(Boolean) as string[],
     ]));
@@ -4441,7 +4443,7 @@ export class DatabaseStorage implements IStorage {
     
     const driverMap = new Map<string, any>();
     for (const emp of allEmployees) {
-      driverMap.set(emp.id, { id: emp.id, name: emp.name, username: emp.employeeCode, role: "driver" });
+      driverMap.set(emp.id, { id: emp.id, name: emp.name, username: emp.employeeCode, role: emp.position?.toLowerCase().includes("driver") ? "driver" : "crew" });
     }
     for (const u of allUsers) {
       driverMap.set(u.id, u);
@@ -4490,7 +4492,8 @@ export class DatabaseStorage implements IStorage {
         const configDriverIds = zoneToDriverIds.get(z.id) || [];
         const zoneTrucks = truckAssigns.filter(t => t.zoneId === z.id);
         const truckDriverIds = zoneTrucks.map(t => t.driverId || truckMap.get(t.truckId)?.assignedDriverId).filter(Boolean) as string[];
-        const combinedDriverIds = Array.from(new Set([...configDriverIds, ...truckDriverIds]));
+        const truckCrewIds = zoneTrucks.map(t => t.crewMemberId).concat(zoneTrucks.map(t => t.secondCrewMemberId)).filter(Boolean) as string[];
+        const combinedDriverIds = Array.from(new Set([...configDriverIds, ...truckDriverIds, ...truckCrewIds]));
 
         board[z.id] = {
           zoneId: z.id,
