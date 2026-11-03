@@ -288,7 +288,7 @@ export default function Dashboard() {
           </Button>
 
           <Button asChild size="sm" className="h-9 gap-1.5 shadow-sm bg-primary hover:bg-primary/90 cursor-pointer">
-            <Link href="/daily-dispatch">
+            <Link href="/logistics/daily-dispatch">
               <Truck className="h-4 w-4" />
               <span>Dispatch Board</span>
             </Link>
@@ -914,10 +914,10 @@ export default function Dashboard() {
                   </p>
                   <div className="mt-2.5 flex items-center gap-2">
                     <Button variant="outline" size="sm" asChild className="h-7 text-[11px] px-2.5 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20">
-                      <Link href="/fleet">Track Vehicle</Link>
+                      <Link href="/logistics/fleet">Track Vehicle</Link>
                     </Button>
                     <Button variant="ghost" size="sm" asChild className="h-7 text-[11px] px-2.5 text-muted-foreground hover:text-foreground">
-                      <Link href="/daily-dispatch">Reassign Trip</Link>
+                      <Link href="/logistics/daily-dispatch">Reassign Trip</Link>
                     </Button>
                   </div>
                 </div>
@@ -942,7 +942,7 @@ export default function Dashboard() {
                   </p>
                   <div className="mt-2.5 flex items-center gap-2">
                     <Button variant="outline" size="sm" asChild className="h-7 text-[11px] px-2.5 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20">
-                      <Link href="/orders">Inspect Order</Link>
+                      <Link href="/logistics/orders">Inspect Order</Link>
                     </Button>
                   </div>
                 </div>
@@ -1049,7 +1049,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-          <Link href="/daily-dispatch">
+          <Link href="/logistics/daily-dispatch">
             <div className="group p-4 rounded-xl border border-border/70 hover:border-primary/50 bg-background hover:bg-muted/30 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-sm">
               <div className="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
                 <Truck className="h-5 w-5" />
@@ -1059,7 +1059,7 @@ export default function Dashboard() {
             </div>
           </Link>
 
-          <Link href="/orders">
+          <Link href="/logistics/orders">
             <div className="group p-4 rounded-xl border border-border/70 hover:border-primary/50 bg-background hover:bg-muted/30 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-sm">
               <div className="h-10 w-10 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
                 <PackageSearch className="h-5 w-5" />
@@ -1079,7 +1079,7 @@ export default function Dashboard() {
             </div>
           </Link>
 
-          <Link href="/fleet">
+          <Link href="/logistics/fleet">
             <div className="group p-4 rounded-xl border border-border/70 hover:border-primary/50 bg-background hover:bg-muted/30 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-sm">
               <div className="h-10 w-10 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
                 <Navigation className="h-5 w-5" />
@@ -1089,7 +1089,7 @@ export default function Dashboard() {
             </div>
           </Link>
 
-          <Link href="/driver-hub">
+          <Link href="/logistics/driver-hub">
             <div className="group p-4 rounded-xl border border-border/70 hover:border-primary/50 bg-background hover:bg-muted/30 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-sm">
               <div className="h-10 w-10 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
                 <Users className="h-5 w-5" />

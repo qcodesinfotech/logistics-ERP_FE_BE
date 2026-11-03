@@ -116,6 +116,29 @@ function PrivateRouter() {
       <Route path="/logistics/brand-invoices" component={BrandInvoicesPage} />
       <Route path="/settings" component={SettingsPage} />
 
+      {/* Aliases for direct/legacy navigation */}
+      <Route path="/daily-dispatch">
+        {() => <Redirect to="/logistics/daily-dispatch" />}
+      </Route>
+      <Route path="/dispatch">
+        {() => <Redirect to="/logistics/dispatch" />}
+      </Route>
+      <Route path="/orders">
+        {() => <Redirect to="/logistics/orders" />}
+      </Route>
+      <Route path="/fleet">
+        {() => <Redirect to="/logistics/fleet" />}
+      </Route>
+      <Route path="/driver-hub">
+        {() => <Redirect to="/logistics/driver-hub" />}
+      </Route>
+      <Route path="/contracts">
+        {() => <Redirect to="/logistics/contracts" />}
+      </Route>
+      <Route path="/rfq">
+        {() => <Redirect to="/logistics/rfq" />}
+      </Route>
+
       <Route component={NotFound} />
     </Switch>
   );
