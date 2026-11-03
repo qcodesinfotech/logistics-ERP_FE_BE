@@ -167,6 +167,14 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
     }, 10000);
   };
 
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error("[process] Unhandled Rejection at:", promise, "reason:", reason);
+  });
+
+  process.on("uncaughtException", (err) => {
+    console.error("[process] Uncaught Exception:", err);
+  });
+
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 })();

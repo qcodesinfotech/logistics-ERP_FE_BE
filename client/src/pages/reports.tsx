@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart3, Users, Truck, ShoppingCart, Receipt, CreditCard, TrendingUp, Calendar, Building2, AlertTriangle, PackageX, Package, Scale, Landmark, Wallet, Briefcase, Printer, Wrench, FileSpreadsheet } from "lucide-react";
+import { BarChart3, Users, Truck, ShoppingCart, Receipt, CreditCard, TrendingUp, Calendar, Building2, AlertTriangle, PackageX, Package, Scale, Landmark, Wallet, Briefcase, Printer, Wrench, FileSpreadsheet, Layers, Search, ChevronRight } from "lucide-react";
 import CustomerReportView from "@/components/customer-report-view";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -23,6 +23,8 @@ type DateRange = "today" | "week" | "month" | "year" | "custom";
 
 export default function Reports() {
   const [activeReport, setActiveReport] = useState("trial-balance");
+  const [activeCategory, setActiveCategory] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [dateRange, setDateRange] = useState<DateRange>("month");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -246,11 +248,13 @@ export default function Reports() {
     dateField: keyof T
   ): T[] => {
     const { start, end } = getDateFilter();
+    const effectiveShopId = shopId || currentShopId;
+    const effectiveBranchId = branchId || currentBranchId;
     return items.filter(item => {
       const itemDate = new Date(item[dateField] as string);
       const dateMatch = itemDate >= start && itemDate <= end;
-      const shopMatch = !shopId || item.shopId === shopId;
-      const branchMatch = !branchId || item.branchId === branchId;
+      const shopMatch = !effectiveShopId || item.shopId === effectiveShopId;
+      const branchMatch = !effectiveBranchId || item.branchId === effectiveBranchId;
       return dateMatch && shopMatch && branchMatch;
     });
   };
@@ -274,24 +278,41 @@ export default function Reports() {
   const vatAccount = chartOfAccounts.find((acc: any) => acc.accountCode === "2150");
   const totalVatPayable = vatAccount ? parseFloat(vatAccount.balance || "0") : 0;
 
-  const reportTypes = [
-    { id: "overall", label: "Overall Income & Expense", icon: TrendingUp },
-    { id: "trial-balance", label: "Trial Balance", icon: Scale },
-    { id: "balance-sheet", label: "Balance Sheet", icon: Landmark },
-    { id: "profit-loss", label: "Profit & Loss", icon: TrendingUp },
-    { id: "daily", label: "Daily Summary", icon: Calendar },
-    { id: "salary", label: "Salary Report", icon: Wallet },
-    { id: "petty-cash", label: "Petty Cash Report", icon: Wallet },
-    { id: "employee-work", label: "Employee Work Report", icon: Users },
-    { id: "driver-attendance", label: "Attendance Report", icon: Users },
-    { id: "driver-delivery", label: "Daily Delivery Report", icon: Truck },
-    { id: "customer-activity-utilization", label: "Customer Activity & Utilization", icon: FileSpreadsheet },
-    { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck },
-    { id: "trip-profitability", label: "Trip Profitability", icon: TrendingUp },
-    { id: "vehicle-profitability", label: "Vehicle Profitability", icon: Truck },
-    { id: "customer-profitability", label: "Customer Profitability", icon: Users },
-    { id: "receivables-aging", label: "Receivables Aging", icon: Scale },
+  const reportCategories = [
+    { id: "all", label: "All Reports", count: 16 },
+    { id: "finance", label: "Finance & Accounts", count: 7, icon: Landmark },
+    { id: "logistics", label: "Logistics & Fleet", count: 6, icon: Truck },
+    { id: "hr", label: "HR & Workforce", count: 3, icon: Users },
   ];
+
+  const reportTypes = [
+    // Finance & Accounts
+    { id: "overall", label: "Overall Income & Expense", icon: TrendingUp, category: "finance" },
+    { id: "trial-balance", label: "Trial Balance", icon: Scale, category: "finance" },
+    { id: "balance-sheet", label: "Balance Sheet", icon: Landmark, category: "finance" },
+    { id: "profit-loss", label: "Profit & Loss", icon: TrendingUp, category: "finance" },
+    { id: "daily", label: "Daily Summary", icon: Calendar, category: "finance" },
+    { id: "petty-cash", label: "Petty Cash Report", icon: Wallet, category: "finance" },
+    { id: "receivables-aging", label: "Receivables Aging", icon: Scale, category: "finance" },
+
+    // Logistics & Fleet
+    { id: "driver-delivery", label: "Daily Delivery Report", icon: Truck, category: "logistics" },
+    { id: "logistics-kpi", label: "Logistics KPIs", icon: Truck, category: "logistics" },
+    { id: "customer-activity-utilization", label: "Customer Activity & Utilization", icon: FileSpreadsheet, category: "logistics" },
+    { id: "trip-profitability", label: "Trip Profitability", icon: TrendingUp, category: "logistics" },
+    { id: "vehicle-profitability", label: "Vehicle Profitability", icon: Truck, category: "logistics" },
+    { id: "customer-profitability", label: "Customer Profitability", icon: Users, category: "logistics" },
+
+    // HR & Operations
+    { id: "salary", label: "Salary Report", icon: Wallet, category: "hr" },
+    { id: "employee-work", label: "Employee Work Report", icon: Users, category: "hr" },
+    { id: "driver-attendance", label: "Attendance Report", icon: Users, category: "hr" },
+  ];
+
+  const filteredReports = useMemo(() => {
+    if (activeCategory === "all") return reportTypes;
+    return reportTypes.filter(r => r.category === activeCategory);
+  }, [activeCategory]);
 
   const filteredBranches = shopId ? branches.filter(b => b.shopId === shopId) : branches;
 
@@ -2043,53 +2064,67 @@ export default function Reports() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-green-600">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
+          <Card className="min-w-0 overflow-hidden shadow-xs border-border/80 hover:shadow-sm transition-all">
+            <CardContent className="p-4 min-w-0">
+              <div className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-green-600 truncate">
                 {driverDeliveriesReport.filter(d => d.status === 'delivered').length}
               </div>
-              <div className="text-sm text-muted-foreground">Full Deliveries</div>
+              <div className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">Full Deliveries</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-blue-600">
+          <Card className="min-w-0 overflow-hidden shadow-xs border-border/80 hover:shadow-sm transition-all">
+            <CardContent className="p-4 min-w-0">
+              <div className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-blue-600 truncate">
                 {driverDeliveriesReport.filter(d => d.status === 'partial' || d.status === 'partially_delivered').length}
               </div>
-              <div className="text-sm text-muted-foreground">Partial Deliveries</div>
+              <div className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">Partial Deliveries</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-red-600">
+          <Card className="min-w-0 overflow-hidden shadow-xs border-border/80 hover:shadow-sm transition-all">
+            <CardContent className="p-4 min-w-0">
+              <div className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-red-600 truncate">
                 {driverDeliveriesReport.filter(d => d.status === 'failed').length}
               </div>
-              <div className="text-sm text-muted-foreground">Failed Deliveries</div>
+              <div className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">Failed Deliveries</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-orange-600">
+          <Card className="min-w-0 overflow-hidden shadow-xs border-border/80 hover:shadow-sm transition-all">
+            <CardContent className="p-4 min-w-0">
+              <div className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-orange-600 truncate">
                 {driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.damagedQty || "0"), 0)}
               </div>
-              <div className="text-sm text-muted-foreground">Damaged Items</div>
+              <div className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">Damaged Items</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-slate-700">
-                {driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.requestedQty || curr.weight || "0"), 0).toFixed(3)}
-              </div>
-              <div className="text-sm text-muted-foreground">Total Qty Requested</div>
+          <Card className="min-w-0 overflow-hidden shadow-xs border-border/80 hover:shadow-sm transition-all">
+            <CardContent className="p-4 min-w-0">
+              {(() => {
+                const totalReq = driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.requestedQty || curr.weight || "0"), 0).toFixed(3);
+                return (
+                  <>
+                    <div className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-foreground truncate" title={totalReq}>
+                      {totalReq}
+                    </div>
+                    <div className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">Total Qty Requested</div>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-emerald-700">
-                {driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.deliveredQty || "0"), 0).toFixed(3)}
-              </div>
-              <div className="text-sm text-muted-foreground">Total Qty Delivered</div>
+          <Card className="min-w-0 overflow-hidden shadow-xs border-border/80 hover:shadow-sm transition-all">
+            <CardContent className="p-4 min-w-0">
+              {(() => {
+                const totalDel = driverDeliveriesReport.reduce((acc, curr) => acc + parseFloat(curr.deliveredQty || "0"), 0).toFixed(3);
+                return (
+                  <>
+                    <div className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-emerald-600 dark:text-emerald-400 truncate" title={totalDel}>
+                      {totalDel}
+                    </div>
+                    <div className="text-xs sm:text-sm text-muted-foreground truncate mt-0.5">Total Qty Delivered</div>
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
@@ -2807,119 +2842,235 @@ export default function Reports() {
   };
 
   return (
-    <div className="p-6 space-y-6 print:p-0">
-      <div className="flex items-center justify-between gap-4 flex-wrap print:hidden">
-        <h1 className="text-2xl font-semibold flex items-center gap-2" data-testid="text-page-title">
-          <BarChart3 className="w-6 h-6" />
-          Reports
-        </h1>
-      </div>
-
-      <div className="flex flex-wrap gap-4 items-end print:hidden">
-        <div className="space-y-1">
-          <Label>Date Range</Label>
-          <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
-            <SelectTrigger className="w-[150px]" data-testid="select-date-range">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">This Week</SelectItem>
-              <SelectItem value="month">This Month</SelectItem>
-              <SelectItem value="year">This Year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
-            </SelectContent>
-          </Select>
+    <div className="p-4 sm:p-6 space-y-6 print:p-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 print:hidden border-b border-border/60 pb-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2.5 text-foreground" data-testid="text-page-title">
+            <BarChart3 className="w-6 h-6 text-primary" />
+            <span>Reports & Analytics</span>
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+            <span>Enterprise intelligence for</span>
+            <span className="font-semibold text-foreground">{currentShop?.name || "Global Scope"}</span>
+            {currentBranch?.name && (
+              <>
+                <span className="text-muted-foreground/60">•</span>
+                <span className="text-primary font-medium">{currentBranch.name}</span>
+              </>
+            )}
+          </p>
         </div>
-        {dateRange === "custom" && (
-          <>
-            <div className="space-y-1">
-              <Label>From</Label>
+
+        {/* Date Range Selector placed neatly in the header */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-2 bg-muted/50 px-2.5 py-1 rounded-lg border border-border/70 text-xs shadow-2xs">
+            <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground font-medium">Period:</span>
+            <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+              <SelectTrigger className="h-7 w-[125px] border-0 bg-transparent shadow-none text-xs font-semibold focus:ring-0 p-0" data-testid="select-date-range">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">This Week</SelectItem>
+                <SelectItem value="month">This Month</SelectItem>
+                <SelectItem value="year">This Year</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {dateRange === "custom" && (
+            <div className="flex items-center gap-1.5 bg-background p-1 rounded-lg border border-border/70">
               <Input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
+                className="h-7 w-[120px] text-xs border-0 bg-transparent"
                 data-testid="input-start-date"
               />
-            </div>
-            <div className="space-y-1">
-              <Label>To</Label>
+              <span className="text-xs text-muted-foreground font-medium">to</span>
               <Input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
+                className="h-7 w-[120px] text-xs border-0 bg-transparent"
                 data-testid="input-end-date"
               />
             </div>
-          </>
-        )}
-        <div className="space-y-1">
-          <Label>Shop</Label>
-          <Select value={shopId} onValueChange={(v) => { setShopId(v === "all" ? "" : v); setBranchId(""); }}>
-            <SelectTrigger className="w-[200px]" data-testid="select-shop">
-              <SelectValue placeholder="All Shops" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Shops</SelectItem>
-              {shops.map(shop => (
-                <SelectItem key={shop.id} value={shop.id}>{shop.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label>Branch</Label>
-          <Select value={branchId} onValueChange={(v) => setBranchId(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[200px]" data-testid="select-branch">
-              <SelectValue placeholder="All Branches" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Branches</SelectItem>
-              {filteredBranches.map(branch => (
-                <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-6 print:block">
-        <div className="col-span-3 print:hidden">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Report Types</CardTitle>
-            </CardHeader>
-            <CardContent className="p-2">
-              <div className="space-y-1">
-                {reportTypes.map(report => (
-                  <Button
-                    key={report.id}
-                    variant={activeReport === report.id ? "secondary" : "ghost"}
-                    className="w-full justify-start"
-                    onClick={() => setActiveReport(report.id)}
-                    data-testid={`button-report-${report.id}`}
-                  >
-                    <report.icon className="w-4 h-4 mr-2" />
-                    {report.label}
-                  </Button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-        <div className="col-span-9 print:col-span-12 min-w-0">
-          <Card className="print:border-0 print:shadow-none">
-            <CardHeader className="print:px-0 print:pt-0">
-              <CardTitle className="flex items-center gap-2 print:text-2xl">
-                {reportTypes.find(r => r.id === activeReport)?.label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="print:px-0">
-              {renderActiveReport()}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      {/* Categorized Vertical Navigation and Flexible Report View */}
+      {(() => {
+        const currentReportMeta = reportTypes.find(r => r.id === activeReport);
+        const currentCategoryLabel = currentReportMeta?.category === "finance" 
+          ? "Finance & Accounts" 
+          : currentReportMeta?.category === "logistics" 
+          ? "Logistics & Fleet Operations" 
+          : "HR & Workforce";
+        const Icon = currentReportMeta?.icon;
+
+        const displayedFinanceReports = reportTypes.filter(r => r.category === "finance" && (!searchQuery || r.label.toLowerCase().includes(searchQuery.toLowerCase())));
+        const displayedLogisticsReports = reportTypes.filter(r => r.category === "logistics" && (!searchQuery || r.label.toLowerCase().includes(searchQuery.toLowerCase())));
+        const displayedHrReports = reportTypes.filter(r => r.category === "hr" && (!searchQuery || r.label.toLowerCase().includes(searchQuery.toLowerCase())));
+
+        return (
+          <div className="flex flex-col lg:flex-row gap-6 print:block">
+            {/* VERTICAL REPORT TYPES SIDEBAR */}
+            <div className="w-full lg:w-72 shrink-0 print:hidden space-y-4">
+              <Card className="border-border/80 shadow-xs overflow-hidden">
+                <CardHeader className="p-3.5 pb-2.5 border-b border-border/60 bg-muted/20">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-primary" />
+                      <span>Report Types</span>
+                    </CardTitle>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">
+                      {reportTypes.length} Reports
+                    </Badge>
+                  </div>
+                  <div className="relative mt-2.5">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search reports..."
+                      className="h-8 pl-8 text-xs bg-background"
+                    />
+                  </div>
+                </CardHeader>
+                <CardContent className="p-2 space-y-3 max-h-[calc(100vh-260px)] overflow-y-auto">
+                  {/* Finance & Accounts */}
+                  {displayedFinanceReports.length > 0 && (
+                    <div className="space-y-0.5">
+                      <div className="px-2 py-1 text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                        <Landmark className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                        <span>Finance & Accounts</span>
+                      </div>
+                      {displayedFinanceReports.map((report) => {
+                        const isSelected = activeReport === report.id;
+                        const RIcon = report.icon;
+                        return (
+                          <button
+                            key={report.id}
+                            onClick={() => setActiveReport(report.id)}
+                            data-testid={`button-report-${report.id}`}
+                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all text-left cursor-pointer ${
+                              isSelected
+                                ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                                : "hover:bg-muted text-foreground/80 hover:text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate min-w-0">
+                              <RIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-primary-foreground" : "text-muted-foreground"}`} />
+                              <span className="truncate">{report.label}</span>
+                            </div>
+                            {isSelected && <ChevronRight className="w-3.5 h-3.5 shrink-0 ml-1 text-primary-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Logistics & Fleet */}
+                  {displayedLogisticsReports.length > 0 && (
+                    <div className="space-y-0.5 pt-1.5 border-t border-border/40">
+                      <div className="px-2 py-1 text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                        <Truck className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                        <span>Logistics & Fleet</span>
+                      </div>
+                      {displayedLogisticsReports.map((report) => {
+                        const isSelected = activeReport === report.id;
+                        const RIcon = report.icon;
+                        return (
+                          <button
+                            key={report.id}
+                            onClick={() => setActiveReport(report.id)}
+                            data-testid={`button-report-${report.id}`}
+                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all text-left cursor-pointer ${
+                              isSelected
+                                ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                                : "hover:bg-muted text-foreground/80 hover:text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate min-w-0">
+                              <RIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-primary-foreground" : "text-muted-foreground"}`} />
+                              <span className="truncate">{report.label}</span>
+                            </div>
+                            {isSelected && <ChevronRight className="w-3.5 h-3.5 shrink-0 ml-1 text-primary-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* HR & Operations */}
+                  {displayedHrReports.length > 0 && (
+                    <div className="space-y-0.5 pt-1.5 border-t border-border/40">
+                      <div className="px-2 py-1 text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5 uppercase tracking-wider">
+                        <Users className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                        <span>HR & Workforce</span>
+                      </div>
+                      {displayedHrReports.map((report) => {
+                        const isSelected = activeReport === report.id;
+                        const RIcon = report.icon;
+                        return (
+                          <button
+                            key={report.id}
+                            onClick={() => setActiveReport(report.id)}
+                            data-testid={`button-report-${report.id}`}
+                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all text-left cursor-pointer ${
+                              isSelected
+                                ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                                : "hover:bg-muted text-foreground/80 hover:text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate min-w-0">
+                              <RIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-primary-foreground" : "text-muted-foreground"}`} />
+                              <span className="truncate">{report.label}</span>
+                            </div>
+                            {isSelected && <ChevronRight className="w-3.5 h-3.5 shrink-0 ml-1 text-primary-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* MAIN REPORT CANVAS */}
+            <div className="flex-1 min-w-0">
+              <Card className="print:border-0 print:shadow-none border-border/80 shadow-xs">
+                <CardHeader className="print:px-0 print:pt-0 pb-4 border-b border-border/60">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {Icon && (
+                        <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 border border-primary/20">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <CardTitle className="text-lg sm:text-xl font-bold tracking-tight truncate print:text-2xl">
+                          {currentReportMeta?.label || "Report"}
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {currentCategoryLabel} • Showing {dateRange === "custom" ? `${startDate || 'Start'} to ${endDate || 'End'}` : dateRange.toUpperCase()} data
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="print:px-0 p-4 sm:p-6 min-w-0">
+                  {renderActiveReport()}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
