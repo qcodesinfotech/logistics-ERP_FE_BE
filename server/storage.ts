@@ -4025,13 +4025,19 @@ export class DatabaseStorage implements IStorage {
     startedItemSheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
     startedTruckSheetIds.forEach(r => r.sheetId && activeSheetIdSet.add(r.sheetId));
 
-    // If driver identifiers are provided, find all sheets where this driver has assignments
+    // If driver identifiers are provided, find all sheets where this driver or crew has assignments
     const driverSheetIdSet = new Set<string>();
     if (driverIdentifiers && driverIdentifiers.length > 0) {
       const truckSheets = await db
         .selectDistinct({ sheetId: dispatchTruckAssignments.sheetId })
         .from(dispatchTruckAssignments)
-        .where(inArray(dispatchTruckAssignments.driverId, driverIdentifiers));
+        .where(
+          or(
+            inArray(dispatchTruckAssignments.driverId, driverIdentifiers),
+            inArray(dispatchTruckAssignments.crewMemberId, driverIdentifiers),
+            inArray(dispatchTruckAssignments.secondCrewMemberId, driverIdentifiers)
+          )
+        );
       truckSheets.forEach(r => r.sheetId && driverSheetIdSet.add(r.sheetId));
 
       const zoneSheets = await db
@@ -4408,6 +4414,13 @@ export class DatabaseStorage implements IStorage {
           if (!t.driverId && matchedAtt.driverId) {
             t.driverId = matchedAtt.driverId;
             updateData.driverId = matchedAtt.driverId;
+            needsUpdate = true;
+          }
+
+          // If crewMemberId is not yet assigned on this truck, synchronize from attendance
+          if (!t.crewMemberId && matchedAtt.crewMemberId) {
+            t.crewMemberId = matchedAtt.crewMemberId;
+            updateData.crewMemberId = matchedAtt.crewMemberId;
             needsUpdate = true;
           }
         }

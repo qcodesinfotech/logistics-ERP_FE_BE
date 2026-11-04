@@ -2,6 +2,9 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
 
+// Return PostgreSQL DATE columns (OID 1082) as exact YYYY-MM-DD string to prevent timezone offset shifts
+pg.types.setTypeParser(1082, (val: string) => val);
+
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
