@@ -8080,14 +8080,65 @@ export async function registerRoutes(
 
       // Auto-register any new outlets found in the uploaded sheet for this client
       const cKey = clientId || "null";
+      const allClients = await storage.getClients();
+      const clientByNameMap = new Map<string, any>();
+      allClients.forEach(c => {
+        if (c.name) clientByNameMap.set(c.name.trim().toLowerCase(), c);
+        if (c.companyName) clientByNameMap.set(c.companyName.trim().toLowerCase(), c);
+      });
+
       for (const row of items) {
-        const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
-        const rawCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
+        // Distinguish between individual delivery stop/outlet and corporate billed customer
+        const specificBranch = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || "").trim();
+        const custName = String(row.customer_name || row.customer || "").trim();
+
+        let rawDesc = specificBranch || custName;
+        let rawCode = String(row.outlet_code || row.to_sub_code || row.outletCode || specificBranch || custName || rawDesc || "").trim();
+
+        // If rawCode points to corporate customer, but specific branch/market/location is present,
+        // prioritize specific branch so each location is an independent stop!
+        if (specificBranch && custName && rawCode.toLowerCase() === custName.toLowerCase()) {
+          rawCode = specificBranch;
+          rawDesc = specificBranch;
+        }
+
+        // Auto-match or create child client if corporate customer name is provided
+        let targetClientId = clientId || null;
+        if (custName) {
+          const normCust = custName.toLowerCase();
+          let matchedClient = clientByNameMap.get(normCust);
+          if (!matchedClient) {
+            for (const [k, c] of Array.from(clientByNameMap.entries())) {
+              if (k.length > 3 && (normCust.includes(k) || k.includes(normCust))) {
+                matchedClient = c;
+                break;
+              }
+            }
+          }
+          if (!matchedClient) {
+            try {
+              const [newClient] = await db.insert(schema.clients).values({
+                name: custName,
+                parentClientId: parentClientId || clientId || null,
+                status: "active"
+              }).returning();
+              if (newClient) {
+                matchedClient = newClient;
+                clientByNameMap.set(normCust, newClient);
+              }
+            } catch {}
+          }
+          if (matchedClient) {
+            targetClientId = matchedClient.id;
+          }
+        }
+
         const norm = normalizeOutletCode(rawCode);
         const existingInGeneric = norm ? genericOutletCodeMap.get(norm) : null;
         const hasExisting = norm && (
           clientOutletCodeMap.has(`${cKey}:${norm}`) ||
           (parentClientId ? clientOutletCodeMap.has(`${parentClientId}:${norm}`) : false) ||
+          (targetClientId ? clientOutletCodeMap.has(`${targetClientId}:${norm}`) : false) ||
           Boolean(existingInGeneric)
         );
 
@@ -8098,12 +8149,13 @@ export async function registerRoutes(
             const [newOutlet] = await db.insert(schema.outlets).values({
               code: rawCode,
               name: outletName,
-              clientId: clientId || null,
+              clientId: targetClientId || clientId || null,
               routeId: existingOutletWithRoute?.routeId || null,
               status: "active"
             }).returning();
             if (newOutlet) {
               clientOutletCodeMap.set(`${cKey}:${norm}`, newOutlet);
+              if (targetClientId) clientOutletCodeMap.set(`${targetClientId}:${norm}`, newOutlet);
               clientOutletNameMap.set(`${cKey}:${outletName.toLowerCase()}`, newOutlet);
               if (!genericOutletCodeMap.has(norm)) genericOutletCodeMap.set(norm, newOutlet);
               if (!genericOutletNameMap.has(outletName.toLowerCase())) genericOutletNameMap.set(outletName.toLowerCase(), newOutlet);
@@ -8112,15 +8164,17 @@ export async function registerRoutes(
             // Safe ignore in case of race condition
           }
         } else if (norm && existingInGeneric) {
-          if (!existingInGeneric.clientId && clientId) {
+          const effectiveClient = targetClientId || clientId;
+          if (!existingInGeneric.clientId && effectiveClient) {
             try {
               await db.update(schema.outlets)
-                .set({ clientId })
+                .set({ clientId: effectiveClient })
                 .where(eq(schema.outlets.id, existingInGeneric.id));
-              existingInGeneric.clientId = clientId;
+              existingInGeneric.clientId = effectiveClient;
             } catch {}
           }
           clientOutletCodeMap.set(`${cKey}:${norm}`, existingInGeneric);
+          if (targetClientId) clientOutletCodeMap.set(`${targetClientId}:${norm}`, existingInGeneric);
         }
       }
 
@@ -8171,8 +8225,17 @@ export async function registerRoutes(
 
       const resolvedItems = items
         .map((row: any) => {
-          const rawDesc = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || row.customer_name || "").trim();
-          const rowCode = String(row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || rawDesc || "").trim();
+          const specificBranch = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || "").trim();
+          const custName = String(row.customer_name || row.customer || "").trim();
+
+          let rawDesc = specificBranch || custName;
+          let rowCode = String(row.outlet_code || row.to_sub_code || row.outletCode || specificBranch || custName || rawDesc || "").trim();
+
+          if (specificBranch && custName && rowCode.toLowerCase() === custName.toLowerCase()) {
+            rowCode = specificBranch;
+            rawDesc = specificBranch;
+          }
+
           const outletDesc = rawDesc.toLowerCase();
           const normCode = normalizeOutletCode(rowCode);
           const outlet =

@@ -745,7 +745,7 @@ export default function Dashboard() {
                           </div>
                           <div className="min-w-0">
                             <p className="font-semibold text-sm text-foreground truncate">
-                              {acc.bankName || acc.accountName || "Commercial Bank"}
+                              {acc.bankName || acc.name || (acc as any).accountName || "Commercial Bank"}
                             </p>
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <span>{maskedAccount}</span>

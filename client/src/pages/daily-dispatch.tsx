@@ -170,34 +170,59 @@ interface Driver { id: string; name: string; status: string; }
 interface Zone { id: string; name: string; }
 
 // ===== CSV Parser =====
-// ===== Header Normalization for Multi-Client CSV/Excel Files =====
+// ===== CSV / Excel Header Normalization for Multi-Client Dispatch Files =====
 function normalizeDispatchHeader(h: string): string {
   const lower = (h || "").toLowerCase().trim().replace(/[\s\-_.]+/g, "_");
 
-  // Outlet / Customer / Store / Branch Code
+  // Corporate / Central Customer Name
   if (
-    (lower.includes("outlet") && lower.includes("code")) ||
+    lower === "customer_name" || lower === "client_name" || lower === "party_name" ||
+    lower === "corporate_customer" || lower === "parent_account" || lower === "account_name" ||
+    lower === "company_name"
+  ) {
+    return "customer_name";
+  }
+
+  // Corporate / Central Customer Code
+  if (
+    lower === "customer_code" || lower === "client_code" || lower === "party_code" ||
+    lower === "account_code" || lower === "company_code"
+  ) {
+    return "customer_code";
+  }
+
+  // Outlet / Customer / Store / Branch / Market / Location Code
+  if (
+    (lower.includes("outlet") && (lower.includes("code") || lower.includes("id") || lower.includes("no"))) ||
+    (lower.includes("branch") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("market") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("merchant") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("location") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("store") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("party") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
+    (lower.includes("ship_to") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
     (lower.includes("customer") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
     (lower.includes("cust") && (lower.includes("code") || lower.includes("no") || lower.includes("num") || lower.includes("id"))) ||
     (lower.includes("account") && (lower.includes("code") || lower.includes("no") || lower.includes("num"))) ||
     (lower.includes("acc") && (lower.includes("code") || lower.includes("no"))) ||
-    (lower.includes("store") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
-    (lower.includes("branch") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
-    (lower.includes("party") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
-    (lower.includes("ship_to") && (lower.includes("code") || lower.includes("no") || lower.includes("id"))) ||
     lower.includes("to_sub_code") || lower.includes("sub_code") ||
-    lower === "outlet_code" || lower === "customer_code" || lower === "store_code" || lower === "branch_code" ||
-    lower === "outlet" || lower === "customer" || lower === "store" || lower === "branch" || lower === "shipto"
+    lower === "outlet_code" || lower === "store_code" || lower === "branch_code" || lower === "market_code" ||
+    lower === "outlet" || lower === "store" || lower === "branch" || lower === "shipto" || lower === "customer"
   ) {
     return "outlet_code";
   }
 
-  // Outlet / Customer Name / Description
+  // Outlet / Branch / Market / Location / Destination Name / Description
   if (
     lower.includes("sub_desc") || lower.includes("outlet_desc") || lower.includes("customer_desc") ||
     lower.includes("outlet_name") || lower.includes("customer_name") || lower.includes("cust_name") ||
     lower.includes("store_name") || lower.includes("branch_name") || lower.includes("party_name") ||
-    lower.includes("ship_to_name") || (lower.includes("to") && lower.includes("desc"))
+    lower.includes("market_name") || lower.includes("merchant_name") || lower.includes("destination") ||
+    lower.includes("delivery_location") || lower.includes("drop_location") || lower.includes("drop_point") ||
+    lower.includes("location_name") || lower.includes("location_desc") || lower.includes("site_name") ||
+    lower.includes("ship_to_name") || (lower.includes("to") && lower.includes("desc")) ||
+    lower === "market" || lower === "merchant" || lower === "mall" || lower === "location" ||
+    lower === "destination" || lower === "drop_off" || lower === "site" || lower === "m"
   ) {
     return "to_sub_desc";
   }
@@ -266,15 +291,103 @@ function normalizeDispatchHeader(h: string): string {
   return lower;
 }
 
+// Contextual Header Map Builder: If a sheet has BOTH a corporate customer column (e.g. Sevens Hotels)
+// and an individual delivery outlet/location/market/branch column (e.g. Mood Seef), this ensures:
+// 1. Column H (Market / Location / Branch) -> mapped as Outlet / Delivery Stop (to_sub_desc / outlet_code)
+// 2. Column G (Customer) -> mapped as Billed Corporate Customer (customer_name)
+function buildDispatchHeaderMap(rawHeaders: string[]): Map<string, string> {
+  const headerMap = new Map<string, string>();
+  const cleanedList = rawHeaders.map(h => (h || "").toLowerCase().trim().replace(/[\s\-_.]+/g, "_"));
+
+  const isOutletCol = (clean: string) => {
+    return (
+      clean.includes("outlet") ||
+      clean.includes("branch") ||
+      clean.includes("market") ||
+      clean.includes("merchant") ||
+      clean.includes("mall") ||
+      clean.includes("destination") ||
+      clean.includes("location") ||
+      clean.includes("drop_location") ||
+      clean.includes("delivery_location") ||
+      clean.includes("site") ||
+      clean.includes("drop_point") ||
+      clean.includes("sub_desc") ||
+      clean.includes("to_sub") ||
+      clean.includes("ship_to") ||
+      clean === "store" ||
+      clean.includes("store_name") ||
+      clean.includes("store_code") ||
+      clean.includes("store_desc") ||
+      clean === "m" ||
+      clean.startsWith("m_") ||
+      clean.startsWith("market") ||
+      clean.startsWith("merchant") ||
+      clean.startsWith("mall")
+    );
+  };
+
+  const isCustomerCol = (clean: string) => {
+    return (
+      (clean.includes("customer") ||
+       clean.includes("cust") ||
+       clean.includes("client") ||
+       clean.includes("party") ||
+       clean.includes("company") ||
+       clean.includes("account") ||
+       clean.includes("parent_account")) &&
+      !clean.includes("outlet") &&
+      !clean.includes("branch") &&
+      !clean.includes("market") &&
+      !clean.includes("location") &&
+      !clean.includes("destination")
+    );
+  };
+
+  const hasOutlet = cleanedList.some(isOutletCol);
+  const hasCustomer = cleanedList.some(isCustomerCol);
+  const hasBoth = hasOutlet && hasCustomer;
+
+  rawHeaders.forEach(h => {
+    const clean = (h || "").toLowerCase().trim().replace(/[\s\-_.]+/g, "_");
+
+    if (hasBoth) {
+      if (isCustomerCol(clean)) {
+        if (clean.includes("code") || clean.includes("no") || clean.includes("num") || clean.includes("id")) {
+          headerMap.set(h, "customer_code");
+        } else {
+          headerMap.set(h, "customer_name");
+        }
+        return;
+      }
+      if (isOutletCol(clean)) {
+        if (clean.includes("code") || clean.includes("no") || clean.includes("num") || clean.includes("id")) {
+          headerMap.set(h, "outlet_code");
+        } else {
+          headerMap.set(h, "to_sub_desc");
+        }
+        return;
+      }
+    }
+
+    headerMap.set(h, normalizeDispatchHeader(h));
+  });
+
+  return headerMap;
+}
+
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length < 2) return [];
   const rawHeaders = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
-  const headers = rawHeaders.map(normalizeDispatchHeader);
+  const headerMap = buildDispatchHeaderMap(rawHeaders);
   return lines.slice(1).map(line => {
     const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
     const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = vals[i] ?? ""; });
+    rawHeaders.forEach((h, i) => {
+      const key = headerMap.get(h) || normalizeDispatchHeader(h);
+      row[key] = vals[i] ?? "";
+    });
     return row;
   });
 }
@@ -4214,8 +4327,7 @@ export default function DailyDispatchPage() {
 
           if (rawJson.length > 0) {
             const rawHeaders = Object.keys(rawJson[0]);
-            const headerMap = new Map();
-            rawHeaders.forEach(h => headerMap.set(h, normalizeDispatchHeader(h)));
+            const headerMap = buildDispatchHeaderMap(rawHeaders);
 
             const sheetParsed = rawJson.map(row => {
               const newRow: Record<string, string> = {};
@@ -4255,8 +4367,20 @@ export default function DailyDispatchPage() {
 
       // Filter out total/summary rows and invalid lines
       const filteredParsed = parsed.filter(row => {
-        const outletDesc = (row.to_sub_desc || row.outlet_name || row.customer_name || row.outlet_desc || row.customer_desc || row.outlet_description || "").trim();
-        const outletCode = (row.outlet_code || row.to_sub_code || row.outletCode || row.customer_code || row.customer || outletDesc || "").trim();
+        // Distinguish between individual delivery stop/outlet and parent corporate customer
+        const specificBranch = (row.to_sub_desc || row.outlet_name || row.outlet_desc || row.outlet_description || "").trim();
+        const custName = (row.customer_name || row.customer || row.customer_desc || "").trim();
+
+        let outletDesc = specificBranch || custName;
+        let outletCode = (row.outlet_code || row.to_sub_code || row.outletCode || specificBranch || custName || outletDesc || "").trim();
+
+        // If outletCode was accidentally mapped to the corporate customer name, but a specific branch/location is provided,
+        // prioritize the specific branch/outlet so each location has an independent stop identity!
+        if (specificBranch && custName && outletCode.toLowerCase() === custName.toLowerCase()) {
+          outletCode = specificBranch;
+          outletDesc = specificBranch;
+        }
+
         const itemCode = (row.item_code || row.item_number || row.itemCode || row.product_code || row.product || row.sku || "").trim();
 
         const hasOutlet = !!outletCode;
@@ -4285,6 +4409,7 @@ export default function DailyDispatchPage() {
         // Normalize essential keys for downstream use
         row.outlet_code = outletCode;
         if (!row.to_sub_desc && outletDesc) row.to_sub_desc = outletDesc;
+        if (custName && !row.customer_name) row.customer_name = custName;
         row.item_code = itemCode;
         row.weight = parsedQty.toString();
         if (!row.requestedQty && row.fus_requested_qty) row.requestedQty = row.fus_requested_qty;
