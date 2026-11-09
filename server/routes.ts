@@ -8089,15 +8089,47 @@ export async function registerRoutes(
 
       for (const row of items) {
         // Distinguish between individual delivery stop/outlet and corporate billed customer
-        const specificBranch = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || "").trim();
-        const custName = String(row.customer_name || row.customer || "").trim();
+        const specificBranch = String(
+          row.to_sub_desc ||
+          row.outlet_desc ||
+          row.outlet_name ||
+          row.outlet_description ||
+          row[""] ||
+          row["__empty"] ||
+          row["__EMPTY"] ||
+          row["__empty_1"] ||
+          row["__EMPTY_1"] ||
+          row["__empty_7"] ||
+          row["__EMPTY_7"] ||
+          row.location ||
+          row.destination ||
+          row.branch ||
+          row.market ||
+          row.m ||
+          ""
+        ).trim();
+        const custName = String(
+          row.customer_name ||
+          row.customer ||
+          row.customer_desc ||
+          row.parent_account ||
+          row.company ||
+          ""
+        ).trim();
 
         let rawDesc = specificBranch || custName;
-        let rawCode = String(row.outlet_code || row.to_sub_code || row.outletCode || specificBranch || custName || rawDesc || "").trim();
+        let rawCode = String(
+          row.outlet_code ||
+          row.to_sub_code ||
+          row.outletCode ||
+          specificBranch ||
+          custName ||
+          rawDesc ||
+          ""
+        ).trim();
 
-        // If rawCode points to corporate customer, but specific branch/market/location is present,
-        // prioritize specific branch so each location is an independent stop!
-        if (specificBranch && custName && rawCode.toLowerCase() === custName.toLowerCase()) {
+        // If specific branch/market/location is present, prioritize specific branch as outlet identity!
+        if (specificBranch) {
           rawCode = specificBranch;
           rawDesc = specificBranch;
         }
@@ -8225,20 +8257,53 @@ export async function registerRoutes(
 
       const resolvedItems = items
         .map((row: any) => {
-          const specificBranch = String(row.to_sub_desc || row.outlet_desc || row.outlet_name || "").trim();
-          const custName = String(row.customer_name || row.customer || "").trim();
+          const specificBranch = String(
+            row.to_sub_desc ||
+            row.outlet_desc ||
+            row.outlet_name ||
+            row.outlet_description ||
+            row[""] ||
+            row["__empty"] ||
+            row["__EMPTY"] ||
+            row["__empty_1"] ||
+            row["__EMPTY_1"] ||
+            row["__empty_7"] ||
+            row["__EMPTY_7"] ||
+            row.location ||
+            row.destination ||
+            row.branch ||
+            row.market ||
+            row.m ||
+            ""
+          ).trim();
+          const custName = String(
+            row.customer_name ||
+            row.customer ||
+            row.customer_desc ||
+            row.parent_account ||
+            row.company ||
+            ""
+          ).trim();
 
           let rawDesc = specificBranch || custName;
-          let rowCode = String(row.outlet_code || row.to_sub_code || row.outletCode || specificBranch || custName || rawDesc || "").trim();
+          let rowCode = String(
+            row.outlet_code ||
+            row.to_sub_code ||
+            row.outletCode ||
+            specificBranch ||
+            custName ||
+            rawDesc ||
+            ""
+          ).trim();
 
-          if (specificBranch && custName && rowCode.toLowerCase() === custName.toLowerCase()) {
+          if (specificBranch) {
             rowCode = specificBranch;
             rawDesc = specificBranch;
           }
 
           const outletDesc = rawDesc.toLowerCase();
           const normCode = normalizeOutletCode(rowCode);
-          const outlet =
+          let outlet =
             (normCode ? clientOutletCodeMap.get(`${cKey}:${normCode}`) : null) ||
             (normCode && parentClientId ? clientOutletCodeMap.get(`${parentClientId}:${normCode}`) : null) ||
             (outletDesc ? clientOutletNameMap.get(`${cKey}:${outletDesc}`) : null) ||
@@ -8247,6 +8312,20 @@ export async function registerRoutes(
             (outletDesc ? clientOutletNameMap.get(`null:${outletDesc}`) : null) ||
             (normCode ? genericOutletCodeMap.get(normCode) : null) ||
             (outletDesc ? genericOutletNameMap.get(outletDesc) : null);
+
+          // Partial fallback if not exact
+          if (!outlet && normCode) {
+            for (const o of allOutlets) {
+              const oNorm = normalizeOutletCode(o.code);
+              const oName = (o.name || "").toLowerCase();
+              if (oNorm.includes(normCode) || oName.includes(normCode)) {
+                if (!custName || oNorm.includes(custName.toLowerCase()) || oName.includes(custName.toLowerCase())) {
+                  outlet = o;
+                  break;
+                }
+              }
+            }
+          }
           const itemCode = String(row.item_code || row.item_number || row.itemCode || row.product_code || row.product || row.sku || "").trim();
           
           let description = row.description || row.item_name || row.item_desc || row.itemName || row.product_name || row.item_description || null;

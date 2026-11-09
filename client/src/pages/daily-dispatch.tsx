@@ -323,7 +323,16 @@ function buildDispatchHeaderMap(rawHeaders: string[]): Map<string, string> {
       clean.startsWith("m_") ||
       clean.startsWith("market") ||
       clean.startsWith("merchant") ||
-      clean.startsWith("mall")
+      clean.startsWith("mall") ||
+      clean.startsWith("memo") ||
+      clean === "area" ||
+      clean.includes("area") ||
+      clean === "zone" ||
+      clean.includes("zone") ||
+      clean === "city" ||
+      clean.includes("city") ||
+      clean === "stop" ||
+      clean.includes("delivery")
     );
   };
 
@@ -344,15 +353,34 @@ function buildDispatchHeaderMap(rawHeaders: string[]): Map<string, string> {
     );
   };
 
-  const hasOutlet = cleanedList.some(isOutletCol);
-  const hasCustomer = cleanedList.some(isCustomerCol);
+  const custIdx = cleanedList.findIndex(isCustomerCol);
+
+  // If a customer column exists, check if the column immediately to its right (e.g. Column H next to Column G)
+  // is an outlet/delivery location (even if unnamed, blank, "__EMPTY*", or "M")
+  let adjacentOutletIdx = -1;
+  if (custIdx !== -1 && custIdx + 1 < rawHeaders.length) {
+    const nextClean = cleanedList[custIdx + 1];
+    if (
+      nextClean === "" ||
+      nextClean.startsWith("_empty") ||
+      nextClean.startsWith("empty") ||
+      nextClean === "m" ||
+      nextClean.startsWith("m_") ||
+      isOutletCol(nextClean)
+    ) {
+      adjacentOutletIdx = custIdx + 1;
+    }
+  }
+
+  const hasOutlet = cleanedList.some((c, i) => isOutletCol(c) || i === adjacentOutletIdx);
+  const hasCustomer = custIdx !== -1;
   const hasBoth = hasOutlet && hasCustomer;
 
-  rawHeaders.forEach(h => {
+  rawHeaders.forEach((h, idx) => {
     const clean = (h || "").toLowerCase().trim().replace(/[\s\-_.]+/g, "_");
 
     if (hasBoth) {
-      if (isCustomerCol(clean)) {
+      if (idx === custIdx) {
         if (clean.includes("code") || clean.includes("no") || clean.includes("num") || clean.includes("id")) {
           headerMap.set(h, "customer_code");
         } else {
@@ -360,7 +388,7 @@ function buildDispatchHeaderMap(rawHeaders: string[]): Map<string, string> {
         }
         return;
       }
-      if (isOutletCol(clean)) {
+      if (idx === adjacentOutletIdx || isOutletCol(clean)) {
         if (clean.includes("code") || clean.includes("no") || clean.includes("num") || clean.includes("id")) {
           headerMap.set(h, "outlet_code");
         } else {
@@ -1315,7 +1343,7 @@ function MoveOverrideDialog({
   items?: DispatchItem[];
   currentSheetDate?: string;
   onClose: () => void;
-  onSave: (zoneId: string, truckId: string | null, reason: string, storageTypes?: string[], targetDate?: string) => void;
+  onSave: (zoneId: string, truckId: string | null, reason: string, storageTypes?: string[], targetDate?: string, selectedItemIds?: string[]) => void;
 }) {
   const todayStr = format(new Date(), "yyyy-MM-dd");
   const defaultDate = currentSheetDate && currentSheetDate < todayStr ? todayStr : (currentSheetDate || todayStr);
@@ -1325,6 +1353,15 @@ function MoveOverrideDialog({
   const [reason, setReason] = useState("");
 
   const isCrossDateTransfer = Boolean(currentSheetDate && deliveryDate && deliveryDate !== currentSheetDate);
+
+  const hasMultipleItems = items && items.length > 1;
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>(() => (items || []).map(i => i.id));
+
+  useEffect(() => {
+    if (items && items.length > 0) {
+      setSelectedItemIds(items.map(i => i.id));
+    }
+  }, [items]);
 
   // Extract distinct storage types present in these items
   const availableTypes = useMemo(() => {
@@ -1351,6 +1388,7 @@ function MoveOverrideDialog({
   const handleConfirm = () => {
     if (!zoneId) return;
     if (!deliveryDate) return;
+    if (hasMultipleItems && selectedItemIds.length === 0) return;
     if (hasMultipleTypes && selectedTypes.length === 0) return;
 
     // If items have specific storage types, always pass selectedTypes so ONLY the selected categories move.
@@ -1360,20 +1398,20 @@ function MoveOverrideDialog({
       ? selectedTypes
       : undefined;
 
-    onSave(zoneId, isCrossDateTransfer ? null : (truckId || null), reason, typesToMove, deliveryDate);
+    onSave(zoneId, isCrossDateTransfer ? null : (truckId || null), reason, typesToMove, deliveryDate, selectedItemIds);
   };
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="max-w-md max-h-[90vh] flex flex-col p-0 overflow-hidden">
+        <DialogHeader className="p-4 pb-2 border-b">
+          <DialogTitle className="flex items-center gap-2 text-base">
             <ArrowRight className="h-5 w-5 text-amber-500" />
             {title} — {targetName}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <p className="text-xs text-muted-foreground">
             {isCrossDateTransfer
               ? `Transfer this delivery to ${deliveryDate}'s dispatch sheet.`
               : "Temporarily reassign this to a different route for this dispatch sheet."}
@@ -1402,8 +1440,88 @@ function MoveOverrideDialog({
             </p>
           </div>
 
+          {/* Multiple Items Selection: lets supervisors move specific items or all items */}
+          {hasMultipleItems && (
+            <div className="space-y-2 border rounded-lg p-3 bg-slate-50/70 dark:bg-slate-900/50">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Select Items to Move ({selectedItemIds.length}/{items.length}) <span className="text-destructive">*</span>
+                </Label>
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-amber-600 hover:text-amber-700 hover:underline"
+                  onClick={() => {
+                    if (selectedItemIds.length === items.length) {
+                      setSelectedItemIds([]);
+                    } else {
+                      setSelectedItemIds(items.map(i => i.id));
+                    }
+                  }}
+                >
+                  {selectedItemIds.length === items.length ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {items.map(it => {
+                  const isChecked = selectedItemIds.includes(it.id);
+                  const qty = it.requestedQty || it.weight || "0";
+                  return (
+                    <label
+                      key={it.id}
+                      className={`flex items-start justify-between p-2 rounded-md border text-xs cursor-pointer transition-colors ${
+                        isChecked
+                          ? "bg-amber-50/80 border-amber-300 dark:bg-amber-950/30 dark:border-amber-700 text-slate-900 dark:text-slate-100"
+                          : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100/50"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2 min-w-0 flex-1">
+                        <Checkbox
+                          checked={isChecked}
+                          className="mt-0.5"
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedItemIds(prev => [...prev, it.id]);
+                            } else {
+                              setSelectedItemIds(prev => prev.filter(id => id !== it.id));
+                            }
+                          }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-800 dark:text-slate-200 truncate">{it.itemCode}</p>
+                          {it.description && <p className="text-[10px] text-muted-foreground truncate">{it.description}</p>}
+                          {it.remark && <p className="text-[9px] text-amber-700 dark:text-amber-300 font-mono">{it.remark}</p>}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0 ml-2">
+                        <span className="font-bold text-slate-700 dark:text-slate-300">Qty: {qty}</span>
+                        {it.storageType && (
+                          <span className="block text-[9px] text-muted-foreground">{it.storageType}</span>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {selectedItemIds.length === 0 && (
+                <p className="text-[11px] text-destructive pt-1">Please select at least one item to move.</p>
+              )}
+            </div>
+          )}
+
+          {/* Single Item summary indicator */}
+          {items.length === 1 && (
+            <div className="p-2.5 rounded-lg border bg-slate-50 dark:bg-slate-900/40 text-xs flex justify-between items-center">
+              <div className="min-w-0 flex-1 pr-2">
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{items[0].itemCode}</span>
+                {items[0].description && <p className="text-[11px] text-muted-foreground truncate">{items[0].description}</p>}
+                {items[0].remark && <p className="text-[9px] text-amber-600 font-mono">{items[0].remark}</p>}
+              </div>
+              <Badge variant="outline" className="flex-shrink-0">Qty: {items[0].requestedQty || items[0].weight || "1"}</Badge>
+            </div>
+          )}
+
           {/* Single Storage Type: Display clear indicator so the user sees what is being moved */}
-          {availableTypes.length === 1 && (
+          {availableTypes.length === 1 && !hasMultipleItems && (
             <div className="flex items-center justify-between p-3 rounded-lg border bg-amber-50/50 dark:bg-amber-950/20 text-xs">
               <span className="font-semibold text-slate-700 dark:text-slate-300">Category to Move:</span>
               <Badge variant="outline" className="font-semibold bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-900/50 dark:text-amber-200 px-2.5 py-0.5">
@@ -1519,10 +1637,10 @@ function MoveOverrideDialog({
             <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Moved pending from previous dispatch" />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="p-4 border-t">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button
-            disabled={!zoneId || !deliveryDate || (hasMultipleTypes && selectedTypes.length === 0)}
+            disabled={!zoneId || !deliveryDate || (hasMultipleItems && selectedItemIds.length === 0) || (hasMultipleTypes && selectedTypes.length === 0)}
             onClick={handleConfirm}
             className="bg-amber-500 hover:bg-amber-600 text-white"
           >
@@ -4351,6 +4469,10 @@ export default function DailyDispatchPage() {
                 }
 
                 newRow[normalizedKey] = String(finalVal ?? "");
+                // Preserve original key as well so raw fallback references work
+                if (!(key in newRow)) {
+                  newRow[key] = String(finalVal ?? "");
+                }
               });
               return newRow;
             });
@@ -4368,15 +4490,48 @@ export default function DailyDispatchPage() {
       // Filter out total/summary rows and invalid lines
       const filteredParsed = parsed.filter(row => {
         // Distinguish between individual delivery stop/outlet and parent corporate customer
-        const specificBranch = (row.to_sub_desc || row.outlet_name || row.outlet_desc || row.outlet_description || "").trim();
-        const custName = (row.customer_name || row.customer || row.customer_desc || "").trim();
+        const specificBranch = (
+          row.to_sub_desc ||
+          row.outlet_name ||
+          row.outlet_desc ||
+          row.outlet_description ||
+          row[""] ||
+          row["__empty"] ||
+          row["__EMPTY"] ||
+          row["__empty_1"] ||
+          row["__EMPTY_1"] ||
+          row["__empty_7"] ||
+          row["__EMPTY_7"] ||
+          row.location ||
+          row.destination ||
+          row.branch ||
+          row.market ||
+          row.m ||
+          ""
+        ).trim();
+
+        const custName = (
+          row.customer_name ||
+          row.customer ||
+          row.customer_desc ||
+          row.parent_account ||
+          row.company ||
+          ""
+        ).trim();
 
         let outletDesc = specificBranch || custName;
-        let outletCode = (row.outlet_code || row.to_sub_code || row.outletCode || specificBranch || custName || outletDesc || "").trim();
+        let outletCode = (
+          row.outlet_code ||
+          row.to_sub_code ||
+          row.outletCode ||
+          specificBranch ||
+          custName ||
+          outletDesc ||
+          ""
+        ).trim();
 
-        // If outletCode was accidentally mapped to the corporate customer name, but a specific branch/location is provided,
-        // prioritize the specific branch/outlet so each location has an independent stop identity!
-        if (specificBranch && custName && outletCode.toLowerCase() === custName.toLowerCase()) {
+        // If specific branch/outlet location is present, ALWAYS prioritize specific branch as outlet identity
+        if (specificBranch) {
           outletCode = specificBranch;
           outletDesc = specificBranch;
         }
@@ -4408,8 +4563,8 @@ export default function DailyDispatchPage() {
 
         // Normalize essential keys for downstream use
         row.outlet_code = outletCode;
-        if (!row.to_sub_desc && outletDesc) row.to_sub_desc = outletDesc;
-        if (custName && !row.customer_name) row.customer_name = custName;
+        row.to_sub_desc = outletDesc;
+        if (custName) row.customer_name = custName;
         row.item_code = itemCode;
         row.weight = parsedQty.toString();
         if (!row.requestedQty && row.fus_requested_qty) row.requestedQty = row.fus_requested_qty;
@@ -5962,16 +6117,19 @@ export default function DailyDispatchPage() {
           items={overrideDialog.items}
           currentSheetDate={selectedDate}
           onClose={() => setOverrideDialog(null)}
-          onSave={async (zoneId, truckId, reason, storageTypes, targetDate) => {
+          onSave={async (zoneId, truckId, reason, storageTypes, targetDate, selectedItemIds) => {
             const finalDate = targetDate || selectedDate;
+            const allItems = overrideDialog.items || [];
             if (finalDate && selectedDate && finalDate !== selectedDate) {
-              const itemsToMove = (overrideDialog.items || []).filter(item => {
-                if (!storageTypes || storageTypes.length === 0) return true;
-                return storageTypes.some(st => (item.storageType || "").trim().toLowerCase() === st.toLowerCase());
-              });
+              const itemsToMove = (selectedItemIds && selectedItemIds.length > 0)
+                ? allItems.filter(i => selectedItemIds.includes(i.id))
+                : allItems.filter(item => {
+                    if (!storageTypes || storageTypes.length === 0) return true;
+                    return storageTypes.some(st => (item.storageType || "").trim().toLowerCase() === st.toLowerCase());
+                  });
               const itemIds = itemsToMove.map(i => i.id);
               if (itemIds.length === 0) {
-                toast({ title: "No items match selected categories", variant: "destructive" });
+                toast({ title: "No items match selection", variant: "destructive" });
                 return;
               }
               try {
@@ -5996,15 +6154,32 @@ export default function DailyDispatchPage() {
                 toast({ title: getErrorMessage(err), variant: "destructive" });
               }
             } else {
-              overrideMutation.mutate({
-                sheetId: boardSheetId,
-                outletId: overrideDialog.outletId,
-                outletCode: overrideDialog.outletCode,
-                storageTypes: storageTypes && storageTypes.length > 0 ? storageTypes : undefined,
-                overrideZoneId: zoneId,
-                overrideTruckId: truckId,
-                reason,
-              });
+              // If a subset of items was selected (not all items of the outlet):
+              const isSubset = selectedItemIds && selectedItemIds.length > 0 && selectedItemIds.length < allItems.length;
+              if (isSubset) {
+                try {
+                  for (const itemId of selectedItemIds) {
+                    await apiRequest("PUT", `/api/dispatch/items/${itemId}/override`, { overrideRouteId: zoneId });
+                  }
+                  toast({ title: "Items moved successfully", description: `Moved ${selectedItemIds.length} item(s) to selected route.` });
+                  queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+                  queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/trucks`] });
+                  queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
+                  setOverrideDialog(null);
+                } catch (err: any) {
+                  toast({ title: getErrorMessage(err), variant: "destructive" });
+                }
+              } else {
+                overrideMutation.mutate({
+                  sheetId: boardSheetId,
+                  outletId: overrideDialog.outletId,
+                  outletCode: overrideDialog.outletCode,
+                  storageTypes: storageTypes && storageTypes.length > 0 ? storageTypes : undefined,
+                  overrideZoneId: zoneId,
+                  overrideTruckId: truckId,
+                  reason,
+                });
+              }
             }
           }}
         />
