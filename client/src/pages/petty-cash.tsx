@@ -69,19 +69,20 @@ const pettyCashSchema = z.object({
 
 const transactionSchema = z.object({
   pettyCashId: z.string().min(1, "Petty cash account is required"),
-  type: z.enum(["deposit", "withdrawal", "return"]),
+  type: z.enum(["withdrawal", "deposit", "return"]),
+  transactionDate: z.string().min(1, "Date is required"),
   amount: z.string().min(1, "Amount is required"),
   description: z.string().optional(),
   reference: z.string().optional(),
   bankAccountId: z.string().optional(),
 }).refine((data) => {
-  // For deposits and returns, bank account is required
-  if ((data.type === "deposit" || data.type === "return") && !data.bankAccountId) {
+  // Only for deposits (refund reimbursement from bank), bank account is required
+  if (data.type === "deposit" && !data.bankAccountId) {
     return false;
   }
   return true;
 }, {
-  message: "Bank account is required for this transaction type",
+  message: "Bank account is required for refund reimbursements",
   path: ["bankAccountId"],
 });
 
@@ -118,7 +119,8 @@ export default function PettyCashPage() {
     resolver: zodResolver(transactionSchema),
     defaultValues: {
       pettyCashId: "",
-      type: "deposit",
+      type: "withdrawal",
+      transactionDate: new Date().toISOString().split("T")[0],
       amount: "",
       description: "",
       reference: "",
@@ -696,7 +698,7 @@ export default function PettyCashPage() {
                 name="type"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Type *</FormLabel>
+                    <FormLabel>Transaction Nature *</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger data-testid="select-type">
@@ -704,11 +706,23 @@ export default function PettyCashPage() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="deposit">Deposit (From Bank)</SelectItem>
-                        <SelectItem value="withdrawal">Withdrawal / Expense</SelectItem>
-                        <SelectItem value="return">Return to Bank</SelectItem>
+                        <SelectItem value="withdrawal">Expense (Daily Spent)</SelectItem>
+                        <SelectItem value="deposit">Refund Reimbursement (From Bank upon Claim Approval)</SelectItem>
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={transactionForm.control}
+                name="transactionDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Date of Transaction *</FormLabel>
+                    <FormControl>
+                      <Input {...field} type="date" className="h-9 text-xs" />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -720,19 +734,19 @@ export default function PettyCashPage() {
                   <FormItem>
                     <FormLabel>Amount (BD) *</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="0.001" data-testid="input-amount" />
+                      <Input {...field} type="number" step="0.001" placeholder="e.g. 15.500" data-testid="input-amount" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              {(transactionType === "deposit" || transactionType === "return") && (
+              {transactionType === "deposit" && (
                 <FormField
                   control={transactionForm.control}
                   name="bankAccountId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{transactionType === "deposit" ? "Deduct From Bank Account *" : "Return To Bank Account *"}</FormLabel>
+                      <FormLabel>Deduct Refund From Bank Account *</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger data-testid="select-bank-account">
@@ -823,6 +837,23 @@ export default function PettyCashPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {totalClaimAmount > 0 && claimAccountId !== "all" && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      transactionForm.setValue("pettyCashId", claimAccountId);
+                      transactionForm.setValue("type", "deposit");
+                      transactionForm.setValue("amount", totalClaimAmount.toFixed(3));
+                      transactionForm.setValue("description", `Approved claim refund for ${pettyCashAccounts?.find(a => a.id === claimAccountId)?.name || "Staff"}`);
+                      setIsRefundClaimOpen(false);
+                      setIsTransactionDialogOpen(true);
+                    }}
+                    className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    <CheckCircle className="h-3.5 w-3.5" />
+                    Approve & Disburse Refund
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

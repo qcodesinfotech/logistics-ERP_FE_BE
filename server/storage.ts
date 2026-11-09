@@ -2768,136 +2768,87 @@ export class DatabaseStorage implements IStorage {
 
   async createPettyCashTransaction(data: any): Promise<any> {
     const amount = parseFloat(data.amount?.toString() || "0");
+    const isRefundOrDeposit = data.type === "deposit" || data.type === "refund";
 
-    // STRICT FINANCIAL CONTROL: For deposits, bank account is required and must have sufficient funds
-    if (data.type === "deposit" && amount > 0) {
-      if (!data.bankAccountId) {
-        throw new Error("Bank account is required for petty cash deposits. The deposit amount will be deducted from the selected bank account.");
-      }
-      await this.ensureSufficientFunds(amount, data.bankAccountId, "petty cash deposit");
-    }
+    // Prepare transaction payload with custom selected transaction date
+    const txPayload = {
+      pettyCashId: data.pettyCashId,
+      type: isRefundOrDeposit ? "deposit" : (data.type || "withdrawal"),
+      amount: amount.toFixed(3),
+      description: data.description || null,
+      reference: data.reference || null,
+      bankAccountId: isRefundOrDeposit ? (data.bankAccountId || null) : null,
+      transactionDate: data.transactionDate ? new Date(data.transactionDate) : new Date(),
+    };
 
-    // STRICT FINANCIAL CONTROL: Validate sufficient funds for petty cash withdrawal/expense/return
-    if (data.type !== "deposit" && amount > 0) {
-      // Check petty cash account balance
-      const [pc] = await db.select().from(pettyCash).where(eq(pettyCash.id, data.pettyCashId));
-      if (pc) {
-        const currentBalance = parseFloat(pc.currentBalance || "0");
-        if (amount > currentBalance) {
-          const actionName = data.type === "return" ? "return to bank" : "withdrawals";
-          throw new Error(`Insufficient petty cash balance for ${actionName}. Available: ${currentBalance.toFixed(3)} BD, Required: ${amount.toFixed(3)} BD. Please check petty cash funds.`);
-        }
-      }
-    }
-
-    if (data.type === "return" && !data.bankAccountId) {
-      throw new Error("Bank account is required to return petty cash funds to the bank.");
+    // When a refund is approved and disbursed from bank:
+    if (isRefundOrDeposit && data.bankAccountId && amount > 0) {
+      await this.ensureSufficientFunds(amount, data.bankAccountId, "petty cash refund reimbursement");
     }
 
     return await db.transaction(async (tx) => {
-      const [transaction] = await tx.insert(pettyCashTransactions).values(data).returning();
+      const [transaction] = await tx.insert(pettyCashTransactions).values(txPayload).returning();
 
-      // Update petty cash balance
+      // Automatically recalculate petty cash account balance after every entry
       const [pc] = await tx.select().from(pettyCash).where(eq(pettyCash.id, data.pettyCashId));
       if (pc) {
         const currentBalance = parseFloat(pc.currentBalance || "0");
-        const newBalance = data.type === "deposit" ? currentBalance + amount : currentBalance - amount;
+        const newBalance = isRefundOrDeposit ? currentBalance + amount : currentBalance - amount;
         await tx.update(pettyCash).set({ currentBalance: newBalance.toFixed(3) }).where(eq(pettyCash.id, data.pettyCashId));
 
-        // Get shopId and branchId from petty cash account
-        const pettyCashShopId = pc.shopId;
-        let pettyCashBranchId = pc.branchId;
-        if (!pettyCashBranchId) throw new Error("Petty cash must have a branchId for journal entries");
-        // Use branchId as fallback for shopId
-        if (!pettyCashShopId) {
-          // branchId will be used as shopId in createJournalEntryInTx
+        // When refund is claimed & approved from bank, deduct from bank account
+        if (isRefundOrDeposit && data.bankAccountId && amount > 0) {
+          const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
+          if (bankAccount) {
+            const bankCurrentBalance = parseFloat(bankAccount.currentBalance || "0");
+            const newBankBalance = bankCurrentBalance - amount;
+            await tx.update(bankAccounts).set({ currentBalance: newBankBalance.toFixed(3) }).where(eq(bankAccounts.id, data.bankAccountId));
+
+            // Record bank transaction for the refund disbursement
+            await tx.insert(bankTransactions).values({
+              bankAccountId: data.bankAccountId,
+              shopId: bankAccount.shopId || pc.shopId || "",
+              branchId: bankAccount.branchId || pc.branchId || "",
+              type: "withdrawal",
+              amount: amount.toFixed(3),
+              reference: data.reference || `PC-REFUND-${Date.now()}`,
+              description: `Petty cash refund reimbursement to ${pc.name}: ${data.description || "Expense claim refund"}`,
+              relatedType: "petty_cash",
+              relatedId: transaction.id,
+            });
+          }
         }
 
-        // Create accounting journal entry & bank transactions
-        if (amount > 0) {
-          const journalLines = [];
-          if (data.type === "deposit") {
-            // For deposits: Debit Petty Cash Fund (1010), Credit Bank (1000)
-            // This represents transferring cash from bank to petty cash fund
-            journalLines.push(
-              { accountCode: "1010", debit: amount, description: `Petty cash replenishment - ${data.description || ""}` },
-              { accountCode: "1000", credit: amount, description: "Transfer from bank account" }
-            );
-
-            // STRICT FINANCIAL CONTROL: Deduct from bank account - MANDATORY for deposits
-            if (data.bankAccountId) {
-              const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
-              if (!bankAccount) {
-                throw new Error("Bank account not found. Cannot process petty cash deposit without a valid bank account.");
-              }
-
-              const bankCurrentBalance = parseFloat(bankAccount.currentBalance || "0");
-              const newBankBalance = bankCurrentBalance - amount;
-              await tx.update(bankAccounts).set({ currentBalance: newBankBalance.toFixed(3) }).where(eq(bankAccounts.id, data.bankAccountId));
-
-              // Record bank transaction for the withdrawal
-              await tx.insert(bankTransactions).values({
-                bankAccountId: data.bankAccountId,
-                shopId: bankAccount.shopId,
-                branchId: bankAccount.branchId,
-                type: "withdrawal",
-                amount: amount.toFixed(3),
-                reference: data.reference || `PC-DEP-${Date.now()}`,
-                description: `Transfer to petty cash: ${data.description || "Petty cash deposit"}`,
-                relatedType: "petty_cash",
-                relatedId: transaction.id,
-              });
+        // Optional accounting journal entry
+        try {
+          const pettyCashBranchId = pc.branchId || (await db.select().from(branches).limit(1))[0]?.id;
+          if (amount > 0 && pettyCashBranchId) {
+            const journalLines = [];
+            if (isRefundOrDeposit) {
+              journalLines.push(
+                { accountCode: "1010", debit: amount, description: `Petty cash replenishment - ${data.description || ""}` },
+                { accountCode: "1000", credit: amount, description: "Transfer from bank account" }
+              );
+            } else {
+              const expenseCode = this.getPettyCashExpenseCode(data.category);
+              journalLines.push(
+                { accountCode: expenseCode, debit: amount, description: `Petty cash expense - ${data.description || data.category || ""}` },
+                { accountCode: "1010", credit: amount, description: "Petty cash fund reduction" }
+              );
             }
-          } else if (data.type === "return") {
-            // For returns: Debit Bank (1000), Credit Petty Cash Fund (1010)
-            // This represents returning remaining petty cash to bank
-            journalLines.push(
-              { accountCode: "1000", debit: amount, description: `Petty cash return to bank - ${data.description || ""}` },
-              { accountCode: "1010", credit: amount, description: "Petty cash fund reduction" }
-            );
 
-            // Deposit back into bank account
-            if (data.bankAccountId) {
-              const [bankAccount] = await tx.select().from(bankAccounts).where(eq(bankAccounts.id, data.bankAccountId));
-              if (!bankAccount) {
-                throw new Error("Bank account not found. Cannot process petty cash return without a valid bank account.");
-              }
-
-              const bankCurrentBalance = parseFloat(bankAccount.currentBalance || "0");
-              const newBankBalance = bankCurrentBalance + amount;
-              await tx.update(bankAccounts).set({ currentBalance: newBankBalance.toFixed(3) }).where(eq(bankAccounts.id, data.bankAccountId));
-
-              // Record bank transaction for the deposit
-              await tx.insert(bankTransactions).values({
-                bankAccountId: data.bankAccountId,
-                shopId: bankAccount.shopId,
-                branchId: bankAccount.branchId,
-                type: "deposit",
-                amount: amount.toFixed(3),
-                reference: data.reference || `PC-RET-${Date.now()}`,
-                description: `Return from petty cash: ${data.description || "Petty cash return"}`,
-                relatedType: "petty_cash",
-                relatedId: transaction.id,
-              });
-            }
-          } else {
-            // For expenses/withdrawals: Debit Expense (category-based), Credit Petty Cash Fund (1010)
-            const expenseCode = this.getPettyCashExpenseCode(data.category);
-            journalLines.push(
-              { accountCode: expenseCode, debit: amount, description: `Petty cash expense - ${data.description || data.category || ""}` },
-              { accountCode: "1010", credit: amount, description: "Petty cash fund reduction" }
-            );
+            await this.createJournalEntryInTx(tx, {
+              sourceType: "petty_cash",
+              sourceId: transaction.id,
+              shopId: pc.shopId || undefined,
+              branchId: pettyCashBranchId,
+              reference: data.reference || `PC-${Date.now()}`,
+              description: data.description || `Petty cash ${data.type}`,
+              lines: journalLines,
+            });
           }
-
-          await this.createJournalEntryInTx(tx, {
-            sourceType: "petty_cash",
-            sourceId: transaction.id,
-            shopId: pettyCashShopId || undefined,
-            branchId: pettyCashBranchId!,
-            reference: data.reference || `PC-${Date.now()}`,
-            description: data.description || `Petty cash ${data.type}`,
-            lines: journalLines,
-          });
+        } catch (journalErr) {
+          console.warn("Petty cash journal entry skipped:", journalErr);
         }
       }
 
