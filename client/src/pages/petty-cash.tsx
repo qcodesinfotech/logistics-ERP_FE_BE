@@ -184,6 +184,12 @@ export default function PettyCashPage() {
     }
   }, [isAccountDialogOpen, branchLocations, accountForm]);
 
+  useEffect(() => {
+    if (isTransactionDialogOpen && pettyCashAccounts && pettyCashAccounts.length === 1 && !transactionForm.getValues("pettyCashId")) {
+      transactionForm.setValue("pettyCashId", pettyCashAccounts[0].id);
+    }
+  }, [isTransactionDialogOpen, pettyCashAccounts, transactionForm]);
+
   const { data: bankAccounts } = useQuery<BankAccount[]>({
     queryKey: ["/api/bank-accounts"],
   });
@@ -579,6 +585,23 @@ export default function PettyCashPage() {
           </DialogHeader>
           <Form {...transactionForm}>
             <form onSubmit={transactionForm.handleSubmit((d) => createTransactionMutation.mutate(d))} className="space-y-4">
+              {(!pettyCashAccounts || pettyCashAccounts.length === 0) && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex items-center justify-between gap-2">
+                  <span>No petty cash accounts created yet. Please create an account first.</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs bg-white border-amber-300 text-amber-900 hover:bg-amber-100 shrink-0"
+                    onClick={() => {
+                      setIsTransactionDialogOpen(false);
+                      setIsAccountDialogOpen(true);
+                    }}
+                  >
+                    + Add Account
+                  </Button>
+                </div>
+              )}
               <FormField
                 control={transactionForm.control}
                 name="pettyCashId"
@@ -588,7 +611,7 @@ export default function PettyCashPage() {
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger data-testid="select-account">
-                          <SelectValue placeholder="Select account" />
+                          <SelectValue placeholder={(!pettyCashAccounts || pettyCashAccounts.length === 0) ? "No accounts found (Create account first)" : "Select account"} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
