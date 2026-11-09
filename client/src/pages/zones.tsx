@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2, Truck, Search, X } from "lucide-react";
+import { MapPin, Plus, UserCheck, Upload, AlertCircle, RefreshCw, Check, Trash2, Truck, Search, X, Pencil } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -73,6 +74,11 @@ export default function ZonesPage() {
   const [selectedZoneIdForTrucks, setSelectedZoneIdForTrucks] = useState<string>("");
   const [truckSearchQuery, setTruckSearchQuery] = useState("");
   
+  // Outlet rename state
+  const [editingOutlet, setEditingOutlet] = useState<{ id: string; name: string; code?: string } | null>(null);
+  const [editedOutletName, setEditedOutletName] = useState("");
+  const [editedOutletCode, setEditedOutletCode] = useState("");
+
   // Excel import simulation state
   const [simulatedData, setSimulatedData] = useState<ExcelSimRow[]>([]);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
@@ -211,6 +217,19 @@ export default function ZonesPage() {
     onError: (error: unknown) => {
       toast({ title: getErrorMessage(error), variant: "destructive" });
     },
+  });
+
+  const updateOutletMutation = useMutation({
+    mutationFn: ({ id, name, code }: { id: string; name: string; code?: string }) =>
+      apiRequest("PATCH", `/api/outlets/${id}`, { name, code }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/zones/${selectedZoneIdForOutlets}/outlets`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/zones"] });
+      setEditingOutlet(null);
+      toast({ title: "Outlet updated successfully" });
+    },
+    onError: (err: unknown) => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
   const handleSupervisorChange = async (supervisorId: string) => {
@@ -805,16 +824,31 @@ export default function ZonesPage() {
                           </span>
                         )}
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8 shrink-0"
-                        onClick={() => removeOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
-                        disabled={removeOutletMutation.isPending}
-                        title="Remove outlet"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20 h-8 w-8"
+                          onClick={() => {
+                            setEditingOutlet(outlet);
+                            setEditedOutletName(outlet.name || "");
+                            setEditedOutletCode(outlet.code || "");
+                          }}
+                          title="Edit outlet name"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 h-8 w-8"
+                          onClick={() => removeOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
+                          disabled={removeOutletMutation.isPending}
+                          title="Remove outlet"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -838,15 +872,30 @@ export default function ZonesPage() {
                           </span>
                         )}
                       </div>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="h-8 gap-1 shrink-0 text-xs hover:bg-primary hover:text-white transition-colors"
-                        onClick={() => addSingleOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
-                        disabled={addSingleOutletMutation.isPending}
-                      >
-                        <Plus className="h-3 w-3" /> Add
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/20 h-8 w-8"
+                          onClick={() => {
+                            setEditingOutlet(outlet);
+                            setEditedOutletName(outlet.name || "");
+                            setEditedOutletCode(outlet.code || "");
+                          }}
+                          title="Edit outlet name"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 gap-1 text-xs hover:bg-primary hover:text-white transition-colors"
+                          onClick={() => addSingleOutletMutation.mutate({ zoneId: selectedZoneIdForOutlets, outletId: outlet.id })}
+                          disabled={addSingleOutletMutation.isPending}
+                        >
+                          <Plus className="h-3 w-3" /> Add
+                        </Button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -982,6 +1031,59 @@ export default function ZonesPage() {
             </div>
             <Button type="button" onClick={() => setIsManageTrucksDialogOpen(false)}>
               Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Outlet Name Dialog */}
+      <Dialog open={!!editingOutlet} onOpenChange={(open) => !open && setEditingOutlet(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-amber-500" />
+              Edit Outlet Name
+            </DialogTitle>
+            <DialogDescription>
+              Update the outlet's display name or code for route tracking and dispatch.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Outlet Name <span className="text-destructive">*</span></Label>
+              <Input
+                value={editedOutletName}
+                onChange={(e) => setEditedOutletName(e.target.value)}
+                placeholder="e.g. Caribou Saar, Jidhafs, Mood Seef"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Outlet Code (optional)</Label>
+              <Input
+                value={editedOutletCode}
+                onChange={(e) => setEditedOutletCode(e.target.value)}
+                placeholder="e.g. OUT-1002"
+                className="h-9 font-mono text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingOutlet(null)}>Cancel</Button>
+            <Button
+              disabled={!editedOutletName.trim() || updateOutletMutation.isPending}
+              onClick={() => {
+                if (editingOutlet && editedOutletName.trim()) {
+                  updateOutletMutation.mutate({
+                    id: editingOutlet.id,
+                    name: editedOutletName.trim(),
+                    code: editedOutletCode.trim() || undefined,
+                  });
+                }
+              }}
+              className="bg-primary text-white"
+            >
+              {updateOutletMutation.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

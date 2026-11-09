@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft } from "lucide-react";
+import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft, Upload, FileText, Printer, Download, Receipt, Paperclip, ExternalLink, CheckCircle } from "lucide-react";
+import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -121,6 +122,43 @@ export default function PettyCashPage() {
   
   const transactionType = transactionForm.watch("type");
 
+  const [isRefundClaimOpen, setIsRefundClaimOpen] = useState(false);
+  const [claimAccountId, setClaimAccountId] = useState<string>("all");
+  const [claimStartDate, setClaimStartDate] = useState<string>("");
+  const [claimEndDate, setClaimEndDate] = useState<string>("");
+
+  const [isUploadingBill, setIsUploadingBill] = useState(false);
+  const [uploadedBillUrl, setUploadedBillUrl] = useState<string | null>(null);
+  const [uploadedBillName, setUploadedBillName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      setIsUploadingBill(true);
+      const res = await fetch("/api/upload/receipt", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to upload bill receipt");
+      const data = await res.json();
+      setUploadedBillUrl(data.url);
+      setUploadedBillName(data.filename || file.name);
+      transactionForm.setValue("reference", data.url);
+      toast({ title: "Bill uploaded successfully" });
+    } catch (err: any) {
+      toast({ title: err.message || "Failed to upload bill", variant: "destructive" });
+    } finally {
+      setIsUploadingBill(false);
+    }
+  };
+
   const { data: pettyCashAccounts, isLoading } = useQuery<PettyCash[]>({
     queryKey: ["/api/petty-cash"],
   });
@@ -160,6 +198,8 @@ export default function PettyCashPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       toast({ title: "Transaction recorded successfully" });
       setIsTransactionDialogOpen(false);
+      setUploadedBillUrl(null);
+      setUploadedBillName(null);
       transactionForm.reset();
     },
     onError: (error: any) => {
@@ -186,6 +226,61 @@ export default function PettyCashPage() {
 
   const getShopName = (shopId: string) => {
     return shops?.find((s) => s.id === shopId)?.name || "Unknown";
+  };
+
+  const claimTransactions = useMemo(() => {
+    if (!transactions) return [];
+    return transactions.filter((t) => {
+      if (t.type !== "withdrawal") return false;
+      if (claimAccountId !== "all" && t.pettyCashId !== claimAccountId) return false;
+      if (claimStartDate && new Date(t.transactionDate) < new Date(claimStartDate)) return false;
+      if (claimEndDate) {
+        const end = new Date(claimEndDate);
+        end.setHours(23, 59, 59, 999);
+        if (new Date(t.transactionDate) > end) return false;
+      }
+      return true;
+    });
+  }, [transactions, claimAccountId, claimStartDate, claimEndDate]);
+
+  const totalClaimAmount = useMemo(() => {
+    return claimTransactions.reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+  }, [claimTransactions]);
+
+  const handleExportClaimExcel = () => {
+    if (claimTransactions.length === 0) {
+      toast({ title: "No transactions to export", variant: "destructive" });
+      return;
+    }
+    const accountName = claimAccountId === "all" ? "All Accounts" : (pettyCashAccounts?.find(a => a.id === claimAccountId)?.name || "Account");
+    const data = claimTransactions.map((t, idx) => ({
+      "Sl No": idx + 1,
+      "Date": new Date(t.transactionDate).toLocaleDateString(),
+      "Account": pettyCashAccounts?.find(a => a.id === t.pettyCashId)?.name || "Petty Cash",
+      "Description": t.description || "-",
+      "Amount (BD)": parseFloat(t.amount || "0").toFixed(3),
+      "Receipt / Reference": t.reference ? (t.reference.startsWith("/uploads") ? `${window.location.origin}${t.reference}` : t.reference) : "None",
+    }));
+
+    // Add total row
+    data.push({
+      "Sl No": "" as any,
+      "Date": "",
+      "Account": "",
+      "Description": "TOTAL CLAIM AMOUNT",
+      "Amount (BD)": totalClaimAmount.toFixed(3),
+      "Receipt / Reference": "",
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Refund Claim");
+    XLSX.writeFile(wb, `Petty_Cash_Claim_${accountName.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.xlsx`);
+    toast({ title: "Refund claim exported to Excel" });
+  };
+
+  const handlePrintClaim = () => {
+    window.print();
   };
 
   const accountColumns = [
@@ -228,6 +323,28 @@ export default function PettyCashPage() {
       ),
     },
     { key: "description", header: "Description", render: (t: PettyCashTransaction) => t.description || "-" },
+    {
+      key: "reference",
+      header: "Bill / Receipt",
+      render: (t: PettyCashTransaction) => {
+        if (!t.reference) return <span className="text-muted-foreground text-xs">-</span>;
+        if (t.reference.startsWith("/uploads") || t.reference.startsWith("http")) {
+          return (
+            <a
+              href={t.reference}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              View Bill
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          );
+        }
+        return <span className="text-xs font-mono">{t.reference}</span>;
+      },
+    },
     {
       key: "amount",
       header: "Amount",
@@ -282,6 +399,10 @@ export default function PettyCashPage() {
         description="Manage petty cash accounts and transactions"
       >
         <div className="flex gap-2">
+          <Button onClick={() => setIsRefundClaimOpen(true)} variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50">
+            <Receipt className="h-4 w-4 mr-2 text-indigo-600" />
+            Claim Refund
+          </Button>
           <Button onClick={() => setIsTransactionDialogOpen(true)} variant="outline" data-testid="button-new-transaction">
             <Plus className="h-4 w-4 mr-2" />
             Transaction
@@ -519,22 +640,236 @@ export default function PettyCashPage() {
                   <FormItem>
                     <FormLabel>Description</FormLabel>
                     <FormControl>
-                      <Textarea {...field} data-testid="input-description" />
+                      <Textarea {...field} data-testid="input-description" placeholder="e.g. Fuel expense, delivery parking, truck wash" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              <div className="space-y-1.5">
+                <FormLabel>Bill / Receipt (Attachment)</FormLabel>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 text-xs"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingBill}
+                  >
+                    <Upload className="h-4 w-4" />
+                    {isUploadingBill ? "Uploading..." : uploadedBillName ? "Change Bill" : "Upload Bill / Receipt"}
+                  </Button>
+                  {uploadedBillName && (
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200">
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span className="truncate max-w-[200px]">{uploadedBillName}</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground">Upload bills/invoices to substantiate refund claims (JPG, PNG, PDF up to 10MB).</p>
+              </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsTransactionDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createTransactionMutation.isPending} data-testid="button-save-transaction">
+                <Button type="submit" disabled={createTransactionMutation.isPending || isUploadingBill} data-testid="button-save-transaction">
                   {createTransactionMutation.isPending ? "Saving..." : "Record"}
                 </Button>
               </DialogFooter>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Refund Claim Dialog */}
+      <Dialog open={isRefundClaimOpen} onOpenChange={setIsRefundClaimOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-6">
+          <DialogHeader className="print:hidden">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                  <Receipt className="h-5 w-5 text-indigo-600" />
+                  Petty Cash Refund Claim Statement
+                </DialogTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Generate an itemized claim statement with date, description, receipt attachments, and amounts for manager/supervisor reimbursement.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportClaimExcel}
+                  className="gap-1.5 text-xs"
+                >
+                  <Download className="h-3.5 w-3.5 text-emerald-600" />
+                  Export Excel
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePrintClaim}
+                  className="gap-1.5 text-xs"
+                >
+                  <Printer className="h-3.5 w-3.5 text-blue-600" />
+                  Print Voucher
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {/* Filters (hidden in print) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border text-xs print:hidden">
+            <div>
+              <label className="block text-slate-500 mb-1 font-semibold">Petty Cash Account</label>
+              <Select value={claimAccountId} onValueChange={setClaimAccountId}>
+                <SelectTrigger className="h-8 text-xs bg-white dark:bg-slate-950">
+                  <SelectValue placeholder="All Accounts" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Accounts</SelectItem>
+                  {pettyCashAccounts?.map((acc) => (
+                    <SelectItem key={acc.id} value={acc.id}>
+                      {acc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1 font-semibold">From Date</label>
+              <Input
+                type="date"
+                value={claimStartDate}
+                onChange={(e) => setClaimStartDate(e.target.value)}
+                className="h-8 text-xs bg-white dark:bg-slate-950"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-500 mb-1 font-semibold">To Date</label>
+              <Input
+                type="date"
+                value={claimEndDate}
+                onChange={(e) => setClaimEndDate(e.target.value)}
+                className="h-8 text-xs bg-white dark:bg-slate-950"
+              />
+            </div>
+          </div>
+
+          {/* Printable Statement Area */}
+          <div className="flex-1 overflow-y-auto space-y-4 print:p-0 print:m-0">
+            <div className="border rounded-md p-4 bg-white dark:bg-slate-950 print:border-none print:p-0">
+              <div className="flex justify-between items-start border-b pb-3 mb-3">
+                <div>
+                  <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">EXPENSE REFUND CLAIM VOUCHER</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Account: <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {claimAccountId === "all" ? "All Individual Accounts" : pettyCashAccounts?.find(a => a.id === claimAccountId)?.name}
+                    </span>
+                  </p>
+                </div>
+                <div className="text-right text-xs">
+                  <p className="text-muted-foreground">Generated Date: <span className="font-medium text-slate-800 dark:text-slate-200">{new Date().toLocaleDateString()}</span></p>
+                  <p className="text-muted-foreground">Generated By: <span className="font-medium text-slate-800 dark:text-slate-200">{user?.name || user?.username || "Supervisor"}</span></p>
+                </div>
+              </div>
+
+              {claimTransactions.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">
+                  No expense transactions found for the selected account and date range.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 font-semibold">
+                        <th className="py-2 px-3 text-left w-12">#</th>
+                        <th className="py-2 px-3 text-left w-24">Date</th>
+                        <th className="py-2 px-3 text-left">Description</th>
+                        <th className="py-2 px-3 text-left w-28">Bill / Receipt</th>
+                        <th className="py-2 px-3 text-right w-28">Amount (BD)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {claimTransactions.map((item, idx) => (
+                        <tr key={item.id} className="hover:bg-slate-50/50">
+                          <td className="py-2 px-3 text-slate-500">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono">{new Date(item.transactionDate).toLocaleDateString()}</td>
+                          <td className="py-2 px-3 font-medium text-slate-800 dark:text-slate-200">{item.description || "-"}</td>
+                          <td className="py-2 px-3">
+                            {item.reference ? (
+                              item.reference.startsWith("/uploads") || item.reference.startsWith("http") ? (
+                                <a
+                                  href={item.reference}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-blue-600 hover:underline print:hidden"
+                                >
+                                  <Paperclip className="h-3 w-3" />
+                                  Attached
+                                </a>
+                              ) : (
+                                <span className="font-mono text-[11px]">{item.reference}</span>
+                              )
+                            ) : (
+                              <span className="text-muted-foreground italic">None</span>
+                            )}
+                            <span className="hidden print:inline">{item.reference ? "Attached" : "None"}</span>
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono font-semibold">
+                            {parseFloat(item.amount || "0").toFixed(3)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-300 dark:border-slate-700 font-bold bg-slate-50 dark:bg-slate-900">
+                        <td colSpan={4} className="py-2.5 px-3 text-right uppercase tracking-wider">
+                          Total Claim Amount:
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400 text-sm">
+                          {totalClaimAmount.toFixed(3)} BD
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+
+              {/* Signatures section for printed claim voucher */}
+              <div className="mt-8 pt-6 border-t border-dashed grid grid-cols-3 gap-6 text-xs text-center">
+                <div>
+                  <div className="border-b border-slate-400 h-10 mb-1"></div>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">Claimant Signature</p>
+                  <p className="text-[10px] text-muted-foreground">(Supervisor / Manager)</p>
+                </div>
+                <div>
+                  <div className="border-b border-slate-400 h-10 mb-1"></div>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">Verified By</p>
+                  <p className="text-[10px] text-muted-foreground">(Operations Head)</p>
+                </div>
+                <div>
+                  <div className="border-b border-slate-400 h-10 mb-1"></div>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">Approved for Refund</p>
+                  <p className="text-[10px] text-muted-foreground">(Accounts & Finance)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="print:hidden">
+            <Button variant="outline" onClick={() => setIsRefundClaimOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

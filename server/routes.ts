@@ -551,6 +551,25 @@ export async function registerRoutes(
     }
   });
 
+  // Petty cash receipt upload for bills and refund claims
+  app.post("/api/upload/receipt", authMiddleware, invoiceUpload.single("file"), (req: AuthRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const fileUrl = `/uploads/invoices/${req.file.filename}`;
+      res.json({
+        url: fileUrl,
+        filename: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      });
+    } catch (error) {
+      console.error("Receipt upload error:", error);
+      res.status(500).json({ error: "Failed to upload receipt" });
+    }
+  });
+
   // Compliance Reminder attachment upload
   app.post("/api/upload/compliance-reminder", authMiddleware, complianceUpload.single("file"), (req: AuthRequest, res) => {
     try {
@@ -7862,7 +7881,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/outlets/:id", authMiddleware, permissionMiddleware("projects"), async (req: AuthRequest, res) => {
+  app.patch("/api/outlets/:id", authMiddleware, async (req: AuthRequest, res) => {
     try {
       const { zoneIds, ...data } = req.body;
       const outlet = await storage.updateOutlet(req.params.id, data);
@@ -9156,6 +9175,42 @@ export async function registerRoutes(
     } catch (e) {
       console.error("Item override error:", e);
       res.status(500).json({ error: "Failed to update item override" });
+    }
+  });
+
+  // Rename an outlet on the dispatch board and update master outlets table
+  app.put("/api/dispatch/sheets/:sheetId/outlets/rename", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { oldOutletCode, newOutletName } = req.body;
+      const { sheetId } = req.params;
+      if (!oldOutletCode || !newOutletName) {
+        return res.status(400).json({ error: "Old outlet code and new outlet name are required" });
+      }
+
+      const cleanNew = String(newOutletName).trim();
+      const cleanOld = String(oldOutletCode).trim();
+      const normOld = cleanOld.toLowerCase();
+
+      // 1. Update dispatch_items in this sheet
+      await db.update(schema.dispatchItems)
+        .set({ outletCode: cleanNew })
+        .where(and(
+          eq(schema.dispatchItems.sheetId, sheetId),
+          eq(schema.dispatchItems.outletCode, cleanOld)
+        ));
+
+      // 2. Also update master outlets table if an outlet exists with this code or name
+      await db.update(schema.outlets)
+        .set({ name: cleanNew, code: cleanNew })
+        .where(or(
+          sql`LOWER(TRIM(${schema.outlets.code})) = ${normOld}`,
+          sql`LOWER(TRIM(${schema.outlets.name})) = ${normOld}`
+        ));
+
+      res.json({ success: true, newOutletName: cleanNew });
+    } catch (e: any) {
+      console.error("Rename outlet error:", e);
+      res.status(500).json({ error: e.message || "Failed to rename outlet" });
     }
   });
 

@@ -44,7 +44,7 @@ import {
 import {
   Truck, Upload, FileText, Calendar, MapPin, User, Users, Package, Store, Hourglass, AlertCircle,
   ChevronDown, ChevronUp, ChevronRight, AlertTriangle, CheckCircle2, Clock,
-  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Check,
+  X, Plus, Trash2, RefreshCw, ArrowRight, Eye, Printer, Download, Edit2, Pencil, Check,
   Share2, MoreHorizontal, Folder, Wrench, History, Fuel, Settings, PlusCircle, Search, FileSpreadsheet,
   Layers, RotateCcw, DollarSign, Receipt, Boxes, CheckSquare, CalendarDays,
   Thermometer, Image as ImageIcon, Camera, UploadCloud, Sparkles, Zap,
@@ -3746,6 +3746,13 @@ export default function DailyDispatchPage() {
     items: [],
   });
 
+  const [renameOutletModal, setRenameOutletModal] = useState<{ isOpen: boolean; oldOutletCode: string; currentName: string }>({
+    isOpen: false,
+    oldOutletCode: "",
+    currentName: "",
+  });
+  const [newOutletRenameValue, setNewOutletRenameValue] = useState("");
+
   const [editedItems, setEditedItems] = useState<any[]>([]);
   const [prevOpen, setPrevOpen] = useState(false);
 
@@ -4394,6 +4401,19 @@ export default function DailyDispatchPage() {
       queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
       queryClient.invalidateQueries({ queryKey: ["/api/dispatch/pending-advanced"] });
     },
+  });
+
+  const renameOutletMutation = useMutation({
+    mutationFn: ({ oldOutletCode, newOutletName }: { oldOutletCode: string; newOutletName: string }) =>
+      apiRequest("PUT", `/api/dispatch/sheets/${boardSheetId}/outlets/rename`, { oldOutletCode, newOutletName }),
+    onSuccess: (_, vars) => {
+      toast({ title: "Outlet renamed successfully", description: `Renamed to ${vars.newOutletName}` });
+      queryClient.invalidateQueries({ queryKey: [`/api/dispatch/sheets/${boardSheetId}/board`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/outlets"] });
+      setManageItemsModal(prev => ({ ...prev, outletCode: vars.newOutletName, outletName: vars.newOutletName }));
+      setRenameOutletModal({ isOpen: false, oldOutletCode: "", currentName: "" });
+    },
+    onError: (err) => toast({ title: getErrorMessage(err), variant: "destructive" }),
   });
 
   // Driver zone mutations
@@ -6235,10 +6255,28 @@ export default function DailyDispatchPage() {
       >
         <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-6 pb-4 border-b">
-            <DialogTitle className="flex items-center gap-2 text-base font-bold">
-              <Settings className="h-5 w-5 text-orange-600 animate-spin-hover" />
-              Manage Items — {manageItemsModal.outletName || ""} ({manageItemsModal.outletCode || ""})
-            </DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                <Settings className="h-5 w-5 text-orange-600 animate-spin-hover" />
+                Manage Items — {manageItemsModal.outletName || ""} ({manageItemsModal.outletCode || ""})
+              </DialogTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1 border-amber-300 text-amber-700 hover:bg-amber-50 mr-6"
+                onClick={() => {
+                  setNewOutletRenameValue(manageItemsModal.outletName || manageItemsModal.outletCode || "");
+                  setRenameOutletModal({
+                    isOpen: true,
+                    oldOutletCode: manageItemsModal.outletCode,
+                    currentName: manageItemsModal.outletName || manageItemsModal.outletCode,
+                  });
+                }}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Rename Outlet
+              </Button>
+            </div>
             <DialogDescription className="text-xs">
               Add new items, update quantities/routes, or delete items from this sheet. Changes update truck load capacities automatically.
             </DialogDescription>
@@ -6495,6 +6533,72 @@ export default function DailyDispatchPage() {
                 {batchUpdateItemsMutation.isPending ? "Saving..." : "Save Changes"}
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Outlet Dialog */}
+      <Dialog
+        open={renameOutletModal.isOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenameOutletModal({ isOpen: false, oldOutletCode: "", currentName: "" });
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-amber-500" />
+              Rename Outlet
+            </DialogTitle>
+            <DialogDescription>
+              Rename this outlet for this dispatch sheet and update the master outlet database.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Current Identifier</Label>
+              <Input
+                value={renameOutletModal.oldOutletCode}
+                disabled
+                className="h-8 bg-slate-50 font-mono text-xs text-slate-500"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">New Outlet Name <span className="text-destructive">*</span></Label>
+              <Input
+                value={newOutletRenameValue}
+                onChange={(e) => setNewOutletRenameValue(e.target.value)}
+                placeholder="e.g. Caribou Village Gate Saar, Chicket Jidhafs"
+                className="h-9"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRenameOutletModal({ isOpen: false, oldOutletCode: "", currentName: "" })}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!newOutletRenameValue.trim() || renameOutletMutation.isPending}
+              onClick={() => {
+                if (renameOutletModal.oldOutletCode && newOutletRenameValue.trim()) {
+                  renameOutletMutation.mutate({
+                    oldOutletCode: renameOutletModal.oldOutletCode,
+                    newOutletName: newOutletRenameValue.trim(),
+                  });
+                }
+              }}
+              className="bg-primary text-white"
+            >
+              {renameOutletMutation.isPending ? "Renaming..." : "Save Name"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

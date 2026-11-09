@@ -153,6 +153,14 @@ export function AppSidebar() {
   const canViewItem = (item: MenuItem): boolean => {
     if (isSuperAdmin) return true;
     if (item.superAdminOnly) return false;
+    if (item.menuKey === "petty_cash" && (
+      user?.role === "supervisor" ||
+      user?.role?.includes("supervisor") ||
+      user?.role === "manager" ||
+      user?.role === "admin"
+    )) {
+      return true;
+    }
     if (!item.menuKey) return true;
     return hasReadPermission(item.menuKey);
   };

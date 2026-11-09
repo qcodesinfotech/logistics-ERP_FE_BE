@@ -156,6 +156,16 @@ export const permissionMiddleware = (menuKey: string) => {
       return next();
     }
 
+    // Allow supervisors and managers direct access to petty cash
+    if (menuKey === "petty_cash" && (
+      req.user.role === "manager" || 
+      req.user.role === "supervisor" || 
+      req.user.role?.includes("supervisor") ||
+      req.user.role === "admin"
+    )) {
+      return next();
+    }
+
     // Get user from database to check dynamic roleId
     const [dbUser] = await db.select().from(users).where(eq(users.id, req.user.id));
     if (!dbUser?.roleId) {
