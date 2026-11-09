@@ -3202,6 +3202,30 @@ export async function registerRoutes(
     }
   });
 
+  // Eligible users for petty cash accounts (Supervisors, Managers, Admins)
+  app.get("/api/petty-cash/eligible-users", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const allUsers = await db.select({
+        id: schema.users.id,
+        name: schema.users.name,
+        username: schema.users.username,
+        role: schema.users.role,
+        status: schema.users.status,
+      }).from(schema.users)
+      .where(eq(schema.users.status, "active"));
+
+      const eligible = allUsers.filter(u => {
+        const r = (u.role || "").toLowerCase();
+        return r.includes("supervisor") || r.includes("manager") || r.includes("admin");
+      });
+
+      res.json(eligible);
+    } catch (error: any) {
+      console.error("Eligible users error:", error);
+      res.status(500).json({ error: "Failed to fetch eligible users" });
+    }
+  });
+
   // Petty Cash - RBAC protected
   app.get("/api/petty-cash", authMiddleware, permissionMiddleware("petty_cash"), async (req: AuthRequest, res) => {
     const scope = getScopeFromRequest(req);

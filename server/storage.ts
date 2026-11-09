@@ -2658,22 +2658,13 @@ export class DatabaseStorage implements IStorage {
 
   // Petty Cash
   async getPettyCashAccounts(scope?: { shopId?: string | null; branchId?: string | null } | null): Promise<PettyCash[]> {
-    const conditions = [];
-    if (scope?.shopId) {
-      conditions.push(eq(pettyCash.shopId, scope.shopId));
-    }
-    if (scope?.branchId) {
-      conditions.push(eq(pettyCash.branchId, scope.branchId));
-    }
-    if (conditions.length > 0) {
-      return db.select().from(pettyCash).where(and(...conditions));
-    }
     return db.select().from(pettyCash);
   }
 
   async createPettyCash(data: InsertPettyCash): Promise<PettyCash> {
     const pcData = {
       ...data,
+      userId: (data as any).userId || null,
       currentBalance: data.openingBalance || "0.000",
     };
     const [pc] = await db.insert(pettyCash).values(pcData).returning();

@@ -53,10 +53,17 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import type { PettyCash, Shop, Branch, BankAccount } from "@shared/schema";
 
+interface EligibleUser {
+  id: string;
+  name: string;
+  username: string;
+  role: string;
+  status: string;
+}
+
 const pettyCashSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  shopId: z.string().optional(),
-  branchId: z.string().optional(),
+  userId: z.string().optional(),
   openingBalance: z.string().default("0.000"),
 });
 
@@ -102,8 +109,7 @@ export default function PettyCashPage() {
     resolver: zodResolver(pettyCashSchema),
     defaultValues: {
       name: "",
-      shopId: "",
-      branchId: "",
+      userId: "",
       openingBalance: "0.000",
     },
   });
@@ -167,46 +173,61 @@ export default function PettyCashPage() {
     queryKey: ["/api/petty-cash-transactions"],
   });
 
-  const { data: shops } = useQuery<Shop[]>({
-    queryKey: ["/api/shops"],
+  const { data: eligibleUsers = [] } = useQuery<EligibleUser[]>({
+    queryKey: ["/api/petty-cash/eligible-users"],
   });
 
-  const { data: branches } = useQuery<Branch[]>({
-    queryKey: ["/api/branches"],
-  });
+  const [selectedStaffId, setSelectedStaffId] = useState<string>("");
 
-  const branchLocations = (branches && branches.length > 0) ? branches : (shops || []);
+  const handleSelectStaff = (userId: string) => {
+    setSelectedStaffId(userId);
+    accountForm.setValue("userId", userId);
+    const staff = eligibleUsers.find(u => u.id === userId);
+    if (staff) {
+      const roleName = staff.role.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const accountName = `${staff.name || staff.username} - ${roleName}`;
+      accountForm.setValue("name", accountName);
+    }
+  };
 
   useEffect(() => {
-    if (isAccountDialogOpen && branchLocations.length > 0 && !accountForm.getValues("shopId")) {
-      accountForm.setValue("shopId", branchLocations[0].id);
-      accountForm.setValue("branchId", branchLocations[0].id);
+    if (isTransactionDialogOpen && pettyCashAccounts && pettyCashAccounts.length > 0) {
+      if (!transactionForm.getValues("pettyCashId")) {
+        const myAccount = pettyCashAccounts.find(acc => (acc as any).userId === user?.id);
+        if (myAccount) {
+          transactionForm.setValue("pettyCashId", myAccount.id);
+        } else if (pettyCashAccounts.length === 1) {
+          transactionForm.setValue("pettyCashId", pettyCashAccounts[0].id);
+        }
+      }
     }
-  }, [isAccountDialogOpen, branchLocations, accountForm]);
+  }, [isTransactionDialogOpen, pettyCashAccounts, user, transactionForm]);
 
   useEffect(() => {
-    if (isTransactionDialogOpen && pettyCashAccounts && pettyCashAccounts.length === 1 && !transactionForm.getValues("pettyCashId")) {
-      transactionForm.setValue("pettyCashId", pettyCashAccounts[0].id);
+    if (isRefundClaimOpen && pettyCashAccounts && pettyCashAccounts.length > 0 && claimAccountId === "all") {
+      const myAccount = pettyCashAccounts.find(acc => (acc as any).userId === user?.id);
+      if (myAccount && user?.role !== "super_admin" && user?.role !== "admin") {
+        setClaimAccountId(myAccount.id);
+      }
     }
-  }, [isTransactionDialogOpen, pettyCashAccounts, transactionForm]);
+  }, [isRefundClaimOpen, pettyCashAccounts, user, claimAccountId]);
 
   const { data: bankAccounts } = useQuery<BankAccount[]>({
     queryKey: ["/api/bank-accounts"],
   });
 
   const createAccountMutation = useMutation({
-    mutationFn: (data: PettyCashFormData) => {
-      const locationId = data.shopId || data.branchId || branchLocations[0]?.id || "";
-      return apiRequest("POST", "/api/petty-cash", {
-        ...data,
-        shopId: locationId,
-        branchId: locationId,
-      });
-    },
+    mutationFn: (data: PettyCashFormData) =>
+      apiRequest("POST", "/api/petty-cash", {
+        name: data.name.trim(),
+        userId: data.userId || undefined,
+        openingBalance: data.openingBalance || "0.000",
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/petty-cash"] });
       toast({ title: "Petty cash account created successfully" });
       setIsAccountDialogOpen(false);
+      setSelectedStaffId("");
       accountForm.reset();
     },
     onError: (error: unknown) => {
@@ -249,15 +270,6 @@ export default function PettyCashPage() {
     (sum, acc) => sum + parseFloat(acc.currentBalance || "0"),
     0
   ) || 0;
-
-  const getLocationName = (id: string | null | undefined) => {
-    if (!id) return "All Branches";
-    return branchLocations.find((b) => b.id === id)?.name || id;
-  };
-
-  const getShopName = (shopId: string) => {
-    return getLocationName(shopId);
-  };
 
   const claimTransactions = useMemo(() => {
     if (!transactions) return [];
@@ -315,8 +327,41 @@ export default function PettyCashPage() {
   };
 
   const accountColumns = [
-    { key: "name", header: "Name" },
-    { key: "shopId", header: "Branch / Location", render: (p: PettyCash) => getLocationName(p.branchId || p.shopId) },
+    {
+      key: "name",
+      header: "Account Name",
+      render: (p: PettyCash) => {
+        const isMyAccount = (p as any).userId === user?.id;
+        return (
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{p.name}</span>
+            {isMyAccount && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Your Account
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: "userId",
+      header: "Linked Staff / Login ID",
+      render: (p: PettyCash) => {
+        const staff = eligibleUsers.find((u) => u.id === (p as any).userId);
+        if (!staff) return <span className="text-muted-foreground text-xs italic">Unlinked</span>;
+        return (
+          <div className="text-xs">
+            <div className="font-medium text-slate-800 dark:text-slate-200">
+              {staff.name} <span className="text-muted-foreground font-mono">({staff.username})</span>
+            </div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+              {staff.role.replace(/_/g, " ")}
+            </div>
+          </div>
+        );
+      },
+    },
     {
       key: "openingBalance",
       header: "Opening",
@@ -503,74 +548,94 @@ export default function PettyCashPage() {
       </div>
 
       <Dialog open={isAccountDialogOpen} onOpenChange={setIsAccountDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Petty Cash Account</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-emerald-600" />
+              Open Petty Cash Account
+            </DialogTitle>
           </DialogHeader>
           <Form {...accountForm}>
-            <form onSubmit={accountForm.handleSubmit((d) => createAccountMutation.mutate(d))} className="space-y-4">
+            <form onSubmit={accountForm.handleSubmit((d) => createAccountMutation.mutate(d))} className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <FormLabel className="text-xs font-semibold">Select Eligible Staff Member / Position *</FormLabel>
+                <Select
+                  value={selectedStaffId}
+                  onValueChange={handleSelectStaff}
+                >
+                  <FormControl>
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Select Supervisor, Manager, or Admin" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {eligibleUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id} className="text-xs">
+                        <div className="flex items-center justify-between gap-3 w-full">
+                          <span className="font-medium">{u.name}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">({u.username})</span>
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
+                            {u.role.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Links this account to the staff member's login ID for tracking and refunds.
+                </p>
+              </div>
+
               <FormField
                 control={accountForm.control}
                 name="name"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Account Name *</FormLabel>
+                  <FormItem className="space-y-1.5">
+                    <FormLabel className="text-xs font-semibold">Account Name *</FormLabel>
                     <FormControl>
-                      <Input {...field} data-testid="input-account-name" />
+                      <Input
+                        {...field}
+                        placeholder="e.g. Kamaljit - Supervisor LMD"
+                        className="h-9 text-xs"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <FormField
-                control={accountForm.control}
-                name="shopId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Branch / Location *</FormLabel>
-                    <Select
-                      onValueChange={(val) => {
-                        field.onChange(val);
-                        accountForm.setValue("branchId", val);
-                      }}
-                      value={field.value || accountForm.watch("branchId") || ""}
-                    >
-                      <FormControl>
-                        <SelectTrigger data-testid="select-shop">
-                          <SelectValue placeholder="Select branch / location" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {branchLocations.map((loc) => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+
               <FormField
                 control={accountForm.control}
                 name="openingBalance"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Opening Balance (BD)</FormLabel>
+                  <FormItem className="space-y-1.5">
+                    <FormLabel className="text-xs font-semibold">Opening Balance (BD)</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" step="0.001" data-testid="input-opening-balance" />
+                      <Input
+                        {...field}
+                        type="number"
+                        step="0.001"
+                        placeholder="0.000"
+                        className="h-9 text-xs font-mono"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsAccountDialogOpen(false)}>
+
+              <DialogFooter className="pt-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsAccountDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createAccountMutation.isPending} data-testid="button-save-account">
-                  {createAccountMutation.isPending ? "Saving..." : "Create"}
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={createAccountMutation.isPending || !accountForm.watch("name")}
+                  className="bg-primary text-white"
+                >
+                  {createAccountMutation.isPending ? "Creating..." : "Create Account"}
                 </Button>
               </DialogFooter>
             </form>

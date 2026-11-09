@@ -559,6 +559,7 @@ export const bankTransactions = pgTable("bank_transactions", {
 export const pettyCash = pgTable("petty_cash", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
+  userId: varchar("user_id"),
   companyId: varchar("company_id"),
   shopId: varchar("shop_id"),
   branchId: varchar("branch_id"),
