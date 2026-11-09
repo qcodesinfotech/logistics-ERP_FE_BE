@@ -1092,13 +1092,32 @@ export class DatabaseStorage implements IStorage {
     await db.delete(companies).where(eq(companies.id, id));
   }
 
-  // Shops
+  // Shops - In this Logistics ERP, branches represent operational locations / shops
   async getShops(): Promise<Shop[]> {
-    return [];
+    const allBranches = await db.select().from(branches);
+    return allBranches.map(b => ({
+      id: b.id,
+      name: b.name,
+      companyId: b.companyId || "",
+      address: b.address || "",
+      phone: b.phone || "",
+      status: b.status || "active",
+      createdAt: (b as any).createdAt || new Date(),
+    })) as unknown as Shop[];
   }
 
   async getShop(id: string): Promise<Shop | undefined> {
-    return undefined;
+    const [b] = await db.select().from(branches).where(eq(branches.id, id));
+    if (!b) return undefined;
+    return {
+      id: b.id,
+      name: b.name,
+      companyId: b.companyId || "",
+      address: b.address || "",
+      phone: b.phone || "",
+      status: b.status || "active",
+      createdAt: (b as any).createdAt || new Date(),
+    } as unknown as Shop;
   }
 
   async createShop(data: InsertShop): Promise<Shop> {

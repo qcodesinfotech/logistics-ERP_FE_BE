@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft, Upload, FileText, Printer, Download, Receipt, Paperclip, ExternalLink, CheckCircle } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -51,11 +51,11 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { useAuth } from "@/contexts/auth-context";
-import type { PettyCash, Shop, BankAccount } from "@shared/schema";
+import type { PettyCash, Shop, Branch, BankAccount } from "@shared/schema";
 
 const pettyCashSchema = z.object({
   name: z.string().min(1, "Name is required"),
-  shopId: z.string().min(1, "Shop is required"),
+  shopId: z.string().optional(),
   branchId: z.string().optional(),
   openingBalance: z.string().default("0.000"),
 });
@@ -170,13 +170,33 @@ export default function PettyCashPage() {
   const { data: shops } = useQuery<Shop[]>({
     queryKey: ["/api/shops"],
   });
-  
+
+  const { data: branches } = useQuery<Branch[]>({
+    queryKey: ["/api/branches"],
+  });
+
+  const branchLocations = (branches && branches.length > 0) ? branches : (shops || []);
+
+  useEffect(() => {
+    if (isAccountDialogOpen && branchLocations.length > 0 && !accountForm.getValues("shopId")) {
+      accountForm.setValue("shopId", branchLocations[0].id);
+      accountForm.setValue("branchId", branchLocations[0].id);
+    }
+  }, [isAccountDialogOpen, branchLocations, accountForm]);
+
   const { data: bankAccounts } = useQuery<BankAccount[]>({
     queryKey: ["/api/bank-accounts"],
   });
 
   const createAccountMutation = useMutation({
-    mutationFn: (data: PettyCashFormData) => apiRequest("POST", "/api/petty-cash", data),
+    mutationFn: (data: PettyCashFormData) => {
+      const locationId = data.shopId || data.branchId || branchLocations[0]?.id || "";
+      return apiRequest("POST", "/api/petty-cash", {
+        ...data,
+        shopId: locationId,
+        branchId: locationId,
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/petty-cash"] });
       toast({ title: "Petty cash account created successfully" });
@@ -224,8 +244,13 @@ export default function PettyCashPage() {
     0
   ) || 0;
 
+  const getLocationName = (id: string | null | undefined) => {
+    if (!id) return "All Branches";
+    return branchLocations.find((b) => b.id === id)?.name || id;
+  };
+
   const getShopName = (shopId: string) => {
-    return shops?.find((s) => s.id === shopId)?.name || "Unknown";
+    return getLocationName(shopId);
   };
 
   const claimTransactions = useMemo(() => {
@@ -285,7 +310,7 @@ export default function PettyCashPage() {
 
   const accountColumns = [
     { key: "name", header: "Name" },
-    { key: "shopId", header: "Shop", render: (p: PettyCash) => getShopName(p.shopId) },
+    { key: "shopId", header: "Branch / Location", render: (p: PettyCash) => getLocationName(p.branchId || p.shopId) },
     {
       key: "openingBalance",
       header: "Opening",
@@ -496,17 +521,23 @@ export default function PettyCashPage() {
                 name="shopId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Shop *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <FormLabel>Branch / Location *</FormLabel>
+                    <Select
+                      onValueChange={(val) => {
+                        field.onChange(val);
+                        accountForm.setValue("branchId", val);
+                      }}
+                      value={field.value || accountForm.watch("branchId") || ""}
+                    >
                       <FormControl>
                         <SelectTrigger data-testid="select-shop">
-                          <SelectValue placeholder="Select shop" />
+                          <SelectValue placeholder="Select branch / location" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {shops?.map((shop) => (
-                          <SelectItem key={shop.id} value={shop.id}>
-                            {shop.name}
+                        {branchLocations.map((loc) => (
+                          <SelectItem key={loc.id} value={loc.id}>
+                            {loc.name}
                           </SelectItem>
                         ))}
                       </SelectContent>

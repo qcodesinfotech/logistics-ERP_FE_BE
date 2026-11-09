@@ -560,7 +560,7 @@ export const pettyCash = pgTable("petty_cash", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   companyId: varchar("company_id"),
-  shopId: varchar("shop_id").notNull(),
+  shopId: varchar("shop_id"),
   branchId: varchar("branch_id"),
   openingBalance: decimal("opening_balance", { precision: 12, scale: 3 }).default("0.000"),
   currentBalance: decimal("current_balance", { precision: 12, scale: 3 }).default("0.000"),
