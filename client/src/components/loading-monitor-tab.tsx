@@ -1659,7 +1659,19 @@ export default function LoadingMonitorTab({
                 <Label className="text-xs">Loading & Dispatch Status</Label>
                 <Select
                   value={timingModal.loadingStatus || "pending"}
-                  onValueChange={(val) => setTimingModal(prev => prev ? { ...prev, loadingStatus: val } : null)}
+                  onValueChange={(val) => {
+                    const hasStart = Boolean(timingModal.loadingStartTime && timingModal.loadingStartTime.trim() !== "" && timingModal.loadingStartTime.trim() !== "-");
+                    const hasEnd = Boolean(timingModal.loadingEndTime && timingModal.loadingEndTime.trim() !== "" && timingModal.loadingEndTime.trim() !== "-");
+                    if (val === "loaded" && !hasStart) {
+                      toast({ title: "Cannot Complete Loading", description: "Please record Loading Start Time before marking loading completed.", variant: "destructive" });
+                      return;
+                    }
+                    if (val === "dispatched" && (!hasStart || !hasEnd)) {
+                      toast({ title: "Loading Incomplete", description: "Please record both Loading Start Time and Loading Completed Time before marking dispatched.", variant: "destructive" });
+                      return;
+                    }
+                    setTimingModal(prev => prev ? { ...prev, loadingStatus: val } : null);
+                  }}
                 >
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
@@ -1667,8 +1679,21 @@ export default function LoadingMonitorTab({
                   <SelectContent>
                     <SelectItem value="pending">Pending / Not Started</SelectItem>
                     <SelectItem value="loading">Loading in Progress</SelectItem>
-                    <SelectItem value="loaded">Loading Completed</SelectItem>
-                    <SelectItem value="dispatched">Dispatched / En Route</SelectItem>
+                    <SelectItem
+                      value="loaded"
+                      disabled={!timingModal.loadingStartTime || timingModal.loadingStartTime.trim() === "" || timingModal.loadingStartTime.trim() === "-"}
+                    >
+                      Loading Completed
+                    </SelectItem>
+                    <SelectItem
+                      value="dispatched"
+                      disabled={
+                        !timingModal.loadingStartTime || timingModal.loadingStartTime.trim() === "" || timingModal.loadingStartTime.trim() === "-" ||
+                        !timingModal.loadingEndTime || timingModal.loadingEndTime.trim() === "" || timingModal.loadingEndTime.trim() === "-"
+                      }
+                    >
+                      Dispatched / En Route
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1707,6 +1732,7 @@ export default function LoadingMonitorTab({
                     onChange={(e) => setTimingModal(prev => prev ? { ...prev, loadingEndTime: e.target.value } : null)}
                     placeholder="e.g. 09:15 AM"
                     className="h-8 text-xs"
+                    disabled={!timingModal.loadingStartTime || timingModal.loadingStartTime.trim() === "" || timingModal.loadingStartTime.trim() === "-"}
                   />
                   <Button
                     type="button"
@@ -1714,6 +1740,11 @@ export default function LoadingMonitorTab({
                     variant="secondary"
                     className="h-8 text-xs shrink-0"
                     onClick={() => {
+                      const hasStart = Boolean(timingModal.loadingStartTime && timingModal.loadingStartTime.trim() !== "" && timingModal.loadingStartTime.trim() !== "-");
+                      if (!hasStart) {
+                        toast({ title: "Cannot Complete Loading", description: "Please record Loading Start Time before completing loading.", variant: "destructive" });
+                        return;
+                      }
                       const now = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bahrain", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date());
                       setTimingModal(prev => prev ? { ...prev, loadingEndTime: now, loadingStatus: "loaded" } : null);
                     }}
@@ -1732,6 +1763,10 @@ export default function LoadingMonitorTab({
                     onChange={(e) => setTimingModal(prev => prev ? { ...prev, departTime: e.target.value } : null)}
                     placeholder="e.g. 09:30 AM"
                     className="h-8 text-xs"
+                    disabled={
+                      !timingModal.loadingStartTime || timingModal.loadingStartTime.trim() === "" || timingModal.loadingStartTime.trim() === "-" ||
+                      !timingModal.loadingEndTime || timingModal.loadingEndTime.trim() === "" || timingModal.loadingEndTime.trim() === "-"
+                    }
                   />
                   <Button
                     type="button"
@@ -1739,6 +1774,12 @@ export default function LoadingMonitorTab({
                     variant="secondary"
                     className="h-8 text-xs shrink-0"
                     onClick={() => {
+                      const hasStart = Boolean(timingModal.loadingStartTime && timingModal.loadingStartTime.trim() !== "" && timingModal.loadingStartTime.trim() !== "-");
+                      const hasEnd = Boolean(timingModal.loadingEndTime && timingModal.loadingEndTime.trim() !== "" && timingModal.loadingEndTime.trim() !== "-");
+                      if (!hasStart || !hasEnd) {
+                        toast({ title: "Loading Incomplete", description: "Both Loading Start Time and Loading Completed Time must be recorded before departure.", variant: "destructive" });
+                        return;
+                      }
                       const now = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Bahrain", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date());
                       setTimingModal(prev => prev ? { ...prev, departTime: now, loadingStatus: "dispatched" } : null);
                     }}
@@ -1776,6 +1817,19 @@ export default function LoadingMonitorTab({
                 disabled={saveFullTimingMutation.isPending}
                 onClick={() => {
                   if (!timingModal) return;
+                  const hasStart = Boolean(timingModal.loadingStartTime && timingModal.loadingStartTime.trim() !== "" && timingModal.loadingStartTime.trim() !== "-");
+                  const hasEnd = Boolean(timingModal.loadingEndTime && timingModal.loadingEndTime.trim() !== "" && timingModal.loadingEndTime.trim() !== "-");
+                  const hasDepart = Boolean(timingModal.departTime && timingModal.departTime.trim() !== "" && timingModal.departTime.trim() !== "-");
+                  if (timingModal.loadingStatus !== "pending") {
+                    if ((timingModal.loadingStatus === "loaded" || hasEnd) && !hasStart) {
+                      toast({ title: "Cannot Complete Loading", description: "Please record Loading Start Time before completing loading.", variant: "destructive" });
+                      return;
+                    }
+                    if ((timingModal.loadingStatus === "dispatched" || hasDepart) && (!hasStart || !hasEnd)) {
+                      toast({ title: "Loading Incomplete", description: "Both Loading Start Time and Loading Completed Time must be recorded before departure.", variant: "destructive" });
+                      return;
+                    }
+                  }
                   saveFullTimingMutation.mutate({
                     truckAssignmentId: timingModal.truckAssignmentId,
                     loadingStartTime: timingModal.loadingStartTime,

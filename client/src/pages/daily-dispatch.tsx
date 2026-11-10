@@ -2070,6 +2070,15 @@ function ZoneColumn({
       setTimingForm(payload);
       updateTimingMutation.mutate(payload);
     } else if (action === "finish_loading") {
+      const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
+      if (!hasStarted) {
+        toast({
+          title: "Cannot Complete Loading",
+          description: "Please record Loading Start Time before marking loading completed.",
+          variant: "destructive",
+        });
+        return;
+      }
       const payload = {
         ...timingForm,
         loadingEndTime: now,
@@ -3202,7 +3211,19 @@ function ZoneColumn({
                 <Label className="text-xs">Loading & Dispatch Status</Label>
                 <Select
                   value={timingForm.loadingStatus || "pending"}
-                  onValueChange={(val) => setTimingForm(prev => ({ ...prev, loadingStatus: val }))}
+                  onValueChange={(val) => {
+                    const hasStart = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime.trim() !== "-");
+                    const hasEnd = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime.trim() !== "-");
+                    if (val === "loaded" && !hasStart) {
+                      toast({ title: "Cannot Complete Loading", description: "Please record Loading Start Time before marking loading completed.", variant: "destructive" });
+                      return;
+                    }
+                    if (val === "dispatched" && (!hasStart || !hasEnd)) {
+                      toast({ title: "Loading Incomplete", description: "Please record both Loading Start Time and Loading Completed Time before marking dispatched.", variant: "destructive" });
+                      return;
+                    }
+                    setTimingForm(prev => ({ ...prev, loadingStatus: val }));
+                  }}
                 >
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
@@ -3210,8 +3231,21 @@ function ZoneColumn({
                   <SelectContent>
                     <SelectItem value="pending">Pending / Not Started</SelectItem>
                     <SelectItem value="loading">Loading in Progress</SelectItem>
-                    <SelectItem value="loaded">Loading Completed</SelectItem>
-                    <SelectItem value="dispatched">Dispatched / En Route</SelectItem>
+                    <SelectItem
+                      value="loaded"
+                      disabled={!timingForm.loadingStartTime || timingForm.loadingStartTime.trim() === "" || timingForm.loadingStartTime.trim() === "-"}
+                    >
+                      Loading Completed
+                    </SelectItem>
+                    <SelectItem
+                      value="dispatched"
+                      disabled={
+                        !timingForm.loadingStartTime || timingForm.loadingStartTime.trim() === "" || timingForm.loadingStartTime.trim() === "-" ||
+                        !timingForm.loadingEndTime || timingForm.loadingEndTime.trim() === "" || timingForm.loadingEndTime.trim() === "-"
+                      }
+                    >
+                      Dispatched / En Route
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -3247,13 +3281,21 @@ function ZoneColumn({
                     onChange={(e) => setTimingForm(prev => ({ ...prev, loadingEndTime: e.target.value }))}
                     placeholder="e.g. 09:15 AM"
                     className="h-8 text-xs"
+                    disabled={!timingForm.loadingStartTime || timingForm.loadingStartTime.trim() === "" || timingForm.loadingStartTime.trim() === "-"}
                   />
                   <Button
                     type="button"
                     size="sm"
                     variant="secondary"
                     className="h-8 text-xs shrink-0"
-                    onClick={() => setTimingForm(prev => ({ ...prev, loadingEndTime: getNowFormatted(), loadingStatus: "loaded" }))}
+                    onClick={() => {
+                      const hasStart = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime.trim() !== "-");
+                      if (!hasStart) {
+                        toast({ title: "Cannot Complete Loading", description: "Please record Loading Start Time before completing loading.", variant: "destructive" });
+                        return;
+                      }
+                      setTimingForm(prev => ({ ...prev, loadingEndTime: getNowFormatted(), loadingStatus: "loaded" }));
+                    }}
                   >
                     Set Now
                   </Button>
@@ -3277,13 +3319,25 @@ function ZoneColumn({
                     onChange={(e) => setTimingForm(prev => ({ ...prev, departTime: e.target.value }))}
                     placeholder="e.g. 09:30 AM"
                     className="h-8 text-xs"
+                    disabled={
+                      !timingForm.loadingStartTime || timingForm.loadingStartTime.trim() === "" || timingForm.loadingStartTime.trim() === "-" ||
+                      !timingForm.loadingEndTime || timingForm.loadingEndTime.trim() === "" || timingForm.loadingEndTime.trim() === "-"
+                    }
                   />
                   <Button
                     type="button"
                     size="sm"
                     variant="secondary"
                     className="h-8 text-xs shrink-0"
-                    onClick={() => setTimingForm(prev => ({ ...prev, departTime: getNowFormatted(), loadingStatus: "dispatched" }))}
+                    onClick={() => {
+                      const hasStart = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime.trim() !== "-");
+                      const hasEnd = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime.trim() !== "-");
+                      if (!hasStart || !hasEnd) {
+                        toast({ title: "Loading Incomplete", description: "Both Loading Start Time and Loading Completed Time must be recorded before departure.", variant: "destructive" });
+                        return;
+                      }
+                      setTimingForm(prev => ({ ...prev, departTime: getNowFormatted(), loadingStatus: "dispatched" }));
+                    }}
                   >
                     Set Now
                   </Button>
@@ -3316,13 +3370,20 @@ function ZoneColumn({
                   type="button"
                   size="sm"
                   onClick={() => {
-                    // Only validate dispatch completion if user is explicitly setting dispatched status or a new depart time
-                    const isExplicitDispatch = (timingForm.loadingStatus === "dispatched" && activeTruck?.loadingStatus !== "dispatched") ||
-                                               (timingForm.departTime && !activeTruck?.departTime);
-                    if (isExplicitDispatch) {
-                      const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime !== "-");
-                      const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime !== "-") || timingForm.loadingStatus === "loaded";
-                      if (!hasStarted || !hasCompleted) {
+                    const hasStarted = !!(timingForm.loadingStartTime && timingForm.loadingStartTime.trim() !== "" && timingForm.loadingStartTime.trim() !== "-");
+                    const hasCompleted = !!(timingForm.loadingEndTime && timingForm.loadingEndTime.trim() !== "" && timingForm.loadingEndTime.trim() !== "-");
+                    const hasDeparted = !!(timingForm.departTime && timingForm.departTime.trim() !== "" && timingForm.departTime.trim() !== "-");
+
+                    if (timingForm.loadingStatus !== "pending") {
+                      if ((timingForm.loadingStatus === "loaded" || hasCompleted) && !hasStarted) {
+                        toast({
+                          title: "Cannot Complete Loading",
+                          description: "Cannot mark loading completed before commencing loading. Please record Loading Start Time first.",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      if ((timingForm.loadingStatus === "dispatched" || hasDeparted) && (!hasStarted || !hasCompleted)) {
                         toast({
                           title: "Loading Incomplete",
                           description: "Cannot mark truck departed: Both loading start and loading completion must be recorded first.",

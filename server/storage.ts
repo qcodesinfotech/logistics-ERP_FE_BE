@@ -4307,6 +4307,31 @@ export class DatabaseStorage implements IStorage {
         return attDate === sheetDateStr;
       });
 
+      // Resolve userId <-> employeeId aliases so attendance matches regardless of which ID was saved
+      const allUsersList = await db.select({ id: users.id, employeeId: users.employeeId }).from(users);
+      const getDriverAliasSet = (id?: string | null): Set<string> => {
+        const set = new Set<string>();
+        if (!id) return set;
+        set.add(id);
+        for (const u of allUsersList) {
+          if (u.id === id && u.employeeId) set.add(u.employeeId);
+          if (u.employeeId === id && u.id) set.add(u.id);
+        }
+        return set;
+      };
+
+      const parseTimeToMinutes = (str?: string | null): number | null => {
+        if (!str) return null;
+        const m = String(str).trim().match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/i);
+        if (!m) return null;
+        let h = parseInt(m[1], 10);
+        const min = parseInt(m[2], 10);
+        const ampm = m[3]?.toUpperCase();
+        if (ampm === "PM" && h < 12) h += 12;
+        if (ampm === "AM" && h === 12) h = 0;
+        return h * 60 + min;
+      };
+
       for (const t of truckAssigns) {
         // Attendance check-in and morning departure time only apply to Trip 1!
         // Trip 2 and subsequent trips have their own loading/dispatch lifecycle and cannot inherit Trip 1's departure!
@@ -4315,11 +4340,11 @@ export class DatabaseStorage implements IStorage {
         }
 
         const veh = truckMap.get(t.truckId);
-        // Find matching attendance for THIS truck / driver on THIS date
-        // Prioritize matching by assigned driverId first, then by truckId
+        // Find matching attendance for THIS truck / driver / crew on THIS date
         let matchedAtt = null;
-        if (t.driverId) {
-          matchedAtt = sheetAttendances.find(a => a.driverId === t.driverId);
+        const driverAliases = getDriverAliasSet(t.driverId);
+        if (driverAliases.size > 0) {
+          matchedAtt = sheetAttendances.find(a => a.driverId && driverAliases.has(a.driverId));
         }
         if (!matchedAtt && t.truckId) {
           matchedAtt = sheetAttendances.find(a => {
@@ -4330,6 +4355,10 @@ export class DatabaseStorage implements IStorage {
             const vehName = veh?.name?.trim().toLowerCase();
             return aTrk === tTrk || (vehPlate && aTrk === vehPlate) || (vehName && aTrk === vehName);
           });
+        }
+        if (!matchedAtt && t.crewMemberId) {
+          const crewAliases = getDriverAliasSet(t.crewMemberId);
+          matchedAtt = sheetAttendances.find(a => a.driverId && crewAliases.has(a.driverId));
         }
 
         let needsUpdate = false;
@@ -4346,28 +4375,38 @@ export class DatabaseStorage implements IStorage {
             }
           }
 
-          // Reconcile departureTime ONLY if t.departTime is NOT already set!
-          // NEVER mutate an already recorded departure time on read!
+          // Reconcile departureTime ONLY if:
+          // 1. t.departTime is NOT already set
+          // 2. Loading has BOTH started (loadingStartTime) and completed (loadingEndTime / loaded status)
+          // 3. The GPS departure time did NOT occur before loading ended (prevents stale pre-loading GPS jitter)
           const hasExistingDepart = Boolean(t.departTime && t.departTime.trim() !== "" && t.departTime !== "-");
-          if (matchedAtt.departureTime) {
+          const hasStarted = Boolean(t.loadingStartTime && t.loadingStartTime.trim() !== "" && t.loadingStartTime !== "-");
+          const hasCompleted = Boolean(t.loadingEndTime && t.loadingEndTime.trim() !== "" && t.loadingEndTime !== "-") ||
+                               t.loadingStatus === "loaded" || t.loadingStatus === "dispatched";
+
+          if (matchedAtt.departureTime && hasStarted && hasCompleted) {
             const formattedDep = formatTime12h(matchedAtt.departureTime);
-            if (!hasExistingDepart) {
-              t.departTime = formattedDep;
-              updateData.departTime = formattedDep;
-              needsUpdate = true;
-              (t as any).isAutoDeparted = true;
-              if (t.loadingStatus !== "dispatched") {
-                t.loadingStatus = "dispatched";
-                updateData.loadingStatus = "dispatched";
+            const depMins = parseTimeToMinutes(formattedDep);
+            const startMins = parseTimeToMinutes(t.loadingStartTime);
+            const endMins = parseTimeToMinutes(t.loadingEndTime);
+            const isBeforeLoadingEnd =
+              (depMins !== null && startMins !== null && depMins + 2 < startMins) ||
+              (depMins !== null && endMins !== null && depMins + 2 < endMins);
+
+            if (!isBeforeLoadingEnd) {
+              if (!hasExistingDepart) {
+                t.departTime = formattedDep;
+                updateData.departTime = formattedDep;
                 needsUpdate = true;
+                (t as any).isAutoDeparted = true;
+                if (t.loadingStatus !== "dispatched") {
+                  t.loadingStatus = "dispatched";
+                  updateData.loadingStatus = "dispatched";
+                  needsUpdate = true;
+                }
+              } else if (t.departTime === formattedDep) {
+                (t as any).isAutoDeparted = true;
               }
-              if (!t.loadingEndTime || t.loadingEndTime.trim() === "" || t.loadingEndTime === "-") {
-                t.loadingEndTime = formattedDep;
-                updateData.loadingEndTime = formattedDep;
-                needsUpdate = true;
-              }
-            } else if (t.departTime === formattedDep) {
-              (t as any).isAutoDeparted = true;
             }
           }
 
