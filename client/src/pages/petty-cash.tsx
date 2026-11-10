@@ -174,6 +174,7 @@ export default function PettyCashPage() {
   const transactionType = transactionForm.watch("type");
 
   const [isRefundClaimOpen, setIsRefundClaimOpen] = useState(false);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
   const [claimAccountId, setClaimAccountId] = useState<string>("all");
   const [claimStartDate, setClaimStartDate] = useState<string>("");
   const [claimEndDate, setClaimEndDate] = useState<string>("");
@@ -444,6 +445,27 @@ export default function PettyCashPage() {
     0
   ) || 0;
 
+  const selectedAccountObj = useMemo(
+    () => (selectedAccountId !== "all" ? pettyCashAccounts?.find(a => a.id === selectedAccountId) : null),
+    [pettyCashAccounts, selectedAccountId]
+  );
+
+  const displayedAccounts = useMemo(() => {
+    if (!pettyCashAccounts) return [];
+    if (selectedAccountId === "all") return pettyCashAccounts;
+    return pettyCashAccounts.filter(a => a.id === selectedAccountId);
+  }, [pettyCashAccounts, selectedAccountId]);
+
+  const filteredTransactions = useMemo(() => {
+    if (!transactions) return [];
+    if (selectedAccountId === "all") return transactions;
+    return transactions.filter(t => t.pettyCashId === selectedAccountId);
+  }, [transactions, selectedAccountId]);
+
+  const displayedBalance = selectedAccountObj
+    ? parseFloat(selectedAccountObj.currentBalance || "0")
+    : totalBalance;
+
   const claimTransactions = useMemo(() => {
     if (!transactions) return [];
     return transactions.filter((t) => {
@@ -562,6 +584,22 @@ export default function PettyCashPage() {
       header: "Date",
       render: (t: PettyCashTransaction) => new Date(t.transactionDate).toLocaleDateString(),
     },
+    ...(selectedAccountId === "all"
+      ? [
+          {
+            key: "pettyCashId",
+            header: "Account Holder",
+            render: (t: PettyCashTransaction) => {
+              const acc = pettyCashAccounts?.find(a => a.id === t.pettyCashId);
+              return (
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                  {acc?.name || "-"}
+                </span>
+              );
+            },
+          },
+        ]
+      : []),
     {
       key: "type",
       header: "Type",
@@ -669,7 +707,16 @@ export default function PettyCashPage() {
         description="Manage petty cash accounts and transactions"
       >
         <div className="flex gap-2">
-          <Button onClick={() => setIsRefundClaimOpen(true)} variant="outline" className="border-indigo-200 text-indigo-700 hover:bg-indigo-50">
+          <Button
+            onClick={() => {
+              if (selectedAccountId !== "all") {
+                setClaimAccountId(selectedAccountId);
+              }
+              setIsRefundClaimOpen(true);
+            }}
+            variant="outline"
+            className="border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+          >
             <Receipt className="h-4 w-4 mr-2 text-indigo-600" />
             Claim Refund
           </Button>
@@ -682,7 +729,9 @@ export default function PettyCashPage() {
                 amount: "",
                 description: "",
                 reference: "",
-                pettyCashId: myPettyCashAccount?.id || (pettyCashAccounts?.[0]?.id ?? ""),
+                pettyCashId:
+                  (selectedAccountId !== "all" ? selectedAccountId : myPettyCashAccount?.id) ||
+                  (pettyCashAccounts?.[0]?.id ?? ""),
               });
               setIsTransactionDialogOpen(true);
             }}
@@ -699,12 +748,48 @@ export default function PettyCashPage() {
         </div>
       </PageHeader>
 
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-muted/30 p-3 rounded-lg border">
+        <div className="flex items-center gap-2">
+          <Wallet className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Account Filter:</span>
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+            <SelectTrigger className="w-full sm:w-[300px] bg-background" data-testid="select-account-filter">
+              <SelectValue placeholder="All Accounts" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Accounts (All Account Holders)</SelectItem>
+              {pettyCashAccounts?.map((acc) => {
+                const staff = eligibleUsers.find((u) => u.id === (acc as any).userId);
+                return (
+                  <SelectItem key={acc.id} value={acc.id}>
+                    {acc.name}{staff?.username ? ` (${staff.username})` : ""}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          {selectedAccountId !== "all" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setSelectedAccountId("all")}
+              className="text-xs shrink-0"
+            >
+              Show All
+            </Button>
+          )}
+        </div>
+      </div>
+
       {isLoading ? (
         <MetricCardsSkeleton count={1} />
       ) : (
         <MetricCard
-          title="Total Petty Cash"
-          value={totalBalance}
+          title={selectedAccountObj ? `${selectedAccountObj.name} — Current Balance` : "Total Petty Cash (All Accounts)"}
+          value={displayedBalance}
           icon={Wallet}
           isCurrency
         />
@@ -712,8 +797,13 @@ export default function PettyCashPage() {
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Accounts</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-base">
+              {selectedAccountObj ? "Selected Account" : "Accounts"}
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">
+              {selectedAccountObj ? "Showing 1 account holder" : `${displayedAccounts.length} account holders`}
+            </span>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -727,28 +817,38 @@ export default function PettyCashPage() {
             ) : (
               <DataTable
                 columns={accountColumns}
-                data={pettyCashAccounts}
+                data={displayedAccounts}
                 getRowKey={(p) => p.id}
+                onRowClick={(p) => setSelectedAccountId((prev) => (prev === p.id ? "all" : p.id))}
               />
             )}
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recent Transactions</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-base">
+              {selectedAccountObj ? `${selectedAccountObj.name} — Transactions` : "Recent Transactions"}
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">
+              {filteredTransactions.length} transaction{filteredTransactions.length === 1 ? "" : "s"}
+            </span>
           </CardHeader>
           <CardContent>
-            {!transactions || transactions.length === 0 ? (
+            {filteredTransactions.length === 0 ? (
               <EmptyState
                 icon={Wallet}
                 title="No transactions"
-                description="Record deposits and expenses."
+                description={
+                  selectedAccountObj
+                    ? `No transactions recorded yet for ${selectedAccountObj.name}.`
+                    : "Record deposits and expenses."
+                }
               />
             ) : (
               <DataTable
                 columns={transactionColumns}
-                data={transactions.slice(0, 10)}
+                data={filteredTransactions}
                 getRowKey={(t) => t.id}
               />
             )}
