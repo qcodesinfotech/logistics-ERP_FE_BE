@@ -70,10 +70,17 @@ const complianceStorage = multer.diskStorage({
 
 const invoiceUpload = multer({
   storage: invoiceStorage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"];
-    if (allowedTypes.includes(file.mimetype)) {
+    const mime = (file.mimetype || "").toLowerCase();
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const allowedExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp", ".pdf"];
+    if (
+      mime.startsWith("image/") ||
+      mime === "application/pdf" ||
+      mime === "application/x-pdf" ||
+      allowedExts.includes(ext)
+    ) {
       cb(null, true);
     } else {
       cb(new Error("Invalid file type. Only images and PDFs are allowed."));
@@ -551,22 +558,90 @@ export async function registerRoutes(
     }
   });
 
-  // Petty cash receipt upload for bills and refund claims
-  app.post("/api/upload/receipt", authMiddleware, invoiceUpload.single("file"), (req: AuthRequest, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
+  // Petty cash receipt upload for bills and refund claims (with friendly Multer error handling)
+  app.post("/api/upload/receipt", authMiddleware, (req: AuthRequest, res) => {
+    invoiceUpload.single("file")(req, res, (uploadErr: any) => {
+      if (uploadErr) {
+        console.error("Receipt multer upload error:", uploadErr);
+        return res.status(400).json({ error: uploadErr.message || "Invalid file upload" });
       }
-      const fileUrl = `/uploads/invoices/${req.file.filename}`;
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: "No file uploaded" });
+        }
+        const fileUrl = `/uploads/invoices/${req.file.filename}`;
+        res.json({
+          url: fileUrl,
+          filename: req.file.originalname,
+          size: req.file.size,
+          mimetype: req.file.mimetype
+        });
+      } catch (error) {
+        console.error("Receipt upload error:", error);
+        res.status(500).json({ error: "Failed to upload receipt" });
+      }
+    });
+  });
+
+  // Chunked receipt upload (bypasses proxy/nginx 1MB body limit for large PDFs & tablet photos)
+  const chunkTempDir = path.join(uploadDir, ".chunks");
+  if (!fs.existsSync(chunkTempDir)) {
+    fs.mkdirSync(chunkTempDir, { recursive: true });
+  }
+  app.post("/api/upload/receipt-chunk", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { uploadId, chunkIndex, totalChunks, filename, mimetype, data } = req.body || {};
+      const safeId = String(uploadId || "").replace(/[^a-zA-Z0-9_-]/g, "");
+      const idx = Number(chunkIndex);
+      const total = Number(totalChunks);
+      if (!safeId || !Number.isInteger(idx) || !Number.isInteger(total) || total < 1 || total > 100 || idx < 0 || idx >= total || typeof data !== "string") {
+        return res.status(400).json({ error: "Invalid upload chunk payload" });
+      }
+
+      const rawOrigName = String(filename || "receipt.bin");
+      const ext = path.extname(rawOrigName).toLowerCase() || (String(mimetype || "").includes("pdf") ? ".pdf" : ".jpg");
+      const allowedExts = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp", ".pdf"];
+      if (!allowedExts.includes(ext)) {
+        return res.status(400).json({ error: "Invalid file type. Only images and PDFs are allowed." });
+      }
+
+      const chunkBuf = Buffer.from(data, "base64");
+      const chunkFilePath = path.join(chunkTempDir, `${safeId}.part${idx}`);
+      await fs.promises.writeFile(chunkFilePath, chunkBuf);
+
+      if (idx < total - 1) {
+        return res.json({ partial: true, chunkIndex: idx });
+      }
+
+      // Reassemble all chunks into final file
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      const finalFilename = `${uniqueSuffix}${ext}`;
+      const finalPath = path.join(uploadDir, finalFilename);
+      const buffers: Buffer[] = [];
+      for (let i = 0; i < total; i++) {
+        const partPath = path.join(chunkTempDir, `${safeId}.part${i}`);
+        if (!fs.existsSync(partPath)) {
+          return res.status(400).json({ error: `Missing upload chunk ${i + 1} of ${total}` });
+        }
+        buffers.push(await fs.promises.readFile(partPath));
+      }
+      const combined = Buffer.concat(buffers);
+      await fs.promises.writeFile(finalPath, combined);
+
+      // Cleanup chunk temp files
+      for (let i = 0; i < total; i++) {
+        fs.promises.unlink(path.join(chunkTempDir, `${safeId}.part${i}`)).catch(() => {});
+      }
+
       res.json({
-        url: fileUrl,
-        filename: req.file.originalname,
-        size: req.file.size,
-        mimetype: req.file.mimetype
+        url: `/uploads/invoices/${finalFilename}`,
+        filename: rawOrigName,
+        size: combined.length,
+        mimetype: mimetype || (ext === ".pdf" ? "application/pdf" : "image/jpeg"),
       });
-    } catch (error) {
-      console.error("Receipt upload error:", error);
-      res.status(500).json({ error: "Failed to upload receipt" });
+    } catch (error: any) {
+      console.error("Chunked receipt upload error:", error);
+      res.status(500).json({ error: error.message || "Failed to assemble uploaded receipt" });
     }
   });
 

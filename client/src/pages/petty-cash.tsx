@@ -182,6 +182,119 @@ export default function PettyCashPage() {
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const compressImageIfNeeded = async (file: File): Promise<File> => {
+    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp|bmp)$/i.test(file.name);
+    if (!isImage || file.size <= 450 * 1024) return file;
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        try {
+          const maxDim = 1600;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            resolve(file);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                const newName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+                resolve(new File([blob], newName, { type: "image/jpeg" }));
+              } else {
+                resolve(file);
+              }
+            },
+            "image/jpeg",
+            0.78
+          );
+        } catch {
+          resolve(file);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+      };
+      img.src = objectUrl;
+    });
+  };
+
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const step = 0x8000;
+    for (let i = 0; i < bytes.length; i += step) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + step)));
+    }
+    return btoa(binary);
+  };
+
+  const uploadFileResilient = async (rawFile: File): Promise<UploadedAttachment> => {
+    const file = await compressImageIfNeeded(rawFile);
+    const maxDirectBytes = 700 * 1024; // stay safely under proxy/nginx 1MB limit
+
+    if (file.size <= maxDirectBytes) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await apiRequest("POST", "/api/upload/receipt", formData);
+      const data = await res.json();
+      return {
+        name: data.filename || file.name,
+        url: data.url,
+        type: file.type,
+        size: file.size,
+      };
+    }
+
+    // Large file (e.g. >700KB PDF or high-res photo): upload in 450KB chunks
+    const buffer = await file.arrayBuffer();
+    const chunkSize = 450 * 1024;
+    const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
+    const uploadId = `pc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+    let finalData: any = null;
+    for (let idx = 0; idx < totalChunks; idx++) {
+      const slice = buffer.slice(idx * chunkSize, (idx + 1) * chunkSize);
+      const res = await apiRequest("POST", "/api/upload/receipt-chunk", {
+        uploadId,
+        chunkIndex: idx,
+        totalChunks,
+        filename: rawFile.name,
+        mimetype: file.type,
+        data: arrayBufferToBase64(slice),
+      });
+      finalData = await res.json();
+    }
+
+    if (!finalData?.url) {
+      throw new Error(`Failed to complete chunked upload for ${rawFile.name}`);
+    }
+
+    return {
+      name: finalData.filename || rawFile.name,
+      url: finalData.url,
+      type: file.type,
+      size: file.size,
+    };
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -191,22 +304,8 @@ export default function PettyCashPage() {
     try {
       const newAttachments: UploadedAttachment[] = [];
       for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const res = await apiRequest("POST", "/api/upload/receipt", formData);
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || errData.message || `Failed to upload ${file.name}`);
-        }
-        const data = await res.json();
-        newAttachments.push({
-          name: data.filename || file.name,
-          url: data.url,
-          type: file.type,
-          size: file.size,
-        });
+        const uploaded = await uploadFileResilient(files[i]);
+        newAttachments.push(uploaded);
         successCount++;
       }
       setAttachments(prev => [...prev, ...newAttachments]);
@@ -762,7 +861,7 @@ export default function PettyCashPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Transaction</DialogTitle>
           </DialogHeader>
@@ -946,7 +1045,7 @@ export default function PettyCashPage() {
                     ref={fileInputRef}
                     type="file"
                     multiple
-                    accept="image/*,application/pdf"
+                    accept="image/*,.heic,.heif,application/pdf,.pdf"
                     className="hidden"
                     onChange={handleFileUpload}
                   />
