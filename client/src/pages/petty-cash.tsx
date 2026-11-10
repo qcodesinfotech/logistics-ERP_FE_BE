@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft, Upload, FileText, Printer, Download, Receipt, Paperclip, ExternalLink, CheckCircle } from "lucide-react";
+import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft, Upload, FileText, Printer, Download, Receipt, Paperclip, ExternalLink, CheckCircle, Image as ImageIcon, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,6 +89,49 @@ const transactionSchema = z.object({
 type PettyCashFormData = z.infer<typeof pettyCashSchema>;
 type TransactionFormData = z.infer<typeof transactionSchema>;
 
+export interface UploadedAttachment {
+  name: string;
+  url: string;
+  type?: string;
+  size?: number;
+}
+
+export function parseAttachments(reference?: string | null): UploadedAttachment[] {
+  if (!reference) return [];
+  const trimmed = reference.trim();
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item: any, idx: number) => {
+            if (typeof item === "string") {
+              const fileName = item.split("/").pop() || `File ${idx + 1}`;
+              return { name: fileName, url: item };
+            }
+            return {
+              name: item.name || item.url?.split("/").pop() || `File ${idx + 1}`,
+              url: item.url,
+              type: item.type,
+              size: item.size,
+            };
+          })
+          .filter(a => !!a.url);
+      }
+    } catch {
+      // fallback
+    }
+  }
+  if (trimmed.startsWith("/uploads") || trimmed.startsWith("http")) {
+    const urls = trimmed.split(",").map(u => u.trim()).filter(Boolean);
+    return urls.map((u, idx) => ({
+      name: u.split("/").pop() || `File ${idx + 1}`,
+      url: u,
+    }));
+  }
+  return [];
+}
+
 interface PettyCashTransaction {
   id: string;
   pettyCashId: string;
@@ -136,40 +179,57 @@ export default function PettyCashPage() {
   const [claimEndDate, setClaimEndDate] = useState<string>("");
 
   const [isUploadingBill, setIsUploadingBill] = useState(false);
-  const [uploadedBillUrl, setUploadedBillUrl] = useState<string | null>(null);
-  const [uploadedBillName, setUploadedBillName] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    const formData = new FormData();
-    formData.append("file", file);
-
+    setIsUploadingBill(true);
+    let successCount = 0;
     try {
-      setIsUploadingBill(true);
-      const res = await fetch("/api/upload/receipt", {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("Failed to upload bill receipt");
-      const data = await res.json();
-      setUploadedBillUrl(data.url);
-      setUploadedBillName(data.filename || file.name);
-      transactionForm.setValue("reference", data.url);
-      toast({ title: "Bill uploaded successfully" });
+      const newAttachments: UploadedAttachment[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await apiRequest("POST", "/api/upload/receipt", formData);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || errData.message || `Failed to upload ${file.name}`);
+        }
+        const data = await res.json();
+        newAttachments.push({
+          name: data.filename || file.name,
+          url: data.url,
+          type: file.type,
+          size: file.size,
+        });
+        successCount++;
+      }
+      setAttachments(prev => [...prev, ...newAttachments]);
+      toast({ title: `${successCount} file${successCount > 1 ? "s" : ""} uploaded successfully` });
     } catch (err: any) {
-      toast({ title: err.message || "Failed to upload bill", variant: "destructive" });
+      console.error("Upload receipt error:", err);
+      toast({ title: err.message || "Failed to upload receipt", variant: "destructive" });
     } finally {
       setIsUploadingBill(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
   const { data: pettyCashAccounts, isLoading } = useQuery<PettyCash[]>({
     queryKey: ["/api/petty-cash"],
   });
+
+  const myPettyCashAccount = useMemo(
+    () => pettyCashAccounts?.find(acc => (acc as any).userId === user?.id),
+    [pettyCashAccounts, user?.id]
+  );
 
   const { data: transactions } = useQuery<PettyCashTransaction[]>({
     queryKey: ["/api/petty-cash-transactions"],
@@ -247,14 +307,26 @@ export default function PettyCashPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       toast({ title: "Transaction recorded successfully" });
       setIsTransactionDialogOpen(false);
-      setUploadedBillUrl(null);
-      setUploadedBillName(null);
+      setAttachments([]);
       transactionForm.reset();
     },
     onError: (error: any) => {
       toast({ title: error.message || "Failed to record transaction", variant: "destructive" });
     },
   });
+
+  const handleRecordTransaction = (formData: TransactionFormData) => {
+    let refValue = formData.reference || "";
+    if (attachments.length === 1) {
+      refValue = attachments[0].url;
+    } else if (attachments.length > 1) {
+      refValue = JSON.stringify(attachments.map(a => ({ name: a.name, url: a.url })));
+    }
+    createTransactionMutation.mutate({
+      ...formData,
+      reference: refValue || undefined,
+    });
+  };
 
   const deleteTransactionMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/petty-cash-transactions/${id}`),
@@ -298,14 +370,21 @@ export default function PettyCashPage() {
       return;
     }
     const accountName = claimAccountId === "all" ? "All Accounts" : (pettyCashAccounts?.find(a => a.id === claimAccountId)?.name || "Account");
-    const data = claimTransactions.map((t, idx) => ({
-      "Sl No": idx + 1,
-      "Date": new Date(t.transactionDate).toLocaleDateString(),
-      "Account": pettyCashAccounts?.find(a => a.id === t.pettyCashId)?.name || "Petty Cash",
-      "Description": t.description || "-",
-      "Amount (BD)": parseFloat(t.amount || "0").toFixed(3),
-      "Receipt / Reference": t.reference ? (t.reference.startsWith("/uploads") ? `${window.location.origin}${t.reference}` : t.reference) : "None",
-    }));
+    const data = claimTransactions.map((t, idx) => {
+      const atts = parseAttachments(t.reference);
+      const receiptLinks = atts.length > 0
+        ? atts.map(a => a.url.startsWith("http") ? a.url : `${window.location.origin}${a.url}`).join(" | ")
+        : (t.reference ? (t.reference.startsWith("/uploads") ? `${window.location.origin}${t.reference}` : t.reference) : "None");
+
+      return {
+        "Sl No": idx + 1,
+        "Date": new Date(t.transactionDate).toLocaleDateString(),
+        "Account": pettyCashAccounts?.find(a => a.id === t.pettyCashId)?.name || "Petty Cash",
+        "Description": t.description || "-",
+        "Amount (BD)": parseFloat(t.amount || "0").toFixed(3),
+        "Receipt / Reference": receiptLinks,
+      };
+    });
 
     // Add total row
     data.push({
@@ -405,22 +484,36 @@ export default function PettyCashPage() {
       key: "reference",
       header: "Bill / Receipt",
       render: (t: PettyCashTransaction) => {
-        if (!t.reference) return <span className="text-muted-foreground text-xs">-</span>;
-        if (t.reference.startsWith("/uploads") || t.reference.startsWith("http")) {
-          return (
-            <a
-              href={t.reference}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
-            >
-              <Paperclip className="h-3.5 w-3.5" />
-              View Bill
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          );
+        const atts = parseAttachments(t.reference);
+        if (atts.length === 0) {
+          if (!t.reference) return <span className="text-muted-foreground text-xs">-</span>;
+          return <span className="text-xs font-mono">{t.reference}</span>;
         }
-        return <span className="text-xs font-mono">{t.reference}</span>;
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {atts.map((att, i) => {
+              const isPdf = att.url.toLowerCase().endsWith(".pdf");
+              return (
+                <a
+                  key={i}
+                  href={att.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:underline border border-indigo-200"
+                  title={att.name}
+                >
+                  {isPdf ? (
+                    <FileText className="h-3 w-3 text-red-500 shrink-0" />
+                  ) : (
+                    <Paperclip className="h-3 w-3 text-indigo-500 shrink-0" />
+                  )}
+                  <span className="truncate max-w-[110px]">{att.name}</span>
+                  <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                </a>
+              );
+            })}
+          </div>
+        );
       },
     },
     {
@@ -481,7 +574,22 @@ export default function PettyCashPage() {
             <Receipt className="h-4 w-4 mr-2 text-indigo-600" />
             Claim Refund
           </Button>
-          <Button onClick={() => setIsTransactionDialogOpen(true)} variant="outline" data-testid="button-new-transaction">
+          <Button
+            onClick={() => {
+              setAttachments([]);
+              transactionForm.reset({
+                transactionDate: new Date().toISOString().split("T")[0],
+                type: "withdrawal",
+                amount: "",
+                description: "",
+                reference: "",
+                pettyCashId: myPettyCashAccount?.id || (pettyCashAccounts?.[0]?.id ?? ""),
+              });
+              setIsTransactionDialogOpen(true);
+            }}
+            variant="outline"
+            data-testid="button-new-transaction"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Transaction
           </Button>
@@ -645,13 +753,21 @@ export default function PettyCashPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isTransactionDialogOpen} onOpenChange={setIsTransactionDialogOpen}>
+      <Dialog
+        open={isTransactionDialogOpen}
+        onOpenChange={(open) => {
+          setIsTransactionDialogOpen(open);
+          if (!open) {
+            setAttachments([]);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Transaction</DialogTitle>
           </DialogHeader>
           <Form {...transactionForm}>
-            <form onSubmit={transactionForm.handleSubmit((d) => createTransactionMutation.mutate(d))} className="space-y-4">
+            <form onSubmit={transactionForm.handleSubmit(handleRecordTransaction)} className="space-y-4">
               {(!pettyCashAccounts || pettyCashAccounts.length === 0) && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex items-center justify-between gap-2">
                   <span>No petty cash accounts created yet. Please create an account first.</span>
@@ -779,12 +895,57 @@ export default function PettyCashPage() {
                   </FormItem>
                 )}
               />
-              <div className="space-y-1.5">
-                <FormLabel>Bill / Receipt (Attachment)</FormLabel>
+              <div className="space-y-2">
+                <FormLabel>Bills / Receipts / PDFs (Attachments)</FormLabel>
+
+                {attachments.length > 0 && (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto p-2 bg-slate-50 dark:bg-slate-900 rounded-md border text-xs">
+                    {attachments.map((att, idx) => {
+                      const isPdf = att.url.toLowerCase().endsWith(".pdf") || att.type === "application/pdf";
+                      return (
+                        <div key={idx} className="flex items-center justify-between gap-2 p-1.5 bg-white dark:bg-slate-800 rounded border">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isPdf ? (
+                              <FileText className="h-4 w-4 text-red-500 shrink-0" />
+                            ) : (
+                              <ImageIcon className="h-4 w-4 text-blue-500 shrink-0" />
+                            )}
+                            <span className="truncate font-medium text-slate-700 dark:text-slate-200" title={att.name}>
+                              {att.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <a
+                              href={att.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2 py-0.5 text-[11px] text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-0.5"
+                            >
+                              View
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-slate-400 hover:text-red-600"
+                              onClick={() => setAttachments(prev => prev.filter((_, i) => i !== idx))}
+                              title="Remove attachment"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2">
                   <input
                     ref={fileInputRef}
                     type="file"
+                    multiple
                     accept="image/*,application/pdf"
                     className="hidden"
                     onChange={handleFileUpload}
@@ -798,16 +959,21 @@ export default function PettyCashPage() {
                     disabled={isUploadingBill}
                   >
                     <Upload className="h-4 w-4" />
-                    {isUploadingBill ? "Uploading..." : uploadedBillName ? "Change Bill" : "Upload Bill / Receipt"}
+                    {isUploadingBill
+                      ? "Uploading..."
+                      : attachments.length > 0
+                      ? "Add More Bills / PDFs"
+                      : "Upload Bill / Receipt / PDF"}
                   </Button>
-                  {uploadedBillName && (
-                    <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded border border-emerald-200">
-                      <CheckCircle className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                      <span className="truncate max-w-[200px]">{uploadedBillName}</span>
-                    </div>
+                  {attachments.length > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      {attachments.length} file{attachments.length > 1 ? "s" : ""} attached
+                    </span>
                   )}
                 </div>
-                <p className="text-[11px] text-muted-foreground">Upload bills/invoices to substantiate refund claims (JPG, PNG, PDF up to 10MB).</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Upload pump receipts, bills, or diesel invoice PDFs (supports multiple images & PDFs up to 10MB each).
+                </p>
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setIsTransactionDialogOpen(false)}>
@@ -955,24 +1121,44 @@ export default function PettyCashPage() {
                           <td className="py-2 px-3 font-mono">{new Date(item.transactionDate).toLocaleDateString()}</td>
                           <td className="py-2 px-3 font-medium text-slate-800 dark:text-slate-200">{item.description || "-"}</td>
                           <td className="py-2 px-3">
-                            {item.reference ? (
-                              item.reference.startsWith("/uploads") || item.reference.startsWith("http") ? (
-                                <a
-                                  href={item.reference}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-blue-600 hover:underline print:hidden"
-                                >
-                                  <Paperclip className="h-3 w-3" />
-                                  Attached
-                                </a>
-                              ) : (
-                                <span className="font-mono text-[11px]">{item.reference}</span>
-                              )
-                            ) : (
-                              <span className="text-muted-foreground italic">None</span>
-                            )}
-                            <span className="hidden print:inline">{item.reference ? "Attached" : "None"}</span>
+                            {(() => {
+                              const atts = parseAttachments(item.reference);
+                              if (atts.length > 0) {
+                                return (
+                                  <>
+                                    <div className="flex flex-wrap items-center gap-1 print:hidden">
+                                      {atts.map((att, i) => {
+                                        const isPdf = att.url.toLowerCase().endsWith(".pdf");
+                                        return (
+                                          <a
+                                            key={i}
+                                            href={att.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 hover:underline border border-blue-200"
+                                            title={att.name}
+                                          >
+                                            {isPdf ? (
+                                              <FileText className="h-3 w-3 text-red-500 shrink-0" />
+                                            ) : (
+                                              <Paperclip className="h-3 w-3 text-blue-500 shrink-0" />
+                                            )}
+                                            <span className="truncate max-w-[80px]">{att.name}</span>
+                                          </a>
+                                        );
+                                      })}
+                                    </div>
+                                    <span className="hidden print:inline text-[11px] text-slate-700">
+                                      {atts.length} Attached ({atts.map(a => a.name).join(", ")})
+                                    </span>
+                                  </>
+                                );
+                              }
+                              if (item.reference) {
+                                return <span className="font-mono text-[11px]">{item.reference}</span>;
+                              }
+                              return <span className="text-muted-foreground italic">None</span>;
+                            })()}
                           </td>
                           <td className="py-2 px-3 text-right font-mono font-semibold">
                             {parseFloat(item.amount || "0").toFixed(3)}
