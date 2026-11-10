@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft, Upload, FileText, Printer, Download, Receipt, Paperclip, ExternalLink, CheckCircle, Image as ImageIcon, X } from "lucide-react";
+import { Wallet, Plus, ArrowUpCircle, ArrowDownCircle, Trash2, ArrowRightLeft, Upload, FileText, Printer, Download, Receipt, Paperclip, ExternalLink, CheckCircle, Image as ImageIcon, X, ShieldCheck, XCircle, Clock, Banknote } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -142,12 +142,41 @@ interface PettyCashTransaction {
   reference: string | null;
 }
 
+interface PettyCashClaimItem {
+  id: string;
+  claimNumber: string;
+  pettyCashId: string;
+  claimantUserId: string | null;
+  claimantName: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  totalAmount: string;
+  transactionIds: string | null;
+  status: string;
+  submittedById: string | null;
+  submittedByName: string | null;
+  submittedAt: string | null;
+  approvedById: string | null;
+  approvedByName: string | null;
+  approvedByRole: string | null;
+  approvedAt: string | null;
+  approvalNotes: string | null;
+  rejectedById: string | null;
+  rejectedByName: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+  disbursedBankAccountId: string | null;
+  disbursedTransactionId: string | null;
+  disbursedAt: string | null;
+}
+
 export default function PettyCashPage() {
   const [isAccountDialogOpen, setIsAccountDialogOpen] = useState(false);
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
+  const isApproverRole = ["super_admin", "admin", "manager"].includes(String(user?.role || "").toLowerCase());
 
   const accountForm = useForm<PettyCashFormData>({
     resolver: zodResolver(pettyCashSchema),
@@ -172,12 +201,18 @@ export default function PettyCashPage() {
   });
   
   const transactionType = transactionForm.watch("type");
+  const selectedTxPettyCashId = transactionForm.watch("pettyCashId");
 
   const [isRefundClaimOpen, setIsRefundClaimOpen] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
   const [claimAccountId, setClaimAccountId] = useState<string>("all");
   const [claimStartDate, setClaimStartDate] = useState<string>("");
   const [claimEndDate, setClaimEndDate] = useState<string>("");
+
+  const [disburseModalClaim, setDisburseModalClaim] = useState<PettyCashClaimItem | null>(null);
+  const [disburseBankId, setDisburseBankId] = useState<string>("");
+  const [rejectModalClaim, setRejectModalClaim] = useState<PettyCashClaimItem | null>(null);
+  const [rejectReason, setRejectReason] = useState<string>("");
 
   const [isUploadingBill, setIsUploadingBill] = useState(false);
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
@@ -524,8 +559,236 @@ export default function PettyCashPage() {
     toast({ title: "Refund claim exported to Excel" });
   };
 
-  const handlePrintClaim = () => {
-    window.print();
+  const { data: claims = [] } = useQuery<PettyCashClaimItem[]>({
+    queryKey: ["/api/petty-cash-claims"],
+  });
+
+  const filteredClaims = useMemo(() => {
+    if (selectedAccountId === "all") return claims;
+    return claims.filter((c) => c.pettyCashId === selectedAccountId);
+  }, [claims, selectedAccountId]);
+
+  const submitClaimMutation = useMutation({
+    mutationFn: (payload: {
+      pettyCashId: string;
+      startDate?: string;
+      endDate?: string;
+      totalAmount: string;
+      transactionIds: string[];
+    }) => apiRequest("POST", "/api/petty-cash-claims", payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash-claims"] });
+      toast({ title: "Claim submitted for digital approval" });
+      setIsRefundClaimOpen(false);
+    },
+    onError: (err: any) => {
+      toast({ title: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
+  const approveClaimMutation = useMutation({
+    mutationFn: (claimId: string) => apiRequest("POST", `/api/petty-cash-claims/${claimId}/approve`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash-claims"] });
+      toast({ title: "Claim digitally approved" });
+    },
+    onError: (err: any) => {
+      toast({ title: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
+  const rejectClaimMutation = useMutation({
+    mutationFn: ({ claimId, reason }: { claimId: string; reason: string }) =>
+      apiRequest("POST", `/api/petty-cash-claims/${claimId}/reject`, { reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash-claims"] });
+      toast({ title: "Claim rejected" });
+      setRejectModalClaim(null);
+      setRejectReason("");
+    },
+    onError: (err: any) => {
+      toast({ title: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
+  const disburseClaimMutation = useMutation({
+    mutationFn: ({ claimId, bankAccountId }: { claimId: string; bankAccountId: string }) =>
+      apiRequest("POST", `/api/petty-cash-claims/${claimId}/disburse`, { bankAccountId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash-claims"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/petty-cash-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Approved refund disbursed from bank to petty cash account" });
+      setDisburseModalClaim(null);
+      setDisburseBankId("");
+    },
+    onError: (err: any) => {
+      toast({ title: getErrorMessage(err), variant: "destructive" });
+    },
+  });
+
+  const handlePrintClaim = (claimObj?: PettyCashClaimItem) => {
+    const escapeHtml = (val: string) =>
+      val.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    let itemsToPrint = claimTransactions;
+    let accountLabel = claimAccountId === "all"
+      ? "All Individual Accounts"
+      : (pettyCashAccounts?.find(a => a.id === claimAccountId)?.name || "Account");
+    let totalToPrint = totalClaimAmount;
+    let headerSubtitle = `Generated Date: ${new Date().toLocaleDateString()} &nbsp;|&nbsp; Generated By: ${escapeHtml(user?.name || user?.username || "Staff")}`;
+    let approvalBannerHtml = "";
+
+    if (claimObj) {
+      accountLabel = claimObj.claimantName || pettyCashAccounts?.find(a => a.id === claimObj.pettyCashId)?.name || "Account";
+      totalToPrint = parseFloat(claimObj.totalAmount || "0");
+      let txIdSet: Set<string> | null = null;
+      try {
+        const parsedIds = JSON.parse(claimObj.transactionIds || "[]");
+        if (Array.isArray(parsedIds) && parsedIds.length > 0) txIdSet = new Set(parsedIds);
+      } catch {}
+      itemsToPrint = (transactions || []).filter((t) => {
+        if (txIdSet) return txIdSet.has(t.id);
+        return t.pettyCashId === claimObj.pettyCashId && t.type === "withdrawal";
+      });
+      headerSubtitle = `Claim #: <strong>${escapeHtml(claimObj.claimNumber)}</strong> &nbsp;|&nbsp; Submitted: ${claimObj.submittedAt ? new Date(claimObj.submittedAt).toLocaleString() : "-"}`;
+
+      if (claimObj.status === "approved" || claimObj.status === "disbursed") {
+        const roleLabel = (claimObj.approvedByRole || "Manager").replace(/_/g, " ").toUpperCase();
+        approvalBannerHtml = `
+          <div style="margin: 10px 0; padding: 8px 12px; border: 1.5px solid #059669; background: #ecfdf5; border-radius: 4px; font-size: 11px; color: #065f46;">
+            <strong>&#10004; DIGITALLY APPROVED</strong> &nbsp;|&nbsp;
+            Approved By: <strong>${escapeHtml(claimObj.approvedByName || "-")} (${escapeHtml(roleLabel)})</strong> &nbsp;|&nbsp;
+            Approved At: ${claimObj.approvedAt ? new Date(claimObj.approvedAt).toLocaleString() : "-"}
+            ${claimObj.status === "disbursed" ? ` &nbsp;|&nbsp; <strong>REFUND DISBURSED</strong>` : ""}
+          </div>
+        `;
+      } else if (claimObj.status === "rejected") {
+        approvalBannerHtml = `
+          <div style="margin: 10px 0; padding: 8px 12px; border: 1.5px solid #dc2626; background: #fef2f2; border-radius: 4px; font-size: 11px; color: #991b1b;">
+            <strong>&#10008; REJECTED</strong> &nbsp;|&nbsp; By: ${escapeHtml(claimObj.rejectedByName || "-")} &nbsp;|&nbsp; Reason: ${escapeHtml(claimObj.rejectionReason || "-")}
+          </div>
+        `;
+      } else {
+        approvalBannerHtml = `
+          <div style="margin: 10px 0; padding: 8px 12px; border: 1px solid #d97706; background: #fffbeb; border-radius: 4px; font-size: 11px; color: #92400e;">
+            <strong>PENDING DIGITAL APPROVAL</strong> — Submitted by ${escapeHtml(claimObj.submittedByName || "-")}
+          </div>
+        `;
+      }
+    }
+
+    const rowsHtml = itemsToPrint.map((item, idx) => {
+      const atts = parseAttachments(item.reference);
+      const receiptText = atts.length > 0
+        ? `${atts.length} Attached (${atts.map(a => escapeHtml(a.name)).join(", ")})`
+        : (item.reference ? escapeHtml(item.reference) : "None");
+      return `
+        <tr>
+          <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; color:#64748b;">${idx + 1}</td>
+          <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; font-family:monospace;">${new Date(item.transactionDate).toLocaleDateString()}</td>
+          <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0;">${escapeHtml(item.description || "-")}</td>
+          <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; font-size:10px;">${receiptText}</td>
+          <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; text-align:right; font-family:monospace; font-weight:600;">${parseFloat(item.amount || "0").toFixed(3)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Expense Refund Claim Voucher</title>
+          <style>
+            @page { size: A4 portrait; margin: 10mm; }
+            *, *::before, *::after { box-sizing: border-box; }
+            html, body { margin: 0; padding: 6px 12px; width: 100%; font-family: Arial, Helvetica, sans-serif; color: #0f172a; background: #fff; }
+            .voucher { width: 100%; max-width: 100%; overflow: hidden; }
+            .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; }
+            .title { font-size: 15px; font-weight: 700; margin: 0; }
+            .meta { font-size: 10.5px; color: #475569; margin-top: 4px; word-break: break-word; }
+            table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 10.5px; margin-top: 8px; }
+            th, td { word-break: break-word; overflow-wrap: anywhere; }
+            th { background: #f1f5f9; text-align: left; padding: 7px 6px; border-bottom: 1.5px solid #94a3b8; font-weight: 700; }
+            .total-row td { background: #f8fafc; border-top: 2px solid #334155; padding: 8px 6px; font-weight: 700; }
+            .sigs { display: flex; justify-content: space-between; gap: 24px; margin-top: 36px; padding-top: 12px; border-top: 1px dashed #cbd5e1; font-size: 11px; text-align: center; }
+            .sig-box { flex: 1; }
+            .sig-line { border-bottom: 1px solid #475569; height: 28px; margin-bottom: 4px; }
+          </style>
+        </head>
+        <body>
+          <div class="voucher">
+            <div class="header">
+              <div style="flex: 1; min-width: 0;">
+                <h1 class="title">EXPENSE REFUND CLAIM VOUCHER</h1>
+                <div class="meta">Account Holder: <strong>${escapeHtml(accountLabel)}</strong></div>
+              </div>
+              <div class="meta" style="text-align:right; max-width: 45%;">${headerSubtitle}</div>
+            </div>
+            ${approvalBannerHtml}
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:28px;">#</th>
+                  <th style="width:76px;">Date</th>
+                  <th>Description</th>
+                  <th style="width:165px;">Bill / Receipt</th>
+                  <th style="width:88px; text-align:right;">Amount (BD)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml || '<tr><td colspan="5" style="padding:16px; text-align:center; color:#64748b;">No expense transactions found.</td></tr>'}
+              </tbody>
+              <tfoot>
+                <tr class="total-row">
+                  <td colspan="4" style="text-align:right;">TOTAL CLAIM AMOUNT:</td>
+                  <td style="text-align:right; font-family:monospace; font-size:13px;">${totalToPrint.toFixed(3)} BD</td>
+                </tr>
+              </tfoot>
+            </table>
+            <div class="sigs">
+              <div class="sig-box">
+                <div class="sig-line">${claimObj?.submittedByName ? `<span style="font-size:10px;color:#334155;">${escapeHtml(claimObj.submittedByName)} (Digital)</span>` : ""}</div>
+                <div><strong>Claimant Signature</strong></div>
+                <div style="font-size:9px; color:#64748b;">(Supervisor / Manager)</div>
+              </div>
+              <div class="sig-box">
+                <div class="sig-line"></div>
+                <div><strong>Verified By</strong></div>
+                <div style="font-size:9px; color:#64748b;">(Operations Head)</div>
+              </div>
+              <div class="sig-box">
+                <div class="sig-line">${claimObj?.approvedByName ? `<span style="font-size:10px;color:#059669;">Approved: ${escapeHtml(claimObj.approvedByName)}</span>` : ""}</div>
+                <div><strong>Approved for Refund</strong></div>
+                <div style="font-size:9px; color:#64748b;">(Accounts &amp; Finance)</div>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>`;
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => document.body.removeChild(iframe), 1500);
+      }, 250);
+    }
   };
 
   const accountColumns = [
@@ -856,6 +1119,194 @@ export default function PettyCashPage() {
         </Card>
       </div>
 
+      {/* Refund Claims & Digital Approvals */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-indigo-600" />
+              Refund Claims &amp; Digital Approvals
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Claimants submit expense vouchers for digital approval. Only another Manager or Admin (never the claimant) can approve and disburse refunds.
+            </p>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {filteredClaims.length} claim{filteredClaims.length === 1 ? "" : "s"}
+          </span>
+        </CardHeader>
+        <CardContent>
+          {filteredClaims.length === 0 ? (
+            <EmptyState
+              icon={Receipt}
+              title="No submitted refund claims"
+              description="Click 'Claim Refund' above to generate a claim statement and submit it for digital approval."
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-muted-foreground font-semibold">
+                    <th className="py-2.5 px-3 text-left">Claim #</th>
+                    <th className="py-2.5 px-3 text-left">Account Holder</th>
+                    <th className="py-2.5 px-3 text-left">Period / Submitted</th>
+                    <th className="py-2.5 px-3 text-right">Amount (BD)</th>
+                    <th className="py-2.5 px-3 text-left">Digital Approval Status</th>
+                    <th className="py-2.5 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredClaims.map((claim) => {
+                    const pcAcc = pettyCashAccounts?.find(a => a.id === claim.pettyCashId);
+                    const isOwnClaim =
+                      Boolean(user?.id && (claim.claimantUserId === user.id || claim.submittedById === user.id || pcAcc?.userId === user.id));
+                    const canReview = isApproverRole && !isOwnClaim;
+
+                    return (
+                      <tr key={claim.id} className="hover:bg-muted/20">
+                        <td className="py-2.5 px-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                          {claim.claimNumber}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="font-medium text-slate-800 dark:text-slate-200">
+                            {claim.claimantName || pcAcc?.name || "-"}
+                          </div>
+                          {claim.submittedByName && (
+                            <div className="text-[10px] text-muted-foreground">
+                              Submitted by {claim.submittedByName}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
+                          <div>
+                            {claim.startDate || claim.endDate
+                              ? `${claim.startDate || "Start"} to ${claim.endDate || "Latest"}`
+                              : "All dates"}
+                          </div>
+                          {claim.submittedAt && (
+                            <div className="text-[10px] text-muted-foreground">
+                              {new Date(claim.submittedAt).toLocaleString()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-semibold">
+                          <CurrencyDisplay amount={claim.totalAmount} />
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {claim.status === "pending_approval" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              <Clock className="h-3 w-3" />
+                              Pending Approval
+                            </span>
+                          )}
+                          {claim.status === "approved" && (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <ShieldCheck className="h-3 w-3" />
+                                Digitally Approved
+                              </span>
+                              <div className="text-[10px] text-emerald-700 dark:text-emerald-400">
+                                By {claim.approvedByName} ({(claim.approvedByRole || "").replace(/_/g, " ")})
+                              </div>
+                            </div>
+                          )}
+                          {claim.status === "disbursed" && (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                <CheckCircle className="h-3 w-3" />
+                                Approved &amp; Disbursed
+                              </span>
+                              <div className="text-[10px] text-slate-600 dark:text-slate-400">
+                                Approved by {claim.approvedByName}
+                              </div>
+                            </div>
+                          )}
+                          {claim.status === "rejected" && (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200">
+                                <XCircle className="h-3 w-3" />
+                                Rejected
+                              </span>
+                              <div className="text-[10px] text-red-600">
+                                By {claim.rejectedByName}: {claim.rejectionReason}
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            {claim.status === "pending_approval" && (
+                              canReview ? (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    className="h-7 px-2 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                                    onClick={() => approveClaimMutation.mutate(claim.id)}
+                                    disabled={approveClaimMutation.isPending}
+                                  >
+                                    <ShieldCheck className="h-3 w-3" />
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-[11px] text-red-600 border-red-200 hover:bg-red-50 gap-1"
+                                    onClick={() => {
+                                      setRejectModalClaim(claim);
+                                      setRejectReason("");
+                                    }}
+                                  >
+                                    <XCircle className="h-3 w-3" />
+                                    Reject
+                                  </Button>
+                                </>
+                              ) : (
+                                <span className="text-[10px] italic text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                  {isOwnClaim ? "Self-approval disabled" : "Awaiting Manager/Admin"}
+                                </span>
+                              )
+                            )}
+                            {claim.status === "approved" && (
+                              canReview ? (
+                                <Button
+                                  size="sm"
+                                  className="h-7 px-2 text-[11px] bg-blue-600 hover:bg-blue-700 text-white gap-1"
+                                  onClick={() => {
+                                    setDisburseModalClaim(claim);
+                                    setDisburseBankId(bankAccounts?.[0]?.id || "");
+                                  }}
+                                >
+                                  <Banknote className="h-3 w-3" />
+                                  Disburse Refund
+                                </Button>
+                              ) : (
+                                <span className="text-[10px] italic text-emerald-700">
+                                  Awaiting Finance Disbursement
+                                </span>
+                              )
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1"
+                              onClick={() => handlePrintClaim(claim)}
+                              title="Print full-page voucher"
+                            >
+                              <Printer className="h-3 w-3 text-blue-600" />
+                              Print
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Dialog open={isAccountDialogOpen} onOpenChange={setIsAccountDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1011,23 +1462,45 @@ export default function PettyCashPage() {
               <FormField
                 control={transactionForm.control}
                 name="type"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Transaction Nature *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-type">
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="withdrawal">Expense (Daily Spent)</SelectItem>
-                        <SelectItem value="deposit">Refund Reimbursement (From Bank upon Claim Approval)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field }) => {
+                  const selectedAcc = pettyCashAccounts?.find(a => a.id === selectedTxPettyCashId);
+                  const isOwnAccount = Boolean(user?.id && selectedAcc?.userId === user.id);
+                  const canDisburseDirect = isApproverRole && !isOwnAccount;
+                  return (
+                    <FormItem>
+                      <FormLabel>Transaction Nature *</FormLabel>
+                      <Select
+                        onValueChange={(val) => {
+                          if (val === "deposit" && !canDisburseDirect) {
+                            toast({
+                              title: "Permission Restricted",
+                              description: isOwnAccount
+                                ? "Self-approval is not allowed. Submit a Claim Refund for another Manager or Admin to approve."
+                                : "Only Managers or Admins can disburse refund reimbursements.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          field.onChange(val);
+                        }}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger data-testid="select-type">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="withdrawal">Expense (Daily Spent)</SelectItem>
+                          {canDisburseDirect && (
+                            <SelectItem value="deposit">Refund Reimbursement (From Bank upon Claim Approval)</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
               <FormField
                 control={transactionForm.control}
@@ -1201,22 +1674,24 @@ export default function PettyCashPage() {
                   Generate an itemized claim statement with date, description, receipt attachments, and amounts for manager/supervisor reimbursement.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {totalClaimAmount > 0 && claimAccountId !== "all" && (
                   <Button
                     size="sm"
                     onClick={() => {
-                      transactionForm.setValue("pettyCashId", claimAccountId);
-                      transactionForm.setValue("type", "deposit");
-                      transactionForm.setValue("amount", totalClaimAmount.toFixed(3));
-                      transactionForm.setValue("description", `Approved claim refund for ${pettyCashAccounts?.find(a => a.id === claimAccountId)?.name || "Staff"}`);
-                      setIsRefundClaimOpen(false);
-                      setIsTransactionDialogOpen(true);
+                      submitClaimMutation.mutate({
+                        pettyCashId: claimAccountId,
+                        startDate: claimStartDate || undefined,
+                        endDate: claimEndDate || undefined,
+                        totalAmount: totalClaimAmount.toFixed(3),
+                        transactionIds: claimTransactions.map(t => t.id),
+                      });
                     }}
-                    className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+                    disabled={submitClaimMutation.isPending}
+                    className="gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
-                    <CheckCircle className="h-3.5 w-3.5" />
-                    Approve & Disburse Refund
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    {submitClaimMutation.isPending ? "Submitting..." : "Submit for Digital Approval"}
                   </Button>
                 )}
                 <Button
@@ -1231,7 +1706,7 @@ export default function PettyCashPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handlePrintClaim}
+                  onClick={() => handlePrintClaim()}
                   className="gap-1.5 text-xs"
                 >
                   <Printer className="h-3.5 w-3.5 text-blue-600" />
@@ -1403,6 +1878,105 @@ export default function PettyCashPage() {
           <DialogFooter className="print:hidden">
             <Button variant="outline" onClick={() => setIsRefundClaimOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Disburse Approved Claim Modal */}
+      <Dialog open={Boolean(disburseModalClaim)} onOpenChange={(open) => !open && setDisburseModalClaim(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Banknote className="h-5 w-5 text-emerald-600" />
+              Disburse Approved Claim Refund
+            </DialogTitle>
+          </DialogHeader>
+          {disburseModalClaim && (
+            <div className="space-y-4 py-2 text-xs">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-md border border-emerald-200 dark:border-emerald-800 space-y-1">
+                <div>Claim #: <span className="font-mono font-bold">{disburseModalClaim.claimNumber}</span></div>
+                <div>Claimant Account: <span className="font-semibold">{disburseModalClaim.claimantName}</span></div>
+                <div>Digitally Approved By: <span className="font-semibold text-emerald-700">{disburseModalClaim.approvedByName}</span></div>
+                <div>Refund Amount: <span className="font-mono font-bold text-sm">{parseFloat(disburseModalClaim.totalAmount || "0").toFixed(3)} BD</span></div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">Select Bank Account to Pay From *</label>
+                <Select value={disburseBankId} onValueChange={setDisburseBankId}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Choose bank account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts?.map((acc) => (
+                      <SelectItem key={acc.id} value={acc.id}>
+                        {acc.name} — {parseFloat(acc.currentBalance || "0").toFixed(3)} BD
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setDisburseModalClaim(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={!disburseBankId || disburseClaimMutation.isPending}
+              onClick={() => {
+                if (disburseModalClaim && disburseBankId) {
+                  disburseClaimMutation.mutate({ claimId: disburseModalClaim.id, bankAccountId: disburseBankId });
+                }
+              }}
+            >
+              {disburseClaimMutation.isPending ? "Disbursing..." : "Confirm Bank Disbursement"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reject Claim Modal */}
+      <Dialog open={Boolean(rejectModalClaim)} onOpenChange={(open) => !open && setRejectModalClaim(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base text-red-600">
+              <XCircle className="h-5 w-5" />
+              Reject Refund Claim
+            </DialogTitle>
+          </DialogHeader>
+          {rejectModalClaim && (
+            <div className="space-y-3 py-2 text-xs">
+              <div>
+                Claim <span className="font-mono font-bold">{rejectModalClaim.claimNumber}</span> ({rejectModalClaim.claimantName} — {parseFloat(rejectModalClaim.totalAmount || "0").toFixed(3)} BD)
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold">Reason for Rejection *</label>
+                <Textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Enter reason (e.g. missing diesel receipt, unclear bill)..."
+                  className="text-xs"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setRejectModalClaim(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={!rejectReason.trim() || rejectClaimMutation.isPending}
+              onClick={() => {
+                if (rejectModalClaim) {
+                  rejectClaimMutation.mutate({ claimId: rejectModalClaim.id, reason: rejectReason.trim() });
+                }
+              }}
+            >
+              {rejectClaimMutation.isPending ? "Rejecting..." : "Confirm Rejection"}
             </Button>
           </DialogFooter>
         </DialogContent>

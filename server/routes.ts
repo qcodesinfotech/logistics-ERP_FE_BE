@@ -3334,9 +3334,62 @@ export async function registerRoutes(
     }
   });
 
+  let pettyCashClaimsEnsured = false;
+  async function ensurePettyCashClaimsTable() {
+    if (pettyCashClaimsEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS petty_cash_claims (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        claim_number text NOT NULL,
+        petty_cash_id varchar NOT NULL,
+        claimant_user_id varchar,
+        claimant_name text,
+        start_date text,
+        end_date text,
+        total_amount decimal(12,3) NOT NULL,
+        transaction_ids text,
+        status text NOT NULL DEFAULT 'pending_approval',
+        submitted_by_id varchar,
+        submitted_by_name text,
+        submitted_at timestamp DEFAULT now(),
+        approved_by_id varchar,
+        approved_by_name text,
+        approved_by_role text,
+        approved_at timestamp,
+        approval_notes text,
+        rejected_by_id varchar,
+        rejected_by_name text,
+        rejected_at timestamp,
+        rejection_reason text,
+        disbursed_bank_account_id varchar,
+        disbursed_transaction_id varchar,
+        disbursed_at timestamp
+      )
+    `);
+    pettyCashClaimsEnsured = true;
+  }
+
+  function isPettyCashApproverRole(role?: string | null): boolean {
+    const r = String(role || "").toLowerCase();
+    return r === "super_admin" || r === "admin" || r === "manager";
+  }
+
   app.post("/api/petty-cash-transactions", authMiddleware, permissionMiddleware("petty_cash"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
     try {
       const scope = getScopeFromRequest(req);
+      if (req.body?.type === "deposit") {
+        if (!isPettyCashApproverRole(req.user?.role)) {
+          return res.status(403).json({
+            error: "Only Managers or Admins can approve and disburse petty cash refund reimbursements.",
+          });
+        }
+        const [pcAccount] = await db.select().from(schema.pettyCash).where(eq(schema.pettyCash.id, req.body.pettyCashId));
+        if (pcAccount?.userId && req.user?.id && pcAccount.userId === req.user.id) {
+          return res.status(403).json({
+            error: "Self-approval is prohibited. A claimant cannot disburse a refund to their own petty cash account.",
+          });
+        }
+      }
       const transaction = await storage.createPettyCashTransaction({
         ...req.body,
         shopId: scope.shopId || req.body.shopId,
@@ -3346,6 +3399,189 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Petty cash transaction error:", error);
       res.status(400).json({ error: error.message || "Failed to create petty cash transaction" });
+    }
+  });
+
+  // Petty Cash Digital Approval Claims
+  app.get("/api/petty-cash-claims", authMiddleware, permissionMiddleware("petty_cash"), async (req: AuthRequest, res) => {
+    try {
+      await ensurePettyCashClaimsTable();
+      const claims = await db.select().from(schema.pettyCashClaims).orderBy(desc(schema.pettyCashClaims.submittedAt));
+      res.json(claims);
+    } catch (error: any) {
+      console.error("Get petty cash claims error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch claims" });
+    }
+  });
+
+  app.post("/api/petty-cash-claims", authMiddleware, permissionMiddleware("petty_cash"), async (req: AuthRequest, res) => {
+    try {
+      await ensurePettyCashClaimsTable();
+      const { pettyCashId, startDate, endDate, totalAmount, transactionIds } = req.body;
+      if (!pettyCashId || !totalAmount || parseFloat(String(totalAmount)) <= 0) {
+        return res.status(400).json({ error: "Valid petty cash account and positive claim amount are required." });
+      }
+      const [pcAccount] = await db.select().from(schema.pettyCash).where(eq(schema.pettyCash.id, pettyCashId));
+      if (!pcAccount) {
+        return res.status(404).json({ error: "Petty cash account not found" });
+      }
+
+      const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const claimNumber = `CLM-${dateTag}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const txIdsJson = Array.isArray(transactionIds) ? JSON.stringify(transactionIds) : (transactionIds || "[]");
+
+      const [claim] = await db.insert(schema.pettyCashClaims).values({
+        claimNumber,
+        pettyCashId,
+        claimantUserId: pcAccount.userId || req.user?.id || null,
+        claimantName: pcAccount.name,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        totalAmount: parseFloat(String(totalAmount)).toFixed(3),
+        transactionIds: txIdsJson,
+        status: "pending_approval",
+        submittedById: req.user?.id || null,
+        submittedByName: req.user?.name || req.user?.username || "Staff",
+      }).returning();
+
+      res.status(201).json(claim);
+    } catch (error: any) {
+      console.error("Create petty cash claim error:", error);
+      res.status(400).json({ error: error.message || "Failed to submit claim for approval" });
+    }
+  });
+
+  app.post("/api/petty-cash-claims/:id/approve", authMiddleware, permissionMiddleware("petty_cash"), async (req: AuthRequest, res) => {
+    try {
+      await ensurePettyCashClaimsTable();
+      if (!isPettyCashApproverRole(req.user?.role)) {
+        return res.status(403).json({ error: "Only Managers or Admins can digitally approve petty cash claims." });
+      }
+
+      const [claim] = await db.select().from(schema.pettyCashClaims).where(eq(schema.pettyCashClaims.id, req.params.id));
+      if (!claim) return res.status(404).json({ error: "Claim not found" });
+      if (claim.status !== "pending_approval") {
+        return res.status(400).json({ error: `Claim is already ${claim.status.replace(/_/g, " ")}` });
+      }
+
+      const [pcAccount] = await db.select().from(schema.pettyCash).where(eq(schema.pettyCash.id, claim.pettyCashId));
+      const isSelfClaim =
+        (req.user?.id && claim.claimantUserId === req.user.id) ||
+        (req.user?.id && claim.submittedById === req.user.id) ||
+        (req.user?.id && pcAccount?.userId === req.user.id);
+
+      if (isSelfClaim) {
+        return res.status(403).json({
+          error: "Self-approval is prohibited. The claimant cannot digitally approve their own petty cash claim.",
+        });
+      }
+
+      const [updated] = await db.update(schema.pettyCashClaims).set({
+        status: "approved",
+        approvedById: req.user?.id || null,
+        approvedByName: req.user?.name || req.user?.username || "Manager",
+        approvedByRole: req.user?.role || null,
+        approvedAt: new Date(),
+        approvalNotes: req.body?.notes || null,
+      }).where(eq(schema.pettyCashClaims.id, req.params.id)).returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Approve petty cash claim error:", error);
+      res.status(400).json({ error: error.message || "Failed to approve claim" });
+    }
+  });
+
+  app.post("/api/petty-cash-claims/:id/reject", authMiddleware, permissionMiddleware("petty_cash"), async (req: AuthRequest, res) => {
+    try {
+      await ensurePettyCashClaimsTable();
+      if (!isPettyCashApproverRole(req.user?.role)) {
+        return res.status(403).json({ error: "Only Managers or Admins can reject petty cash claims." });
+      }
+
+      const [claim] = await db.select().from(schema.pettyCashClaims).where(eq(schema.pettyCashClaims.id, req.params.id));
+      if (!claim) return res.status(404).json({ error: "Claim not found" });
+      if (claim.status !== "pending_approval") {
+        return res.status(400).json({ error: `Only pending claims can be rejected (current status: ${claim.status})` });
+      }
+
+      const [pcAccount] = await db.select().from(schema.pettyCash).where(eq(schema.pettyCash.id, claim.pettyCashId));
+      const isSelfClaim =
+        (req.user?.id && claim.claimantUserId === req.user.id) ||
+        (req.user?.id && claim.submittedById === req.user.id) ||
+        (req.user?.id && pcAccount?.userId === req.user.id);
+
+      if (isSelfClaim) {
+        return res.status(403).json({ error: "Claimant cannot review their own petty cash claim." });
+      }
+
+      const [updated] = await db.update(schema.pettyCashClaims).set({
+        status: "rejected",
+        rejectedById: req.user?.id || null,
+        rejectedByName: req.user?.name || req.user?.username || "Manager",
+        rejectedAt: new Date(),
+        rejectionReason: req.body?.reason || "Rejected by approver",
+      }).where(eq(schema.pettyCashClaims.id, req.params.id)).returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Reject petty cash claim error:", error);
+      res.status(400).json({ error: error.message || "Failed to reject claim" });
+    }
+  });
+
+  app.post("/api/petty-cash-claims/:id/disburse", authMiddleware, permissionMiddleware("petty_cash"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
+    try {
+      await ensurePettyCashClaimsTable();
+      if (!isPettyCashApproverRole(req.user?.role)) {
+        return res.status(403).json({ error: "Only Managers or Admins can disburse claim refunds." });
+      }
+
+      const { bankAccountId } = req.body;
+      if (!bankAccountId) {
+        return res.status(400).json({ error: "Please select a Bank Account to disburse the refund from." });
+      }
+
+      const [claim] = await db.select().from(schema.pettyCashClaims).where(eq(schema.pettyCashClaims.id, req.params.id));
+      if (!claim) return res.status(404).json({ error: "Claim not found" });
+      if (claim.status !== "approved") {
+        return res.status(400).json({ error: "Claim must be digitally approved before disbursement." });
+      }
+
+      const [pcAccount] = await db.select().from(schema.pettyCash).where(eq(schema.pettyCash.id, claim.pettyCashId));
+      const isSelfClaim =
+        (req.user?.id && claim.claimantUserId === req.user.id) ||
+        (req.user?.id && claim.submittedById === req.user.id) ||
+        (req.user?.id && pcAccount?.userId === req.user.id);
+
+      if (isSelfClaim) {
+        return res.status(403).json({ error: "Self-disbursement is prohibited. Another Manager/Admin must disburse the refund." });
+      }
+
+      const scope = getScopeFromRequest(req);
+      const transaction = await storage.createPettyCashTransaction({
+        pettyCashId: claim.pettyCashId,
+        type: "deposit",
+        amount: claim.totalAmount,
+        bankAccountId,
+        transactionDate: new Date().toISOString().split("T")[0],
+        description: `Approved Claim ${claim.claimNumber} Refund for ${claim.claimantName || pcAccount?.name || "Staff"}`,
+        reference: claim.claimNumber,
+        shopId: scope.shopId || req.body.shopId,
+        branchId: scope.branchId || req.body.branchId,
+      });
+
+      const [updatedClaim] = await db.update(schema.pettyCashClaims).set({
+        status: "disbursed",
+        disbursedBankAccountId: bankAccountId,
+        disbursedTransactionId: transaction.id,
+        disbursedAt: new Date(),
+      }).where(eq(schema.pettyCashClaims.id, req.params.id)).returning();
+
+      res.json({ claim: updatedClaim, transaction });
+    } catch (error: any) {
+      console.error("Disburse petty cash claim error:", error);
+      res.status(400).json({ error: error.message || "Failed to disburse claim refund" });
     }
   });
 

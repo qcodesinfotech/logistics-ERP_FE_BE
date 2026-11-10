@@ -580,6 +580,34 @@ export const pettyCashTransactions = pgTable("petty_cash_transactions", {
   reference: text("reference"),
 });
 
+export const pettyCashClaims = pgTable("petty_cash_claims", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  claimNumber: text("claim_number").notNull(),
+  pettyCashId: varchar("petty_cash_id").notNull(),
+  claimantUserId: varchar("claimant_user_id"),
+  claimantName: text("claimant_name"),
+  startDate: text("start_date"),
+  endDate: text("end_date"),
+  totalAmount: decimal("total_amount", { precision: 12, scale: 3 }).notNull(),
+  transactionIds: text("transaction_ids"),
+  status: text("status").notNull().default("pending_approval"),
+  submittedById: varchar("submitted_by_id"),
+  submittedByName: text("submitted_by_name"),
+  submittedAt: timestamp("submitted_at").defaultNow(),
+  approvedById: varchar("approved_by_id"),
+  approvedByName: text("approved_by_name"),
+  approvedByRole: text("approved_by_role"),
+  approvedAt: timestamp("approved_at"),
+  approvalNotes: text("approval_notes"),
+  rejectedById: varchar("rejected_by_id"),
+  rejectedByName: text("rejected_by_name"),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  disbursedBankAccountId: varchar("disbursed_bank_account_id"),
+  disbursedTransactionId: varchar("disbursed_transaction_id"),
+  disbursedAt: timestamp("disbursed_at"),
+});
+
 export const capital = pgTable("capital", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   companyId: varchar("company_id"), // Company-level capital
@@ -1512,6 +1540,7 @@ export const insertEmployeeSchema = createInsertSchema(employees, {
   assignedClientIds: z.array(z.string()).optional().nullable(),
 }).omit({ id: true });
 export const insertPettyCashTransactionSchema = createInsertSchema(pettyCashTransactions).omit({ id: true });
+export const insertPettyCashClaimSchema = createInsertSchema(pettyCashClaims).omit({ id: true });
 export const insertSalaryPaymentSchema = createInsertSchema(salaryPayments).omit({ id: true });
 export const insertSalaryAdvanceSchema = createInsertSchema(salaryAdvances).omit({ id: true });
 
@@ -1667,6 +1696,7 @@ export type Sale = typeof sales.$inferSelect;
 export type BankAccount = typeof bankAccounts.$inferSelect;
 export type BankTransaction = typeof bankTransactions.$inferSelect;
 export type PettyCash = typeof pettyCash.$inferSelect;
+export type PettyCashClaim = typeof pettyCashClaims.$inferSelect;
 export type Capital = typeof capital.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
 export type SalaryPayment = typeof salaryPayments.$inferSelect;
