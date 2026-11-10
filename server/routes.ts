@@ -8171,8 +8171,21 @@ export async function registerRoutes(
           ""
         ).trim();
 
-        // If specific branch/market/location is present, prioritize specific branch as outlet identity!
-        if (specificBranch) {
+        // If specific branch/market/location is present, combine with corporate customer name if needed
+        if (specificBranch && custName) {
+          const sLower = specificBranch.toLowerCase();
+          const cLower = custName.toLowerCase();
+          if (sLower.includes(cLower)) {
+            rawDesc = specificBranch;
+            rawCode = specificBranch;
+          } else if (cLower.includes(sLower)) {
+            rawDesc = custName;
+            rawCode = custName;
+          } else {
+            rawDesc = `${custName} - ${specificBranch}`;
+            rawCode = `${custName} - ${specificBranch}`;
+          }
+        } else if (specificBranch) {
           rawCode = specificBranch;
           rawDesc = specificBranch;
         }
@@ -8339,7 +8352,20 @@ export async function registerRoutes(
             ""
           ).trim();
 
-          if (specificBranch) {
+          if (specificBranch && custName) {
+            const sLower = specificBranch.toLowerCase();
+            const cLower = custName.toLowerCase();
+            if (sLower.includes(cLower)) {
+              rowCode = specificBranch;
+              rawDesc = specificBranch;
+            } else if (cLower.includes(sLower)) {
+              rowCode = custName;
+              rawDesc = custName;
+            } else {
+              rowCode = `${custName} - ${specificBranch}`;
+              rawDesc = `${custName} - ${specificBranch}`;
+            }
+          } else if (specificBranch) {
             rowCode = specificBranch;
             rawDesc = specificBranch;
           }
