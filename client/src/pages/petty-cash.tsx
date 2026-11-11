@@ -176,7 +176,11 @@ export default function PettyCashPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
-  const isApproverRole = ["super_admin", "admin", "manager"].includes(String(user?.role || "").toLowerCase());
+  const userRoleLower = String(user?.role || "").toLowerCase();
+  const isApproverRole =
+    ["super_admin", "admin", "manager"].includes(userRoleLower) ||
+    userRoleLower.includes("account") ||
+    userRoleLower.includes("finance");
 
   const accountForm = useForm<PettyCashFormData>({
     resolver: zodResolver(pettyCashSchema),
@@ -211,6 +215,9 @@ export default function PettyCashPage() {
 
   const [disburseModalClaim, setDisburseModalClaim] = useState<PettyCashClaimItem | null>(null);
   const [disburseBankId, setDisburseBankId] = useState<string>("");
+  const [disburseDate, setDisburseDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [disburseRef, setDisburseRef] = useState<string>("");
+  const [disburseNotes, setDisburseNotes] = useState<string>("");
   const [rejectModalClaim, setRejectModalClaim] = useState<PettyCashClaimItem | null>(null);
   const [rejectReason, setRejectReason] = useState<string>("");
 
@@ -612,8 +619,25 @@ export default function PettyCashPage() {
   });
 
   const disburseClaimMutation = useMutation({
-    mutationFn: ({ claimId, bankAccountId }: { claimId: string; bankAccountId: string }) =>
-      apiRequest("POST", `/api/petty-cash-claims/${claimId}/disburse`, { bankAccountId }),
+    mutationFn: ({
+      claimId,
+      bankAccountId,
+      transactionDate,
+      reference,
+      notes,
+    }: {
+      claimId: string;
+      bankAccountId: string;
+      transactionDate?: string;
+      reference?: string;
+      notes?: string;
+    }) =>
+      apiRequest("POST", `/api/petty-cash-claims/${claimId}/disburse`, {
+        bankAccountId,
+        transactionDate,
+        reference,
+        notes,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/petty-cash-claims"] });
       queryClient.invalidateQueries({ queryKey: ["/api/petty-cash"] });
@@ -624,6 +648,8 @@ export default function PettyCashPage() {
       toast({ title: "Approved refund disbursed from bank to petty cash account" });
       setDisburseModalClaim(null);
       setDisburseBankId("");
+      setDisburseRef("");
+      setDisburseNotes("");
     },
     onError: (err: any) => {
       toast({ title: getErrorMessage(err), variant: "destructive" });
@@ -1274,6 +1300,9 @@ export default function PettyCashPage() {
                                   onClick={() => {
                                     setDisburseModalClaim(claim);
                                     setDisburseBankId(bankAccounts?.[0]?.id || "");
+                                    setDisburseDate(new Date().toISOString().split("T")[0]);
+                                    setDisburseRef(claim.claimNumber || "");
+                                    setDisburseNotes("");
                                   }}
                                 >
                                   <Banknote className="h-3 w-3" />
@@ -1915,6 +1944,35 @@ export default function PettyCashPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">Payment Date *</label>
+                  <Input
+                    type="date"
+                    value={disburseDate}
+                    onChange={(e) => setDisburseDate(e.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="font-semibold text-slate-700 dark:text-slate-300">Bank / Transfer Ref</label>
+                  <Input
+                    value={disburseRef}
+                    onChange={(e) => setDisburseRef(e.target.value)}
+                    placeholder="Cheque / Transfer Ref"
+                    className="h-9 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-semibold text-slate-700 dark:text-slate-300">Finance Remarks (Optional)</label>
+                <Input
+                  value={disburseNotes}
+                  onChange={(e) => setDisburseNotes(e.target.value)}
+                  placeholder="e.g. Online transfer / Cheque cleared"
+                  className="h-9 text-xs"
+                />
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -1924,10 +1982,16 @@ export default function PettyCashPage() {
             <Button
               size="sm"
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
-              disabled={!disburseBankId || disburseClaimMutation.isPending}
+              disabled={!disburseBankId || !disburseDate || disburseClaimMutation.isPending}
               onClick={() => {
                 if (disburseModalClaim && disburseBankId) {
-                  disburseClaimMutation.mutate({ claimId: disburseModalClaim.id, bankAccountId: disburseBankId });
+                  disburseClaimMutation.mutate({
+                    claimId: disburseModalClaim.id,
+                    bankAccountId: disburseBankId,
+                    transactionDate: disburseDate,
+                    reference: disburseRef,
+                    notes: disburseNotes,
+                  });
                 }
               }}
             >

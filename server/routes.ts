@@ -3371,7 +3371,13 @@ export async function registerRoutes(
 
   function isPettyCashApproverRole(role?: string | null): boolean {
     const r = String(role || "").toLowerCase();
-    return r === "super_admin" || r === "admin" || r === "manager";
+    return (
+      r === "super_admin" ||
+      r === "admin" ||
+      r === "manager" ||
+      r.includes("account") ||
+      r.includes("finance")
+    );
   }
 
   app.post("/api/petty-cash-transactions", authMiddleware, permissionMiddleware("petty_cash"), enforceScopeMiddleware, async (req: AuthRequest, res) => {
@@ -3537,7 +3543,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Only Managers or Admins can disburse claim refunds." });
       }
 
-      const { bankAccountId } = req.body;
+      const { bankAccountId, transactionDate, reference, notes } = req.body;
       if (!bankAccountId) {
         return res.status(400).json({ error: "Please select a Bank Account to disburse the refund from." });
       }
@@ -3559,14 +3565,25 @@ export async function registerRoutes(
       }
 
       const scope = getScopeFromRequest(req);
+      const txDate = typeof transactionDate === "string" && transactionDate.trim()
+        ? transactionDate.trim()
+        : new Date().toISOString().split("T")[0];
+      const txRef = typeof reference === "string" && reference.trim()
+        ? reference.trim()
+        : claim.claimNumber;
+      const defaultDesc = `Approved Claim ${claim.claimNumber} Refund for ${claim.claimantName || pcAccount?.name || "Staff"}`;
+      const txDesc = typeof notes === "string" && notes.trim()
+        ? `${defaultDesc} — ${notes.trim()}`
+        : defaultDesc;
+
       const transaction = await storage.createPettyCashTransaction({
         pettyCashId: claim.pettyCashId,
         type: "deposit",
         amount: claim.totalAmount,
         bankAccountId,
-        transactionDate: new Date().toISOString().split("T")[0],
-        description: `Approved Claim ${claim.claimNumber} Refund for ${claim.claimantName || pcAccount?.name || "Staff"}`,
-        reference: claim.claimNumber,
+        transactionDate: txDate,
+        description: txDesc,
+        reference: txRef,
         shopId: scope.shopId || req.body.shopId,
         branchId: scope.branchId || req.body.branchId,
       });
