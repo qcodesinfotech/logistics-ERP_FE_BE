@@ -10523,14 +10523,29 @@ export class DatabaseStorage implements IStorage {
   async autoAllocateFfd(sheetId: string): Promise<{ allocated: number; overflow: string[] }> {
     // Get all dispatch items for this sheet, grouped by outlet
     const items = await this.getDispatchItemsForSheet(sheetId);
-    const outletMap: Record<string, { outletCode: string; outletId: string | null; totalWeight: number }> = {};
+    
+    // Get outlets and overrides to determine each outlet's intended zone
+    const allOutlets = await db.select().from(outlets);
+    const outletById = new Map(allOutlets.map(o => [o.id, o]));
+    const normalizeCode = (c: string) => (c || "").trim().toLowerCase().replace(/^0+/, "");
+    const outletByCode = new Map<string, any>();
+    for (const o of allOutlets) {
+      const code = normalizeCode(o.code || "");
+      if (code && !outletByCode.has(code)) outletByCode.set(code, o);
+    }
+    const overrides = await db.select().from(dispatchOutletZoneOverrides).where(eq(dispatchOutletZoneOverrides.sheetId, sheetId));
+    const overrideByOutletId = new Map(overrides.filter(ov => !ov.storageType && ov.overrideZoneId).map(ov => [ov.outletId, ov.overrideZoneId]));
+
+    const outletMap: Record<string, { outletCode: string; outletId: string | null; zoneId: string | null; totalWeight: number }> = {};
     for (const item of items) {
       if (!outletMap[item.outletCode]) {
-        outletMap[item.outletCode] = { outletCode: item.outletCode, outletId: item.outletId, totalWeight: 0 };
+        const o = (item.outletId ? outletById.get(item.outletId) : null) || outletByCode.get(normalizeCode(item.outletCode));
+        const effectiveZoneId = (item.outletId && overrideByOutletId.get(item.outletId)) || o?.routeId || item.routeId || null;
+        outletMap[item.outletCode] = { outletCode: item.outletCode, outletId: item.outletId, zoneId: effectiveZoneId, totalWeight: 0 };
       }
       outletMap[item.outletCode].totalWeight += parseFloat(item.weight || "0");
     }
-    const outlets = Object.values(outletMap).sort((a, b) => b.totalWeight - a.totalWeight); // Descending weight (FFD)
+    const sortedOutlets = Object.values(outletMap).sort((a, b) => b.totalWeight - a.totalWeight); // Descending weight (FFD)
 
     // Get truck assignments for this sheet
     const truckAssigns = await db.select().from(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.sheetId, sheetId));
@@ -10550,8 +10565,9 @@ export class DatabaseStorage implements IStorage {
     const overflow: string[] = [];
     let allocated = 0;
 
-    for (const outlet of outlets) {
-      const truck = truckCaps.find(t => t.remaining >= outlet.totalWeight);
+    for (const outlet of sortedOutlets) {
+      // Find a truck in the SAME zone that has enough remaining capacity
+      const truck = truckCaps.find(t => (!outlet.zoneId || t.zoneId === outlet.zoneId) && t.remaining >= outlet.totalWeight);
       if (!truck) {
         overflow.push(outlet.outletCode);
         continue;
