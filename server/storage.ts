@@ -4542,7 +4542,11 @@ export class DatabaseStorage implements IStorage {
       if (!tAssignId && itemCodeNorm) tAssignId = outletToTruck.get(itemCodeNorm) || null;
 
       if (ov?.overrideTruckId) {
-        tAssignId = ov.overrideTruckId;
+        if (truckAssigns.some((t: any) => t.id === ov.overrideTruckId)) {
+          tAssignId = ov.overrideTruckId;
+        } else {
+          tAssignId = null;
+        }
       }
 
       let effectiveZoneId = "unassigned";
@@ -9582,7 +9586,11 @@ export class DatabaseStorage implements IStorage {
       if (!tAssignId && outletCode) tAssignId = outletToTruck.get(outletCode) || null;
       if (!tAssignId && normCode) tAssignId = outletToTruck.get(normCode) || null;
       if (ov?.overrideTruckId) {
-        tAssignId = ov.overrideTruckId;
+        if (sheetTruckAssigns.some((t: any) => t.id === ov.overrideTruckId)) {
+          tAssignId = ov.overrideTruckId;
+        } else {
+          tAssignId = null;
+        }
       }
 
       let effectiveZoneId: string | null = item.routeId;
@@ -9856,7 +9864,11 @@ export class DatabaseStorage implements IStorage {
       if (!tAssignId && outletCode) tAssignId = outletToTruck.get(outletCode) || null;
       if (!tAssignId && normCode) tAssignId = outletToTruck.get(normCode) || null;
       if (ov?.overrideTruckId) {
-        tAssignId = ov.overrideTruckId;
+        if (sheetTruckAssigns.some((t: any) => t.id === ov.overrideTruckId)) {
+          tAssignId = ov.overrideTruckId;
+        } else {
+          tAssignId = null;
+        }
       }
 
       let effectiveZoneId: string | null = item.routeId;
@@ -10407,6 +10419,7 @@ export class DatabaseStorage implements IStorage {
       }
     }
     await db.delete(dispatchOutletTruckAssignments).where(eq(dispatchOutletTruckAssignments.truckAssignmentId, id));
+    await db.update(dispatchOutletZoneOverrides).set({ overrideTruckId: null }).where(eq(dispatchOutletZoneOverrides.overrideTruckId, id));
     await db.delete(dispatchTruckAssignments).where(eq(dispatchTruckAssignments.id, id));
   }
 
@@ -10795,7 +10808,11 @@ export class DatabaseStorage implements IStorage {
       const outletToTruck = sheetOutletTruckMap.get(sheetId);
       let tAssignId: string | null = null;
       if (ov?.overrideTruckId) {
-        tAssignId = ov.overrideTruckId;
+        if (truckAssignMap.has(ov.overrideTruckId)) {
+          tAssignId = ov.overrideTruckId;
+        } else {
+          tAssignId = null;
+        }
       } else if (outletToTruck) {
         if (outletId && st) tAssignId = outletToTruck.get(`${outletId}_${st}`) || null;
         if (!tAssignId && outletCode && st) tAssignId = outletToTruck.get(`${outletCode}_${st}`) || null;
