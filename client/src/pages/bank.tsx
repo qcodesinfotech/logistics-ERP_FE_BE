@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Banknote, Plus, Pencil, Trash2, ArrowUpCircle, ArrowDownCircle, ShieldAlert, CheckCircle2, Calendar, AlertCircle } from "lucide-react";
+import { Banknote, Plus, Pencil, Trash2, ArrowUpCircle, ArrowDownCircle, ShieldAlert, CheckCircle2, Calendar, AlertCircle, Download, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,6 +60,11 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import type { BankAccount, BankTransaction, Company } from "@shared/schema";
+import {
+  exportBankAccountStatementExcel,
+  exportCollectiveBankStatementExcel,
+  exportBankTransactionsCSV,
+} from "@/lib/bank-excel-export";
 
 const bankAccountSchema = z.object({
   name: z.string().min(1, "Account name is required"),
@@ -294,6 +306,95 @@ export default function Bank() {
     setDeletingTransaction(t);
   };
 
+  const handleDownloadAccountStatement = async (account: BankAccount, format: "excel" | "csv" = "excel") => {
+    try {
+      let txs = transactions;
+      if (selectedAccountId !== account.id) {
+        const res = await apiRequest("GET", `/api/bank-transactions?accountId=${account.id}`);
+        txs = await res.json();
+      }
+      if (!txs || txs.length === 0) {
+        toast({
+          title: `No transactions found for ${account.name}`,
+          description: "Cannot export an empty account statement.",
+        });
+        return;
+      }
+
+      const comp = companies?.find((c) => c.id === account.companyId);
+      const companyName = comp?.name || "Globe Link Logistics";
+
+      if (format === "excel") {
+        await exportBankAccountStatementExcel(account, txs, companyName);
+      } else {
+        exportBankTransactionsCSV(txs, account, `Bank_Statement_${account.name.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+      }
+
+      toast({
+        title: "Account statement exported",
+        description: `Exported ${txs.length} transaction(s) for ${account.name}`,
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to export account statement",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDownloadCollectiveReport = async (format: "excel" | "csv" = "excel") => {
+    try {
+      if (!bankAccounts || bankAccounts.length === 0) {
+        toast({ title: "No bank accounts found", variant: "destructive" });
+        return;
+      }
+
+      let allTxs = transactions;
+      if (selectedAccountId !== "all") {
+        const res = await apiRequest("GET", "/api/bank-transactions");
+        allTxs = await res.json();
+      }
+
+      if (!allTxs || allTxs.length === 0) {
+        toast({
+          title: "No transactions found across bank accounts",
+          description: "Cannot export empty collective statement.",
+        });
+        return;
+      }
+
+      const companyName = companies?.[0]?.name || "Globe Link Logistics";
+
+      if (format === "excel") {
+        await exportCollectiveBankStatementExcel(bankAccounts, allTxs, companyName);
+      } else {
+        const accountMap = new Map<string, BankAccount>(bankAccounts.map((a) => [a.id, a]));
+        const enrichedTxs = allTxs.map((t) => {
+          const acc = accountMap.get(t.bankAccountId);
+          return {
+            ...t,
+            accountName: acc?.name || "Unknown",
+            bankName: acc?.bankName || "-",
+            accountNumber: acc?.accountNumber || "-",
+          };
+        });
+        exportBankTransactionsCSV(enrichedTxs, null, "Collective_Bank_Transactions");
+      }
+
+      toast({
+        title: "Collective statement exported",
+        description: `Exported ${allTxs.length} transaction(s) across ${bankAccounts.length} account(s)`,
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to export collective statement",
+        description: getErrorMessage(err),
+        variant: "destructive",
+      });
+    }
+  };
+
   const totalBalance = bankAccounts?.reduce(
     (sum, acc) => {
       const cur = parseFloat(acc.currentBalance || "0");
@@ -330,6 +431,29 @@ export default function Bank() {
       className: "text-right",
       render: (account: BankAccount) => (
         <div className="flex justify-end gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Download Account Statement"
+                onClick={(e) => e.stopPropagation()}
+                className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleDownloadAccountStatement(account, "excel")}>
+                <FileSpreadsheet className="h-4 w-4 mr-2 text-emerald-600" />
+                Download Statement (Excel)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownloadAccountStatement(account, "csv")}>
+                <FileText className="h-4 w-4 mr-2 text-slate-600" />
+                Download Statement (CSV)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="ghost"
             size="icon"
@@ -463,7 +587,28 @@ export default function Bank() {
         title="Bank Accounts"
         description="Manage bank accounts and track transactions"
       >
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300"
+              >
+                <Download className="h-4 w-4" />
+                Export Collective
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleDownloadCollectiveReport("excel")}>
+                <FileSpreadsheet className="h-4 w-4 mr-2 text-emerald-600" />
+                All Accounts Statement (Excel)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownloadCollectiveReport("csv")}>
+                <FileText className="h-4 w-4 mr-2 text-slate-600" />
+                All Accounts Transactions (CSV)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button onClick={() => setIsTransactionDialogOpen(true)} variant="outline" data-testid="button-new-transaction">
             <Plus className="h-4 w-4 mr-2" />
             Transaction
@@ -494,7 +639,24 @@ export default function Bank() {
 
         <TabsContent value="accounts">
           <Card>
-            <CardContent className="pt-6">
+            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-2 flex-wrap">
+              <div>
+                <CardTitle className="text-base">Bank Accounts List</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Click the download button on any account row to export its individual statement, or use collective export.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleDownloadCollectiveReport("excel")}
+                className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Collective Report (All Accounts)
+              </Button>
+            </CardHeader>
+            <CardContent className="pt-2">
               {isLoadingAccounts ? (
                 <TableSkeleton rows={5} cols={7} />
               ) : !bankAccounts || bankAccounts.length === 0 ? (
@@ -521,21 +683,68 @@ export default function Bank() {
 
         <TabsContent value="transactions">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4">
-              <CardTitle className="text-base">Transaction History</CardTitle>
-              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="All accounts" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All accounts</SelectItem>
-                  {bankAccounts?.map((account) => (
-                    <SelectItem key={account.id} value={account.id}>
-                      {account.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 pb-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base">Transaction History</CardTitle>
+                <Badge variant="secondary" className="text-xs">
+                  {transactions?.length || 0} Entries
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="All accounts" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All accounts (Collective)</SelectItem>
+                    {bankAccounts?.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        {account.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      {selectedAccountId === "all" ? "Export Collective" : "Export Statement"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        if (selectedAccountId === "all") {
+                          handleDownloadCollectiveReport("excel");
+                        } else {
+                          const acc = bankAccounts?.find((a) => a.id === selectedAccountId);
+                          if (acc) handleDownloadAccountStatement(acc, "excel");
+                        }
+                      }}
+                    >
+                      <FileSpreadsheet className="h-4 w-4 mr-2 text-emerald-600" />
+                      Export to Excel (.xlsx)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        if (selectedAccountId === "all") {
+                          handleDownloadCollectiveReport("csv");
+                        } else {
+                          const acc = bankAccounts?.find((a) => a.id === selectedAccountId);
+                          if (acc) handleDownloadAccountStatement(acc, "csv");
+                        }
+                      }}
+                    >
+                      <FileText className="h-4 w-4 mr-2 text-slate-600" />
+                      Export to CSV (.csv)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </CardHeader>
             <CardContent>
               {isLoadingTransactions ? (
